@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b1020">
-<title>Stack Rush — HTML5 Portfolio Demo</title>
+<title>Stack Rush</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; background:#0b1020; }
@@ -22,6 +22,12 @@
               font-size:12px; font-weight:700; letter-spacing:1px; padding:8px 12px; border-radius:20px;
               cursor:pointer; backdrop-filter:blur(6px); }
   #soundBtn:active { transform:scale(.94); }
+  #langBtn { position:fixed; top:max(12px, env(safe-area-inset-top)); left:14px; z-index:20;
+             background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25); color:#fff;
+             font-size:12px; font-weight:700; letter-spacing:1px; padding:8px 12px; border-radius:20px;
+             cursor:pointer; backdrop-filter:blur(6px); }
+  #langBtn:active { transform:scale(.94); }
+  #langBtn .on { color:#ffe08a; }
   .overlay { position:fixed; inset:0; z-index:10; display:flex; flex-direction:column;
              align-items:center; justify-content:center; text-align:center; padding:24px;
              background:rgba(5,8,18,.55); backdrop-filter:blur(4px); }
@@ -76,12 +82,13 @@
   <div id="combo"></div>
 </div>
 <button id="soundBtn">SOUND ON</button>
+<button id="langBtn"></button>
 
 <div class="overlay" id="menuOverlay">
   <h1>STACK<br>RUSH</h1>
-  <p>Tap untuk menaruh balok.<br>Potongan yang menggantung akan terpotong.<br>Perfect drop = balok tidak menyusut.</p>
-  <div class="tap-hint">TAP TO START</div>
-  <button id="achBtn">🏆 ACHIEVEMENTS <span id="achCount">0/11</span></button>
+  <p id="menuDesc"></p>
+  <div class="tap-hint" id="menuHint"></div>
+  <button id="achBtn">🏆 <span id="achBtnLabel"></span> <span id="achCount">0/11</span></button>
 </div>
 
 <div class="overlay hidden" id="overOverlay">
@@ -90,14 +97,14 @@
   <div id="finalBest">BEST 0</div>
   <div id="runUnlocks"></div>
   <button id="shareBtn" class="shareBtn">SHARE SCORE</button>
-  <p>Baloknya meleset!</p>
-  <div class="tap-hint">TAP TO RETRY</div>
+  <p id="overTitle"></p>
+  <div class="tap-hint" id="overHint"></div>
 </div>
 
 <div class="overlay hidden" id="achOverlay">
-  <h1 style="font-size:30px; letter-spacing:3px;">ACHIEVEMENTS</h1>
+  <h1 id="achTitle" style="font-size:30px; letter-spacing:3px;"></h1>
   <div class="ach-grid" id="achGrid"></div>
-  <div class="tap-hint">TAP TO CLOSE</div>
+  <div class="tap-hint" id="achHint"></div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
@@ -164,28 +171,89 @@ function sfxOver() { tone(240, 0.5, 'sawtooth', 0.16, 0, 70); }
 soundBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   muted = !muted;
-  soundBtn.textContent = muted ? 'SOUND OFF' : 'SOUND ON';
+  refreshSoundBtn();
 });
+
+/* ---------------- i18n (English default, Bahasa Indonesia) ---------------- */
+const I18N = {
+  en: {
+    menuDesc: 'Tap to place the block.<br>The overhang gets sliced off.<br>A perfect drop keeps full width.',
+    tapStart: 'TAP TO START', tapRetry: 'TAP TO RETRY', tapClose: 'TAP TO CLOSE',
+    achievements: 'ACHIEVEMENTS', shareScore: 'SHARE SCORE',
+    missed: 'You missed the block!', best: 'BEST', newBest: '★ NEW BEST ★',
+    soundOn: 'SOUND ON', soundOff: 'SOUND OFF',
+    achNew: '🏆 {n} new achievements!', achUnlocked: 'Achievement',
+    imgSaved: 'Image saved — share it to WhatsApp / Status!',
+    shareText: 'My Stack Rush score: {s}! Can you beat it?',
+    beatMe: 'Can you beat my score?',
+    achLine: '🏆 {a}/{n} achievements',
+  },
+  id: {
+    menuDesc: 'Ketuk untuk menaruh balok.<br>Potongan yang menggantung akan terpotong.<br>Perfect drop membuat balok tidak menyusut.',
+    tapStart: 'KETUK UNTUK MULAI', tapRetry: 'KETUK UNTUK COBA LAGI', tapClose: 'KETUK UNTUK TUTUP',
+    achievements: 'PENCAPAIAN', shareScore: 'BAGIKAN SKOR',
+    missed: 'Baloknya meleset!', best: 'TERBAIK', newBest: '★ REKOR BARU ★',
+    soundOn: 'SUARA NYALA', soundOff: 'SUARA MATI',
+    achNew: '🏆 {n} pencapaian baru!', achUnlocked: 'Pencapaian',
+    imgSaved: 'Gambar tersimpan — bagikan ke WhatsApp / Status!',
+    shareText: 'Skor Stack Rush-ku: {s}! Bisa kalahkan?',
+    beatMe: 'Bisa kalahkan skorku?',
+    achLine: '🏆 {a}/{n} pencapaian',
+  },
+};
+let lang = 'en';
+try { lang = localStorage.getItem('stackrush_lang') || 'en'; } catch (e) {}
+if (lang !== 'id') lang = 'en';
+function t(k, vars) {
+  let s = (I18N[lang] && I18N[lang][k]) || I18N.en[k] || k;
+  if (vars) for (const key in vars) s = s.split('{' + key + '}').join(vars[key]);
+  return s;
+}
+function refreshSoundBtn() { soundBtn.textContent = muted ? t('soundOff') : t('soundOn'); }
+function refreshBest() { elBest.textContent = t('best') + ' ' + best; }
+function renderLangBtn() {
+  langBtn.innerHTML = '<span class="' + (lang === 'en' ? 'on' : '') + '">EN</span> / ' +
+                      '<span class="' + (lang === 'id' ? 'on' : '') + '">ID</span>';
+}
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.getElementById('menuDesc').innerHTML = t('menuDesc');
+  document.getElementById('menuHint').textContent = t('tapStart');
+  document.getElementById('overHint').textContent = t('tapRetry');
+  document.getElementById('achHint').textContent = t('tapClose');
+  document.getElementById('achBtnLabel').textContent = t('achievements');
+  document.getElementById('overTitle').textContent = t('missed');
+  document.getElementById('achTitle').textContent = t('achievements');
+  shareBtn.textContent = t('shareScore');
+  refreshSoundBtn(); renderLangBtn(); refreshBest();
+  if (!achOverlay.classList.contains('hidden')) renderAchGrid();
+}
+function setLang(l) {
+  lang = (l === 'id') ? 'id' : 'en';
+  try { localStorage.setItem('stackrush_lang', lang); } catch (e) {}
+  applyLang();
+}
 
 /* ---------------- achievements ---------------- */
 const ACHS = [
-  { id:'first_perfect', icon:'🎯', name:'Sentuhan Pertama', desc:'Dapatkan 1 perfect drop' },
-  { id:'first_steps',   icon:'🧱', name:'Pemanasan',        desc:'Susun 10 balok dalam satu game' },
-  { id:'streak_5',      icon:'🔥', name:'Mulai Panas',      desc:'5 perfect beruntun' },
-  { id:'tower_25',      icon:'🏗️', name:'Tukang Susun',     desc:'Capai skor 25' },
-  { id:'streak_10',     icon:'⚡', name:'Mesin Presisi',    desc:'10 perfect beruntun' },
-  { id:'perfect_25',    icon:'💎', name:'Perfeksionis',     desc:'25 perfect dalam satu game' },
-  { id:'tower_50',      icon:'🏙️', name:'Arsitek',          desc:'Capai skor 50' },
-  { id:'comeback',      icon:'🛡️', name:'Bangkit',          desc:'3 perfect beruntun setelah combo putus' },
-  { id:'streak_20',     icon:'👑', name:'Dewa Stack',       desc:'20 perfect beruntun' },
-  { id:'tower_100',     icon:'🚀', name:'Pencakar Langit',  desc:'Capai skor 100' },
-  { id:'survivor',      icon:'🧗', name:'Tetap Berdiri',    desc:'Capai 40 balok dengan balok tersempit < 0.8' },
+  { id:'first_perfect', icon:'🎯', name:{en:'First Touch',id:'Sentuhan Pertama'}, desc:{en:'Land 1 perfect drop',id:'Dapatkan 1 perfect drop'} },
+  { id:'first_steps',   icon:'🧱', name:{en:'Warming Up',id:'Pemanasan'}, desc:{en:'Stack 10 blocks in one game',id:'Susun 10 balok dalam satu game'} },
+  { id:'streak_5',      icon:'🔥', name:{en:'Heating Up',id:'Mulai Panas'}, desc:{en:'5 perfects in a row',id:'5 perfect beruntun'} },
+  { id:'tower_25',      icon:'🏗️', name:{en:'Builder',id:'Tukang Susun'}, desc:{en:'Reach score 25',id:'Capai skor 25'} },
+  { id:'streak_10',     icon:'⚡', name:{en:'Precision Engine',id:'Mesin Presisi'}, desc:{en:'10 perfects in a row',id:'10 perfect beruntun'} },
+  { id:'perfect_25',    icon:'💎', name:{en:'Perfectionist',id:'Perfeksionis'}, desc:{en:'25 perfects in one game',id:'25 perfect dalam satu game'} },
+  { id:'tower_50',      icon:'🏙️', name:{en:'Architect',id:'Arsitek'}, desc:{en:'Reach score 50',id:'Capai skor 50'} },
+  { id:'comeback',      icon:'🛡️', name:{en:'Comeback',id:'Bangkit'}, desc:{en:'3 perfects in a row after breaking combo',id:'3 perfect beruntun setelah combo putus'} },
+  { id:'streak_20',     icon:'👑', name:{en:'Stack God',id:'Dewa Stack'}, desc:{en:'20 perfects in a row',id:'20 perfect beruntun'} },
+  { id:'tower_100',     icon:'🚀', name:{en:'Skyscraper',id:'Pencakar Langit'}, desc:{en:'Reach score 100',id:'Capai skor 100'} },
+  { id:'survivor',      icon:'🧗', name:{en:'Still Standing',id:'Tetap Berdiri'}, desc:{en:'Reach 40 blocks with thinnest block < 0.8',id:'Capai 40 balok dengan balok tersempit < 0.8'} },
 ];
 const achCountEl  = document.getElementById('achCount');
 const achGrid     = document.getElementById('achGrid');
 const achOverlay  = document.getElementById('achOverlay');
 const toastEl     = document.getElementById('toast');
 const shareBtn    = document.getElementById('shareBtn');
+const langBtn     = document.getElementById('langBtn');
 const runUnlocksEl = document.getElementById('runUnlocks');
 
 let achUnlocked = {};
@@ -215,8 +283,8 @@ function unlock(id) {
   runNewUnlocks++;
   refreshAchCount();
   tone(660, 0.12, 'sine', 0.2); tone(880, 0.14, 'sine', 0.2, 0.09); tone(1320, 0.22, 'sine', 0.18, 0.18);
-  toast('<span class="t-ico">' + a.icon + '</span><span><span class="t-name">Achievement: ' +
-        a.name + '</span><br>' + a.desc + '</span>');
+  toast('<span class="t-ico">' + a.icon + '</span><span><span class="t-name">' + t('achUnlocked') + ': ' +
+        a.name[lang] + '</span><br>' + a.desc[lang] + '</span>');
 }
 function checkAch() {
   if (!runStats) return;
@@ -235,7 +303,7 @@ function renderAchGrid() {
   achGrid.innerHTML = ACHS.map(a => {
     const un = !!achUnlocked[a.id];
     return '<div class="ach' + (un ? '' : ' locked') + '"><div class="a-ico">' + (un ? a.icon : '🔒') +
-      '</div><div class="a-name">' + a.name + '</div><div class="a-desc">' + a.desc + '</div></div>';
+      '</div><div class="a-name">' + a.name[lang] + '</div><div class="a-desc">' + a.desc[lang] + '</div></div>';
   }).join('');
 }
 
@@ -267,11 +335,11 @@ function drawShareCard(g) {
   g.fillText(String(score), W2 / 2, 580);
   g.fillStyle = 'rgba(255,255,255,.78)';
   g.font = '700 52px -apple-system, "Segoe UI", Roboto, sans-serif';
-  g.fillText('BEST ' + best, W2 / 2, 680);
-  g.fillText('🏆 ' + achCount() + '/' + ACHS.length + ' achievements', W2 / 2, 762);
+  g.fillText(t('best') + ' ' + best, W2 / 2, 680);
+  g.fillText(t('achLine', { a: achCount(), n: ACHS.length }), W2 / 2, 762);
   g.fillStyle = 'rgba(255,255,255,.6)';
   g.font = '600 40px -apple-system, "Segoe UI", Roboto, sans-serif';
-  g.fillText('Bisa kalahkan skorku?', W2 / 2, 1160);
+  g.fillText(t('beatMe'), W2 / 2, 1160);
   g.fillStyle = '#ffe08a';
   g.font = '700 38px -apple-system, "Segoe UI", Roboto, sans-serif';
   g.fillText('alamaby.github.io/html5-games/stack-rush/', W2 / 2, 1224);
@@ -283,7 +351,7 @@ async function shareScore() {
   const blob = await new Promise(r => c.toBlob(r, 'image/png'));
   if (!blob) return;
   const file = new File([blob], 'stack-rush.png', { type: 'image/png' });
-  const text = 'Skor Stack Rush-ku: ' + score + '! Bisa kalahkan?';
+  const text = t('shareText', { s: score });
   try {
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: 'Stack Rush', text });
@@ -295,7 +363,7 @@ async function shareScore() {
   a.download = 'stack-rush-skor-' + score + '.png';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  toast('<span class="t-ico">📥</span><span>Gambar tersimpan —<br>bagikan ke WhatsApp / Status!</span>');
+  toast('<span class="t-ico">📥</span><span>' + t('imgSaved') + '</span>');
 }
 
 /* ---------------- game state ---------------- */
@@ -319,7 +387,7 @@ let overTimer = 0, overAt = 0;
 let tapCount = 0;
 
 try { best = parseInt(localStorage.getItem('stackrush_best') || '0', 10) || 0; } catch (e) {}
-elBest.textContent = 'BEST ' + best;
+elBest.textContent = 'BEST ' + best; // applyLang() at script end corrects this if lang is 'id'
 
 function speedFor(n) { return Math.min(2.4 + n * 0.09, 6.4); }
 
@@ -521,7 +589,10 @@ function update(now) {
     finalBest.textContent = 'BEST ' + best;
     elBest.textContent = 'BEST ' + best;
     newBestEl.style.display = isBest && score > 0 ? 'block' : 'none';
-    runUnlocksEl.textContent = runNewUnlocks > 0 ? '🏆 ' + runNewUnlocks + ' achievement baru!' : '';
+    newBestEl.textContent = t('newBest');
+    finalBest.textContent = t('best') + ' ' + best;
+    elBest.textContent = t('best') + ' ' + best;
+    runUnlocksEl.textContent = runNewUnlocks > 0 ? t('achNew', { n: runNewUnlocks }) : '';
     overOverlay.classList.remove('hidden');
   }
 }
@@ -621,7 +692,9 @@ document.getElementById('achBtn').addEventListener('pointerdown', (e) => {
 });
 achOverlay.addEventListener('pointerdown', () => achOverlay.classList.add('hidden'));
 shareBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); shareScore(); });
+langBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); audio(); setLang(lang === 'en' ? 'id' : 'en'); });
 refreshAchCount();
+applyLang();
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' || e.code === 'Enter') onTap();
 });
