@@ -9,7 +9,7 @@ each game is a single self-contained HTML file, portrait mobile-first.
 
 | Game | Status | Tech |
 |------|--------|------|
-| [Stack Rush](stack-rush/) | ✅ Playable | Canvas 2D, WebAudio synth SFX, touch |
+| [Tower Rush](tower-rush/) | ✅ Playable | Canvas 2D, WebAudio synth SFX, touch |
 | Helix Drop 3D | 🚧 Planned | Three.js |
 | Pull the Pin — Playable | 🚧 Planned | Canvas 2D, playable-ad format |
 | Neon Dodge | 🚧 Planned | Canvas 2D, procedural particles |
