@@ -36,6 +36,33 @@
   #finalBest  { font-size:15px; opacity:.7; letter-spacing:2px; margin-bottom:18px; }
   #newBest { color:#ffe08a; font-weight:800; letter-spacing:3px; font-size:16px;
              margin-bottom:10px; display:none; animation:pulse 1s ease-in-out infinite; }
+  #achBtn { margin-top:16px; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.25);
+            color:#fff; font-size:14px; font-weight:700; letter-spacing:2px; padding:10px 18px;
+            border-radius:24px; cursor:pointer; }
+  #achBtn:active { transform:scale(.95); }
+  .shareBtn { margin-top:14px; background:linear-gradient(135deg,#ffe08a,#ffb35c); color:#0b1020;
+              font-size:15px; font-weight:800; letter-spacing:2px; padding:13px 30px; border:none;
+              border-radius:12px; cursor:pointer; }
+  .shareBtn:active { transform:scale(.95); }
+  #runUnlocks { margin-top:10px; font-size:14px; color:#ffe08a; font-weight:700; letter-spacing:1px; min-height:20px; }
+  #toast { position:fixed; top:calc(max(10px, env(safe-area-inset-top)) + 104px); left:50%; transform:translateX(-50%);
+           z-index:30; background:rgba(20,26,44,.94); border:1px solid rgba(255,224,138,.5); color:#fff;
+           padding:12px 18px; border-radius:14px; font-size:14px; font-weight:700;
+           display:flex; gap:10px; align-items:center; max-width:88vw; text-align:left;
+           box-shadow:0 8px 30px rgba(0,0,0,.5); animation:toastIn .3s ease; pointer-events:none; }
+  #toast.hidden { display:none; }
+  #toast .t-ico { font-size:26px; }
+  #toast .t-name { color:#ffe08a; }
+  @keyframes toastIn { from { opacity:0; transform:translate(-50%,-12px);} to { opacity:1; transform:translate(-50%,0);} }
+  .ach-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; margin-top:18px;
+              max-width:380px; width:100%; max-height:50vh; overflow-y:auto; padding:2px; }
+  .ach { background:rgba(255,255,255,.07); border:1px solid rgba(255,224,138,.35); border-radius:12px;
+         padding:12px 10px; font-size:12px; }
+  .ach .a-ico { font-size:28px; }
+  .ach .a-name { font-weight:800; letter-spacing:1px; margin:6px 0 4px; color:#ffe08a; font-size:13px; }
+  .ach .a-desc { opacity:.75; line-height:1.45; }
+  .ach.locked { border-color:rgba(255,255,255,.12); opacity:.45; }
+  .ach.locked .a-name { color:#fff; }
   .foot { position:fixed; left:0; right:0; bottom:max(10px, env(safe-area-inset-bottom));
           text-align:center; font-size:11px; letter-spacing:2px; opacity:.4; z-index:5; pointer-events:none; }
 </style>
@@ -54,17 +81,28 @@
   <h1>STACK<br>RUSH</h1>
   <p>Tap untuk menaruh balok.<br>Potongan yang menggantung akan terpotong.<br>Perfect drop = balok tidak menyusut.</p>
   <div class="tap-hint">TAP TO START</div>
+  <button id="achBtn">🏆 ACHIEVEMENTS <span id="achCount">0/11</span></button>
 </div>
 
 <div class="overlay hidden" id="overOverlay">
   <div id="newBest">★ NEW BEST ★</div>
   <div id="finalScore">0</div>
   <div id="finalBest">BEST 0</div>
+  <div id="runUnlocks"></div>
+  <button id="shareBtn" class="shareBtn">SHARE SCORE</button>
   <p>Baloknya meleset!</p>
   <div class="tap-hint">TAP TO RETRY</div>
 </div>
 
-<div class="foot">STACK RUSH · HTML5 PORTFOLIO DEMO</div>
+<div class="overlay hidden" id="achOverlay">
+  <h1 style="font-size:30px; letter-spacing:3px;">ACHIEVEMENTS</h1>
+  <div class="ach-grid" id="achGrid"></div>
+  <div class="tap-hint">TAP TO CLOSE</div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<div class="foot">STACK RUSH</div>
 
 <script>
 "use strict";
@@ -129,6 +167,137 @@ soundBtn.addEventListener('click', (e) => {
   soundBtn.textContent = muted ? 'SOUND OFF' : 'SOUND ON';
 });
 
+/* ---------------- achievements ---------------- */
+const ACHS = [
+  { id:'first_perfect', icon:'🎯', name:'Sentuhan Pertama', desc:'Dapatkan 1 perfect drop' },
+  { id:'first_steps',   icon:'🧱', name:'Pemanasan',        desc:'Susun 10 balok dalam satu game' },
+  { id:'streak_5',      icon:'🔥', name:'Mulai Panas',      desc:'5 perfect beruntun' },
+  { id:'tower_25',      icon:'🏗️', name:'Tukang Susun',     desc:'Capai skor 25' },
+  { id:'streak_10',     icon:'⚡', name:'Mesin Presisi',    desc:'10 perfect beruntun' },
+  { id:'perfect_25',    icon:'💎', name:'Perfeksionis',     desc:'25 perfect dalam satu game' },
+  { id:'tower_50',      icon:'🏙️', name:'Arsitek',          desc:'Capai skor 50' },
+  { id:'comeback',      icon:'🛡️', name:'Bangkit',          desc:'3 perfect beruntun setelah combo putus' },
+  { id:'streak_20',     icon:'👑', name:'Dewa Stack',       desc:'20 perfect beruntun' },
+  { id:'tower_100',     icon:'🚀', name:'Pencakar Langit',  desc:'Capai skor 100' },
+  { id:'survivor',      icon:'🧗', name:'Tetap Berdiri',    desc:'Capai 40 balok dengan balok tersempit < 0.8' },
+];
+const achCountEl  = document.getElementById('achCount');
+const achGrid     = document.getElementById('achGrid');
+const achOverlay  = document.getElementById('achOverlay');
+const toastEl     = document.getElementById('toast');
+const shareBtn    = document.getElementById('shareBtn');
+const runUnlocksEl = document.getElementById('runUnlocks');
+
+let achUnlocked = {};
+try { achUnlocked = JSON.parse(localStorage.getItem('stackrush_ach') || '{}'); } catch (e) { achUnlocked = {}; }
+let runStats = null, runNewUnlocks = 0;
+function resetRunStats() { runStats = { perfects: 0, minW: BASE, afterBreak: false }; runNewUnlocks = 0; }
+function achCount() { return ACHS.filter(a => achUnlocked[a.id]).length; }
+function refreshAchCount() { achCountEl.textContent = achCount() + '/' + ACHS.length; }
+
+let toastQueue = [], toastBusy = false;
+function toast(html) { toastQueue.push(html); pumpToast(); }
+function pumpToast() {
+  if (toastBusy || !toastQueue.length) return;
+  toastBusy = true;
+  toastEl.innerHTML = toastQueue.shift();
+  toastEl.classList.remove('hidden');
+  setTimeout(() => {
+    toastEl.classList.add('hidden'); toastBusy = false;
+    setTimeout(pumpToast, 300);
+  }, 2600);
+}
+function unlock(id) {
+  if (achUnlocked[id]) return;
+  const a = ACHS.find(x => x.id === id); if (!a) return;
+  achUnlocked[id] = Date.now();
+  try { localStorage.setItem('stackrush_ach', JSON.stringify(achUnlocked)); } catch (e) {}
+  runNewUnlocks++;
+  refreshAchCount();
+  tone(660, 0.12, 'sine', 0.2); tone(880, 0.14, 'sine', 0.2, 0.09); tone(1320, 0.22, 'sine', 0.18, 0.18);
+  toast('<span class="t-ico">' + a.icon + '</span><span><span class="t-name">Achievement: ' +
+        a.name + '</span><br>' + a.desc + '</span>');
+}
+function checkAch() {
+  if (!runStats) return;
+  if (layers.length >= 11) unlock('first_steps');
+  if (score >= 25)  unlock('tower_25');
+  if (score >= 50)  unlock('tower_50');
+  if (score >= 100) unlock('tower_100');
+  if (combo >= 1)  unlock('first_perfect');
+  if (combo >= 5)  unlock('streak_5');
+  if (combo >= 10) unlock('streak_10');
+  if (combo >= 20) unlock('streak_20');
+  if (runStats.perfects >= 25) unlock('perfect_25');
+  if (layers.length >= 41 && runStats.minW < 0.8) unlock('survivor');
+}
+function renderAchGrid() {
+  achGrid.innerHTML = ACHS.map(a => {
+    const un = !!achUnlocked[a.id];
+    return '<div class="ach' + (un ? '' : ' locked') + '"><div class="a-ico">' + (un ? a.icon : '🔒') +
+      '</div><div class="a-name">' + a.name + '</div><div class="a-desc">' + a.desc + '</div></div>';
+  }).join('');
+}
+
+/* ---------------- share card (1080x1350, WA-Status friendly) ---------------- */
+function roundRectPath(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);         g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+function drawShareCard(g) {
+  const W2 = 1080, H2 = 1350;
+  const bg = g.createLinearGradient(0, 0, 0, H2);
+  bg.addColorStop(0, 'hsl(' + hue + ',45%,16%)');
+  bg.addColorStop(1, 'hsl(' + ((hue + 40) % 360) + ',50%,8%)');
+  g.fillStyle = bg; g.fillRect(0, 0, W2, H2);
+  for (let i = 0; i < 9; i++) { // decorative tower
+    const w = 620 - i * 42, y = 1010 - i * 44;
+    g.fillStyle = 'hsl(' + ((212 + i * 8) % 360) + ',70%,' + (60 - i * 2) + '%)';
+    roundRectPath(g, (W2 - w) / 2, y, w, 34, 8); g.fill();
+  }
+  g.textAlign = 'center';
+  g.fillStyle = '#fff';
+  g.font = '800 84px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText('STACK RUSH', W2 / 2, 180);
+  g.fillStyle = '#ffe08a';
+  g.font = '800 300px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText(String(score), W2 / 2, 580);
+  g.fillStyle = 'rgba(255,255,255,.78)';
+  g.font = '700 52px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText('BEST ' + best, W2 / 2, 680);
+  g.fillText('🏆 ' + achCount() + '/' + ACHS.length + ' achievements', W2 / 2, 762);
+  g.fillStyle = 'rgba(255,255,255,.6)';
+  g.font = '600 40px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText('Bisa kalahkan skorku?', W2 / 2, 1160);
+  g.fillStyle = '#ffe08a';
+  g.font = '700 38px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText('alamaby.github.io/html5-games/stack-rush/', W2 / 2, 1224);
+}
+async function shareScore() {
+  audio();
+  const c = document.createElement('canvas'); c.width = 1080; c.height = 1350;
+  drawShareCard(c.getContext('2d'));
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  if (!blob) return;
+  const file = new File([blob], 'stack-rush.png', { type: 'image/png' });
+  const text = 'Skor Stack Rush-ku: ' + score + '! Bisa kalahkan?';
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Stack Rush', text });
+      return;
+    }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'stack-rush-skor-' + score + '.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('<span class="t-ico">📥</span><span>Gambar tersimpan —<br>bagikan ke WhatsApp / Status!</span>');
+}
+
 /* ---------------- game state ---------------- */
 const BASE = 3;          // base block size (world units)
 const RANGE = 5.2;       // travel range of moving block
@@ -159,6 +328,8 @@ function newGame() {
   falling = []; parts = []; rings = []; popups = [];
   score = 0; combo = 0; camY = 0; shake = 0; flash = 0; hue = 212;
   tapCount = 0;
+  resetRunStats();
+  runUnlocksEl.textContent = '';
   elScore.textContent = '0'; elCombo.style.opacity = 0;
   spawnBlock();
   mode = 'playing';
@@ -200,8 +371,13 @@ function place() {
   const h = layers.length;
   if (ad <= TOL) { // ---- PERFECT ----
     combo++;
+    if (runStats) {
+      runStats.perfects++;
+      if (runStats.afterBreak && combo >= 3) { unlock('comeback'); runStats.afterBreak = false; }
+    }
     const nl = { x: prev.x, z: prev.z, w: prev.w, d: prev.d };
     layers.push(nl);
+    if (runStats) runStats.minW = Math.min(runStats.minW, nl.w, nl.d);
     const gained = 1 + Math.floor(combo / 4);
     score += gained;
     burst(nl.x, nl.z, h, '#ffe08a', 26);
@@ -212,6 +388,7 @@ function place() {
     if (gained > 1) popups.push({ x: nl.x + 1.2, z: nl.z, h, text: '+' + gained, life: 1, color: '#fff' });
     sfxPerfect(combo);
   } else { // ---- CUT ----
+    if (runStats && combo > 0) runStats.afterBreak = true;
     combo = 0;
     const sign = delta > 0 ? 1 : -1;
     const newSize = size - ad;
@@ -225,6 +402,7 @@ function place() {
     const nl = { x: prev.x, z: prev.z, w: prev.w, d: prev.d };
     if (ax === 'x') { nl.x = keptC; nl.w = newSize; } else { nl.z = keptC; nl.d = newSize; }
     layers.push(nl);
+    if (runStats) runStats.minW = Math.min(runStats.minW, nl.w, nl.d);
     const cut = { x: prev.x, z: prev.z, w: prev.w, d: prev.d, h, vx: sign * 2.4, vy: -2.5, alpha: 1, axis: ax };
     if (ax === 'x') { cut.x = cutC; cut.w = ad; } else { cut.z = cutC; cut.d = ad; }
     falling.push(cut);
@@ -238,6 +416,7 @@ function place() {
   if (combo >= 2) { elCombo.textContent = 'PERFECT x' + combo; elCombo.style.opacity = 1; }
   else elCombo.style.opacity = 0;
   hue = (hue + 2.2) % 360;
+  checkAch();
   spawnBlock();
 }
 
@@ -342,6 +521,7 @@ function update(now) {
     finalBest.textContent = 'BEST ' + best;
     elBest.textContent = 'BEST ' + best;
     newBestEl.style.display = isBest && score > 0 ? 'block' : 'none';
+    runUnlocksEl.textContent = runNewUnlocks > 0 ? '🏆 ' + runNewUnlocks + ' achievement baru!' : '';
     overOverlay.classList.remove('hidden');
   }
 }
@@ -436,6 +616,12 @@ function onTap(e) {
 canvas.addEventListener('pointerdown', onTap);
 menuOverlay.addEventListener('pointerdown', onTap);
 overOverlay.addEventListener('pointerdown', onTap);
+document.getElementById('achBtn').addEventListener('pointerdown', (e) => {
+  e.stopPropagation(); audio(); renderAchGrid(); achOverlay.classList.remove('hidden');
+});
+achOverlay.addEventListener('pointerdown', () => achOverlay.classList.add('hidden'));
+shareBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); shareScore(); });
+refreshAchCount();
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' || e.code === 'Enter') onTap();
 });
