@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b1020">
 <title>Stack Rush</title>
+<!-- CrazyGames SDK v3: ads + game events (docs.crazygames.com/sdk/intro).
+     The game fully works without it — adblock / foreign domains degrade gracefully. -->
+<script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; background:#0b1020; }
@@ -143,13 +146,14 @@ resize();
 
 /* ---------------- audio (tiny synth, no assets) ---------------- */
 let AC = null, muted = false;
+let sdkForceMute = false, cgAudioMuted = false, adPaused = false; // CrazyGames ad/mute state
 function audio() {
   if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (AC && AC.state === 'suspended') AC.resume();
   return AC;
 }
 function tone(freq, dur, type, vol, delay, slideTo) {
-  if (muted) return;
+  if (muted || cgAudioMuted) return;
   const ac = audio(); if (!ac) return;
   const t = ac.currentTime + (delay || 0);
   const o = ac.createOscillator(), g = ac.createGain();
@@ -170,9 +174,84 @@ function sfxPerfect(combo) {
 function sfxOver() { tone(240, 0.5, 'sawtooth', 0.16, 0, 70); }
 soundBtn.addEventListener('click', (e) => {
   e.stopPropagation();
+  if (sdkForceMute) { toast('<span class="t-ico">🔇</span><span>' + t('audioLocked') + '</span>'); return; }
   muted = !muted;
   refreshSoundBtn();
 });
+
+/* ---------------- CrazyGames SDK v3 adapter ----------------
+   Verified against https://docs.crazygames.com/sdk/intro, /sdk/game, /sdk/video-ads.
+   - init() is async and must be awaited before use; on foreign domains
+     SDK.environment === 'disabled' (init may throw) -> we stay in no-op mode.
+   - gameplayStart on every (re)start of play; gameplayStop on every break.
+   - midroll ("midgame") at the natural break = game over. HTML5 SDK does NOT
+     pause the game for us -> we freeze update() and mute audio on adStarted,
+     resume on adFinished/adError. Rewarded ads grant ONLY on adFinished.
+   - A dismissal arrives as adError; cooldown/unfilled/adblock/Basic-Launch
+     also arrive as adError -> onDone always runs, the player is never trapped.
+   - game.settings.muteAudio takes priority over the in-game toggle. */
+const CG = {
+  ready: false, sdk: null, _ready: null,
+  _call(fn) {
+    // Defer until init settles: the docs forbid SDK calls before init() resolves.
+    // Early gameplay events (player taps start in <1s) are queued, not dropped.
+    if (!this._ready) return;
+    this._ready.then(ok => { try { if (ok && this.sdk) fn(this.sdk); } catch (e) {} });
+  },
+  init() {
+    this._ready = (async () => {
+      let S = null;
+      try { S = window.CrazyGames && window.CrazyGames.SDK; } catch (e) { return false; }
+      if (!S || typeof S.init !== 'function') return false;
+      try { await S.init(); } catch (e) { return false; }
+      let env = null;
+      try { env = S.environment; } catch (e) {}
+      if (env === 'disabled') return false; // foreign domain / sitelock
+      this.sdk = S; this.ready = true;
+      try {
+        const gm = S.game;
+        if (gm && gm.settings && gm.settings.muteAudio === true) {
+          sdkForceMute = true; muted = true; refreshSoundBtn();
+        }
+        if (gm && typeof gm.addSettingsChangeListener === 'function') {
+          gm.addSettingsChangeListener((ns) => {
+            if (ns && typeof ns.muteAudio === 'boolean') {
+              sdkForceMute = ns.muteAudio;
+              if (ns.muteAudio) muted = true;
+              refreshSoundBtn();
+            }
+          });
+        }
+      } catch (e) {}
+      return true;
+    })();
+    return this._ready;
+  },
+  gameplayStart() { this._call(s => s.game.gameplayStart()); },
+  gameplayStop()  { this._call(s => s.game.gameplayStop()); },
+  happytime()     { this._call(s => s.game.happytime()); }, // sparingly: new best score
+  midroll(onDone) {
+    const done = () => { try { onDone && onDone(); } catch (e) {} };
+    let settled = false;
+    const finish = () => {
+      if (settled) return; settled = true;
+      adPaused = false; cgAudioMuted = false; done();
+    };
+    const watchdog = setTimeout(finish, 8000); // never trap the player
+    const run = () => {
+      try {
+        this.sdk.ad.requestAd('midgame', {
+          adStarted:  () => { adPaused = true; cgAudioMuted = true; },
+          adFinished: () => { clearTimeout(watchdog); finish(); },
+          adError:    () => { clearTimeout(watchdog); finish(); },
+        });
+      } catch (e) { clearTimeout(watchdog); finish(); }
+    };
+    if (!this._ready) { clearTimeout(watchdog); finish(); return; }
+    this._ready.then(ok => { if (ok) run(); else { clearTimeout(watchdog); finish(); } });
+  },
+};
+CG.init();
 
 /* ---------------- i18n (English default, Bahasa Indonesia) ---------------- */
 const I18N = {
@@ -183,6 +262,7 @@ const I18N = {
     missed: 'You missed the block!', best: 'BEST', newBest: '★ NEW BEST ★',
     soundOn: 'SOUND ON', soundOff: 'SOUND OFF',
     achNew: '🏆 {n} new achievements!', achUnlocked: 'Achievement',
+    audioLocked: 'Audio is controlled by the platform',
     imgSaved: 'Image saved — share it to WhatsApp / Status!',
     shareText: 'My Stack Rush score: {s}! Can you beat it?',
     beatMe: 'Can you beat my score?',
@@ -195,6 +275,7 @@ const I18N = {
     missed: 'Baloknya meleset!', best: 'TERBAIK', newBest: '★ REKOR BARU ★',
     soundOn: 'SUARA NYALA', soundOff: 'SUARA MATI',
     achNew: '🏆 {n} pencapaian baru!', achUnlocked: 'Pencapaian',
+    audioLocked: 'Audio dikontrol oleh platform',
     imgSaved: 'Gambar tersimpan — bagikan ke WhatsApp / Status!',
     shareText: 'Skor Stack Rush-ku: {s}! Bisa kalahkan?',
     beatMe: 'Bisa kalahkan skorku?',
@@ -384,6 +465,7 @@ let camY = 0;            // camera height (layers), lerps to follow tower
 let shake = 0, flash = 0;
 let hue = 212;           // background hue, drifts as you climb
 let overTimer = 0, overAt = 0;
+let overPanelShown = false;
 let tapCount = 0;
 
 try { best = parseInt(localStorage.getItem('stackrush_best') || '0', 10) || 0; } catch (e) {}
@@ -401,8 +483,10 @@ function newGame() {
   elScore.textContent = '0'; elCombo.style.opacity = 0;
   spawnBlock();
   mode = 'playing';
+  overPanelShown = false;
   menuOverlay.classList.add('hidden');
   overOverlay.classList.add('hidden');
+  CG.gameplayStart();
 }
 
 function spawnBlock() {
@@ -433,6 +517,11 @@ function place() {
     falling.push({ x: cur.x, z: cur.z, w: cur.w, d: cur.d, h, vx: cur.dir * 2.2, vy: -3, alpha: 1, axis: cur.axis });
     cur = null; mode = 'over'; overAt = performance.now();
     sfxOver(); shake = 14;
+    CG.gameplayStop();
+    CG.midroll(() => { // midgame ad at the natural break; panel shows after
+      const wait = Math.max(0, 650 - (performance.now() - overAt));
+      setTimeout(showOverPanel, wait);
+    });
     return;
   }
 
@@ -486,6 +575,24 @@ function place() {
   hue = (hue + 2.2) % 360;
   checkAch();
   spawnBlock();
+}
+
+function showOverPanel() {
+  if (overPanelShown || mode !== 'over') return;
+  overPanelShown = true;
+  finalScore.textContent = score;
+  const isBest = score > best;
+  if (isBest) {
+    best = score;
+    try { localStorage.setItem('stackrush_best', String(best)); } catch (e) {}
+    CG.happytime(); // special moment: new best score
+  }
+  newBestEl.style.display = isBest && score > 0 ? 'block' : 'none';
+  newBestEl.textContent = t('newBest');
+  finalBest.textContent = t('best') + ' ' + best;
+  elBest.textContent = t('best') + ' ' + best;
+  runUnlocksEl.textContent = runNewUnlocks > 0 ? t('achNew', { n: runNewUnlocks }) : '';
+  overOverlay.classList.remove('hidden');
 }
 
 function burst(x, z, h, color, n) {
@@ -542,6 +649,7 @@ let last = performance.now();
 function update(now) {
   let dt = Math.min((now - last) / 1000, 0.05);
   last = now;
+  if (adPaused) return; // CrazyGames ad playing: freeze gameplay, keep rendering
 
   if (mode === 'playing' && cur) {
     cur.pos += cur.dir * cur.speed * dt;
@@ -581,20 +689,6 @@ function update(now) {
   // decay juice
   shake = Math.max(0, shake - dt * 40);
   flash = Math.max(0, flash - dt * 1.8);
-
-  if (mode === 'over' && overOverlay.classList.contains('hidden') && now - overAt > 650) {
-    finalScore.textContent = score;
-    const isBest = score > best;
-    if (isBest) { best = score; try { localStorage.setItem('stackrush_best', String(best)); } catch (e) {} }
-    finalBest.textContent = 'BEST ' + best;
-    elBest.textContent = 'BEST ' + best;
-    newBestEl.style.display = isBest && score > 0 ? 'block' : 'none';
-    newBestEl.textContent = t('newBest');
-    finalBest.textContent = t('best') + ' ' + best;
-    elBest.textContent = t('best') + ' ' + best;
-    runUnlocksEl.textContent = runNewUnlocks > 0 ? t('achNew', { n: runNewUnlocks }) : '';
-    overOverlay.classList.remove('hidden');
-  }
 }
 
 /* ---------------- render ---------------- */
