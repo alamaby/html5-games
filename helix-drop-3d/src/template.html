@@ -91,6 +91,10 @@
   .achcard .adesc { font-size:10px; color:#aab4d8; margin-top:2px; line-height:1.35; }
   .achcard.locked { opacity:.38; filter:grayscale(.9); border-color:rgba(255,255,255,.12); }
   .achcard.locked .aname { color:#8a93b8; }
+  .shareBtn { margin-top:14px; background:linear-gradient(135deg,#7df9ff,#4aa8ff); color:#0b1020;
+              border:none; border-radius:14px; padding:12px 34px; font-size:16px; font-weight:800;
+              letter-spacing:2px; cursor:pointer; }
+  .shareBtn:active { transform:scale(.95); }
 </style>
 </head>
 <body>
@@ -119,6 +123,7 @@
   <div id="overScore">0</div>
   <div id="overBest"></div>
   <div id="overAch"></div>
+  <button id="shareBtn" class="shareBtn"></button>
   <div class="tap" id="tapRetry"></div>
 </div>
 

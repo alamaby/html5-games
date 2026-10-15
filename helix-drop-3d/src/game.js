@@ -16,6 +16,11 @@ const STR = {
     combo: (n) => 'COMBO ×' + n,
     achTitle: 'ACHIEVEMENTS', achClose: 'TAP TO CLOSE', locked: '???',
     newAch: (n) => '🏆 ' + n + ' new achievement' + (n > 1 ? 's!' : '!'),
+    shareScore: 'SHARE SCORE',
+    achLine: (o) => '🏆 ' + o.a + ' / ' + o.n + ' achievements',
+    beatMe: 'Can you beat it?',
+    imgSaved: 'Image saved — share it to WhatsApp / Status!',
+    shareText: (s) => 'My Helix Drop 3D score: ' + s + '! Can you beat it?',
   },
   id: {
     tapStart: 'KETUK UNTUK MULAI', best: 'TERBAIK', gameOver: 'GAME OVER', newBest: '★ REKOR BARU ★',
@@ -29,6 +34,11 @@ const STR = {
     combo: (n) => 'KOMBO ×' + n,
     achTitle: 'PENCAPAIAN', achClose: 'KETUK UNTUK TUTUP', locked: '???',
     newAch: (n) => '🏆 ' + n + ' pencapaian baru!',
+    shareScore: 'BAGIKAN SKOR',
+    achLine: (o) => '🏆 ' + o.a + ' / ' + o.n + ' pencapaian',
+    beatMe: 'Bisa kalahkan?',
+    imgSaved: 'Gambar tersimpan — bagikan ke WhatsApp / Status!',
+    shareText: (s) => 'Skor Helix Drop 3D-ku: ' + s + '! Bisa kalahkan?',
   },
 };
 let lang = 'en';
@@ -307,6 +317,80 @@ function renderAchGrid() {
   }).join('');
 }
 
+/* ============================== share card (1080x1350) ============================== */
+function drawShareCard(g) {
+  const W2 = 1080, H2 = 1350;
+  const bg = g.createLinearGradient(0, 0, 0, H2);
+  bg.addColorStop(0, '#1b1440');
+  bg.addColorStop(1, '#0a0f24');
+  g.fillStyle = bg; g.fillRect(0, 0, W2, H2);
+  // faint helix motif behind the score
+  g.save();
+  g.globalAlpha = 0.35; g.lineWidth = 30; g.lineCap = 'butt';
+  const rings = [[540, 520, 230, 0.4], [540, 520, 165, 1.2], [540, 520, 105, 2.1]];
+  rings.forEach((rd, ri) => {
+    for (let s = 0; s < 10; s++) {
+      if (s === 2) continue; // the gap
+      g.strokeStyle = 'hsl(' + ((262 + ri * 22) % 360) + ',72%,60%)';
+      g.beginPath();
+      g.arc(rd[0], rd[1], rd[2], rd[3] + s * TAU / 10, rd[3] + (s + 0.72) * TAU / 10);
+      g.stroke();
+    }
+  });
+  g.restore();
+  // ball above the motif
+  g.fillStyle = '#ff5c7a';
+  g.beginPath(); g.arc(540, 235, 28, 0, TAU); g.fill();
+  g.textAlign = 'center';
+  g.fillStyle = '#fff';
+  g.font = '800 76px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText('HELIX DROP 3D', W2 / 2, 150);
+  g.fillStyle = '#7df9ff';
+  g.font = '800 280px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText(String(score), W2 / 2, 660);
+  g.fillStyle = 'rgba(255,255,255,.8)';
+  g.font = '700 52px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText(t('best') + ' ' + best, W2 / 2, 760);
+  g.fillText(t('achLine', { a: Object.keys(achUnlocked).length, n: ACHS.length }), W2 / 2, 842);
+  g.fillStyle = 'rgba(255,255,255,.6)';
+  g.font = '600 40px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText(t('beatMe'), W2 / 2, 1140);
+  g.fillStyle = '#7df9ff';
+  g.font = '700 36px -apple-system, "Segoe UI", Roboto, sans-serif';
+  g.fillText('alamaby.github.io/html5-games/helix-drop-3d/', W2 / 2, 1206);
+}
+
+function flashMsg(html) {
+  if (toastBusy) return;
+  const el = $('achToast');
+  el.innerHTML = html;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+async function shareScore() {
+  sfx.ui();
+  const c = document.createElement('canvas');
+  c.width = 1080; c.height = 1350;
+  drawShareCard(c.getContext('2d'));
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  if (!blob) return;
+  const file = new File([blob], 'helix-drop-3d.png', { type: 'image/png' });
+  const text = t('shareText', score);
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Helix Drop 3D', text });
+      return;
+    }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'helix-drop-3d-skor-' + score + '.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  flashMsg('<div class="ticon">📥</div><div><div class="tdesc">' + t('imgSaved') + '</div></div>');
+}
+
 /* ============================== game state ============================== */
 let mode = 'menu';           // menu | play | dying | over
 let rotY = 0, targetRotY = 0;
@@ -476,6 +560,7 @@ function applyTexts() {
   $('tapRetry').textContent = t('tapRetry');
   $('achGalTitle').textContent = t('achTitle');
   $('achClose').textContent = t('achClose');
+  $('shareBtn').textContent = t('shareScore');
   $('langBtn').textContent = lang === 'en' ? 'ID' : 'EN';
   if (!$('achGal').classList.contains('hidden')) renderAchGrid();
   if (overShown) {
@@ -536,6 +621,7 @@ $('langBtn').addEventListener('click', (e) => {
   try { localStorage.setItem('helixdrop_lang', lang); } catch (err) {}
   sfx.ui(); applyTexts();
 });
+$('shareBtn').addEventListener('pointerdown', (e) => { e.stopPropagation(); shareScore(); });
 $('trophyBtn').addEventListener('click', (e) => {
   e.stopPropagation();
   sfx.ui();
@@ -615,7 +701,7 @@ if (typeof module !== 'undefined') {
   module.exports = { HDLogic, newGame, stepPlay, die, gameOver,
     setRot: (v) => { targetRotY = v; },
     platTypes: (i) => { const p = platforms.find((x) => x.i === i); return p ? p.types.slice() : null; },
-    unlock, renderAchGrid,
+    unlock, renderAchGrid, drawShareCard, shareScore,
     achState: () => ({ unlocked: Object.keys(achUnlocked).sort(), total: ACHS.length,
                        queue: toastQueue.length, shows: toastShows, grid: $('achGrid').innerHTML }),
     state: () => ({ mode, score, ballY, curIndex, rotY, platforms: platforms.length }) };

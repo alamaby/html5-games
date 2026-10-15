@@ -55,6 +55,22 @@ function fakeEl(id) {
     removeChild(c) { const k = (this._kids || []).indexOf(c); if (k >= 0) this._kids.splice(k, 1); },
   };
 }
+function ctx2dStub() {
+  const texts = [];
+  return {
+    texts,
+    fillStyle: '', strokeStyle: '', lineWidth: 1, lineCap: '', font: '', textAlign: '', globalAlpha: 1,
+    fillRect() {}, save() {}, restore() {}, beginPath() {}, closePath() {},
+    arc() {}, stroke() {}, fill() {}, moveTo() {}, lineTo() {},
+    fillText(t) { texts.push(String(t)); },
+    createLinearGradient() { return { addColorStop() {} }; },
+  };
+}
+function canvasStub() {
+  return { width: 0, height: 0, _ctx: null,
+           getContext() { return this._ctx || (this._ctx = ctx2dStub()); },
+           toBlob(cb) { cb(null); } };
+}
 const elements = {};
 const store = {};
 const sandbox = {
@@ -65,7 +81,7 @@ const sandbox = {
   window: { innerWidth: 390, innerHeight: 844, devicePixelRatio: 2, addEventListener() {} },
   document: {
     getElementById: (id) => elements[id] || (elements[id] = fakeEl(id)),
-    createElement: (tag) => fakeEl(tag),
+    createElement: (tag) => tag === 'canvas' ? canvasStub() : fakeEl(tag),
     addEventListener() {},
     documentElement: { lang: '' },
   },
@@ -140,6 +156,15 @@ ok('manual unlock persists', G.achState().unlocked.includes('marathon'));
 ok('toast shown for unlock(s)', G.achState().shows >= 1);
 G.renderAchGrid();
 eq('gallery renders 11 cards', (G.achState().grid.match(/class="achcard/g) || []).length, 11);
+
+// share card (1080x1350)
+const card = ctx2dStub();
+let cardThrew = null;
+try { G.drawShareCard(card); } catch (e) { cardThrew = e; }
+eq('share card: no exception', cardThrew, null);
+ok('share card: title drawn', card.texts.includes('HELIX DROP 3D'));
+ok('share card: score drawn', card.texts.includes(String(G.state().score)));
+ok('share card: game URL drawn', card.texts.includes('alamaby.github.io/html5-games/helix-drop-3d/'));
 
 // dying -> over flow
 G.newGame();
