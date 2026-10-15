@@ -10,7 +10,9 @@ const HDLogic = (() => {
   function genPlatform(index, rand) {
     const types = new Array(SECTORS).fill('safe');
     const killCount = index === 0 ? 0 : index < 8 ? 1 : index < 20 ? 2 : 3;
-    const gapIdx = Math.floor(rand() * SECTORS);
+    let gapIdx = Math.floor(rand() * SECTORS);
+    // Tutorial platform: the gap must never sit under the ball spawn (sector 0).
+    if (index === 0 && gapIdx === 0) gapIdx = 1 + Math.floor(rand() * (SECTORS - 1));
     types[gapIdx] = 'gap';
     // Keep kill sectors away from the gap so a safe landing always exists nearby.
     let placed = 0, guard = 0;

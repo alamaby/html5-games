@@ -23,6 +23,11 @@
              -webkit-background-clip:text; background-clip:text; color:transparent;
              filter:drop-shadow(0 4px 24px rgba(120,110,255,.45)); margin-bottom:6px; }
   .subtitle { color:#aab4d8; font-size:15px; margin:10px 0 26px; max-width:320px; line-height:1.5; }
+  .howto { display:flex; flex-direction:column; gap:8px; margin:2px 0 20px; max-width:330px; }
+  .hrow { font-size:14.5px; color:#cdd6f4; background:rgba(255,255,255,.05);
+          border:1px solid rgba(255,255,255,.09); padding:9px 14px; border-radius:12px;
+          line-height:1.45; }
+  .hrow b { color:#fff; }
   .best { font-size:15px; color:#ffd76a; letter-spacing:2px; margin-bottom:22px; font-weight:700; }
   .tap { font-size:20px; font-weight:800; letter-spacing:4px; color:#fff;
          animation:pulse 1.6s ease-in-out infinite; }
@@ -69,7 +74,7 @@
 <div class="overlay" id="menu">
   <div class="kicker">ALAMABY · HTML5</div>
   <h1 class="title">HELIX<br>DROP 3D</h1>
-  <div class="subtitle" id="menuHint"></div>
+  <div class="howto" id="howto"></div>
   <div class="best" id="menuBest"></div>
   <div class="tap" id="tapStart"></div>
 </div>
@@ -97,7 +102,9 @@ const HDLogic = (() => {
   function genPlatform(index, rand) {
     const types = new Array(SECTORS).fill('safe');
     const killCount = index === 0 ? 0 : index < 8 ? 1 : index < 20 ? 2 : 3;
-    const gapIdx = Math.floor(rand() * SECTORS);
+    let gapIdx = Math.floor(rand() * SECTORS);
+    // Tutorial platform: the gap must never sit under the ball spawn (sector 0).
+    if (index === 0 && gapIdx === 0) gapIdx = 1 + Math.floor(rand() * (SECTORS - 1));
     types[gapIdx] = 'gap';
     // Keep kill sectors away from the gap so a safe landing always exists nearby.
     let placed = 0, guard = 0;
@@ -153,13 +160,23 @@ const STR = {
   en: {
     tapStart: 'TAP TO START', best: 'BEST', gameOver: 'GAME OVER', newBest: '★ NEW BEST ★',
     tapRetry: 'TAP TO RETRY',
-    menuHint: 'Drag to rotate the tower. Drop through the gaps — never touch red!',
+    howto: [
+      '🌀 <b>Drag</b> to rotate the tower',
+      '⬇️ <b>Drop</b> through the gaps',
+      '🚫 Avoid the <b style="color:#ff5c7a">red</b> zones',
+      '🔥 Pass 3+ platforms in one fall for a <b>COMBO</b>',
+    ],
     combo: (n) => 'COMBO ×' + n,
   },
   id: {
     tapStart: 'KETUK UNTUK MULAI', best: 'TERBAIK', gameOver: 'GAME OVER', newBest: '★ REKOR BARU ★',
     tapRetry: 'KETUK UNTUK ULANGI',
-    menuHint: 'Seret untuk memutar menara. Jatuh melewati celah — jangan sentuh yang merah!',
+    howto: [
+      '🌀 <b>Seret</b> untuk memutar menara',
+      '⬇️ <b>Jatuh</b> melewati celah platform',
+      '🚫 Hindari zona <b style="color:#ff5c7a">merah</b>',
+      '🔥 Lewati 3+ platform dalam sekali jatuh untuk <b>KOMBO</b>',
+    ],
     combo: (n) => 'KOMBO ×' + n,
   },
 };
@@ -436,11 +453,13 @@ function stepPlay(dt) {
   vy -= G * dt;
   ballY += vy * dt;
 
-  // Find platforms crossed while falling this frame (only below current).
+  // Find platforms crossed while falling this frame (current and below).
+  // The current platform is included so the ball genuinely bounces on it;
+  // platforms above can never be crossed (bounce apex < platform spacing).
   let landed = null;
   const passed = [];
   for (const p of platforms) {
-    if (p.i <= curIndex) continue;
+    if (p.i < curIndex) continue;
     const ty = topY(p);
     if (prevY >= ty && ballY <= ty) {
       const sec = HDLogic.sectorAt(p.types, rotY);
@@ -481,7 +500,7 @@ function showCombo(n) {
 
 function applyTexts() {
   document.documentElement.lang = lang === 'id' ? 'id' : 'en';
-  $('menuHint').textContent = t('menuHint');
+  $('howto').innerHTML = STR[lang].howto.map((line) => '<div class="hrow">' + line + '</div>').join('');
   $('tapStart').textContent = t('tapStart');
   $('menuBest').textContent = t('best') + ': ' + best;
   $('overKicker').textContent = t('gameOver');
@@ -610,6 +629,7 @@ frame();
 if (typeof module !== 'undefined') {
   module.exports = { HDLogic, newGame, stepPlay, die, gameOver,
     setRot: (v) => { targetRotY = v; },
+    platTypes: (i) => { const p = platforms.find((x) => x.i === i); return p ? p.types.slice() : null; },
     state: () => ({ mode, score, ballY, curIndex, rotY, platforms: platforms.length }) };
 }
 

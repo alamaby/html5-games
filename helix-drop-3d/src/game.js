@@ -7,13 +7,23 @@ const STR = {
   en: {
     tapStart: 'TAP TO START', best: 'BEST', gameOver: 'GAME OVER', newBest: '★ NEW BEST ★',
     tapRetry: 'TAP TO RETRY',
-    menuHint: 'Drag to rotate the tower. Drop through the gaps — never touch red!',
+    howto: [
+      '🌀 <b>Drag</b> to rotate the tower',
+      '⬇️ <b>Drop</b> through the gaps',
+      '🚫 Avoid the <b style="color:#ff5c7a">red</b> zones',
+      '🔥 Pass 3+ platforms in one fall for a <b>COMBO</b>',
+    ],
     combo: (n) => 'COMBO ×' + n,
   },
   id: {
     tapStart: 'KETUK UNTUK MULAI', best: 'TERBAIK', gameOver: 'GAME OVER', newBest: '★ REKOR BARU ★',
     tapRetry: 'KETUK UNTUK ULANGI',
-    menuHint: 'Seret untuk memutar menara. Jatuh melewati celah — jangan sentuh yang merah!',
+    howto: [
+      '🌀 <b>Seret</b> untuk memutar menara',
+      '⬇️ <b>Jatuh</b> melewati celah platform',
+      '🚫 Hindari zona <b style="color:#ff5c7a">merah</b>',
+      '🔥 Lewati 3+ platform dalam sekali jatuh untuk <b>KOMBO</b>',
+    ],
     combo: (n) => 'KOMBO ×' + n,
   },
 };
@@ -290,11 +300,13 @@ function stepPlay(dt) {
   vy -= G * dt;
   ballY += vy * dt;
 
-  // Find platforms crossed while falling this frame (only below current).
+  // Find platforms crossed while falling this frame (current and below).
+  // The current platform is included so the ball genuinely bounces on it;
+  // platforms above can never be crossed (bounce apex < platform spacing).
   let landed = null;
   const passed = [];
   for (const p of platforms) {
-    if (p.i <= curIndex) continue;
+    if (p.i < curIndex) continue;
     const ty = topY(p);
     if (prevY >= ty && ballY <= ty) {
       const sec = HDLogic.sectorAt(p.types, rotY);
@@ -335,7 +347,7 @@ function showCombo(n) {
 
 function applyTexts() {
   document.documentElement.lang = lang === 'id' ? 'id' : 'en';
-  $('menuHint').textContent = t('menuHint');
+  $('howto').innerHTML = STR[lang].howto.map((line) => '<div class="hrow">' + line + '</div>').join('');
   $('tapStart').textContent = t('tapStart');
   $('menuBest').textContent = t('best') + ': ' + best;
   $('overKicker').textContent = t('gameOver');
@@ -464,6 +476,7 @@ frame();
 if (typeof module !== 'undefined') {
   module.exports = { HDLogic, newGame, stepPlay, die, gameOver,
     setRot: (v) => { targetRotY = v; },
+    platTypes: (i) => { const p = platforms.find((x) => x.i === i); return p ? p.types.slice() : null; },
     state: () => ({ mode, score, ballY, curIndex, rotY, platforms: platforms.length }) };
 }
 

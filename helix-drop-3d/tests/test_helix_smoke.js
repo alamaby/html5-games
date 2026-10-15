@@ -89,21 +89,36 @@ G.newGame();
 eq('newGame: mode play', G.state().mode, 'play');
 eq('newGame: score 0', G.state().score, 0);
 
-// Simulate play: wiggle rotation, step physics. Must not throw; state stays finite.
-let threw = null, sawScore = false, sawLand = false;
+// Guided descent: align platform 0's gap under the ball and verify the ball
+// actually drops, lands and scores. If the landing sector on platform 1 is a
+// kill sector the ball dies instead (valid flow, covered below) — retry with a
+// fresh random layout until 5 clean descents are observed.
+const SEG = (Math.PI * 2) / 10;
+let threw = null, descents = 0, attempts = 0;
 try {
-  for (let f = 0; f < 1500; f++) {
-    G.setRot(Math.sin(f * 0.05) * 2.5); // gentle rotation wiggle
-    G.stepPlay(0.016);
+  while (descents < 5 && attempts < 15) {
+    attempts++;
+    G.newGame();
+    const gap = G.platTypes(0).indexOf('gap');
+    G.setRot(-(gap + 0.5) * SEG); // put the gap under the ball
+    let f = 0;
+    while (G.state().mode === 'play' && G.state().curIndex === 0 && f++ < 400) {
+      G.stepPlay(0.016);
+      const st = G.state();
+      if (!isFinite(st.ballY) || !isFinite(st.score) || !isFinite(st.rotY))
+        throw new Error('non-finite state');
+    }
     const s = G.state();
-    if (!isFinite(s.ballY) || !isFinite(s.score) || !isFinite(s.rotY)) throw new Error('non-finite state at frame ' + f);
-    if (s.score > 0) sawScore = true;
-    if (s.curIndex > 0) sawLand = true;
-    if (s.mode !== 'play') break;
+    if (s.mode === 'play' && s.curIndex > 0) {
+      descents++;
+      if (s.score < 1) throw new Error('descent without score');
+    }
+    // else: ball died on a kill sector — valid flow, retry fresh
   }
 } catch (e) { threw = e; }
-eq('1500 frames: no exception', threw, null);
-ok('ball eventually landed below start (curIndex>0) or scored', sawLand || sawScore);
+if (threw) { fail++; console.log('  FAIL guided descent threw:\n' + (threw && threw.stack ? threw.stack.split('\n').slice(0, 4).join('\n') : threw)); }
+else { pass++; console.log('  ok  guided descent: no exception'); }
+eq('5 clean descents observed', descents, 5);
 
 // dying -> over flow
 G.newGame();

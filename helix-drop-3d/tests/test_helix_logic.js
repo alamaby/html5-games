@@ -24,6 +24,13 @@ eq('p0: 10 sectors', p0.length, 10);
 eq('p0: 1 gap', HD.countType(p0, 'gap'), 1);
 eq('p0: 0 kills (tutorial)', HD.countType(p0, 'kill'), 0);
 eq('p0: spawn sector 0 safe', p0[0], 'safe');
+// Regression: p0 must ALWAYS have exactly 1 gap, never at sector 0 (spawn).
+let p0bad = 0;
+for (let seed = 0; seed < 200; seed++) {
+  const p = HD.genPlatform(0, mulberry32(seed));
+  if (HD.countType(p, 'gap') !== 1 || p[0] !== 'safe') p0bad++;
+}
+eq('p0: 200 seeds all have exactly 1 gap outside sector 0', p0bad, 0);
 
 for (const seed of [1, 2, 3, 42, 999]) {
   const p5 = HD.genPlatform(5, mulberry32(seed));
