@@ -58,6 +58,23 @@ PP.LEVELS.forEach((L, i) => {
   eq('pullPin twice returns false', PP.pullPin(st, 0), false);
 }
 
+// retracting pin uncovers balls in order: handle 'r' slides right, so the
+// leftmost ball drops first (no more simultaneous drop)
+{
+  const st = PP.createGame(0); // pin handle 'r', balls at x 160/210/260
+  for (let f = 0; f < 60; f++) PP.step(st, 1 / 60); // let balls land on the pin
+  const restY = st.balls[0].y;
+  ok('balls settled on pin', Math.abs(restY - (360 - 7 - 16)) < 3);
+  PP.pullPin(st, 0);
+  for (let f = 0; f < 15; f++) PP.step(st, 1 / 60); // pin fully retracted
+  const ys = st.balls.map((b) => b.y);
+  ok('cascade: left ball falls first', ys[0] > ys[2] + 3);
+  ok('cascade: ordered left-to-right', ys[0] > ys[1] && ys[1] > ys[2]);
+  eq('pin still retracting', st.pins[0].state, 'pulling');
+  for (let f = 0; f < 30; f++) PP.step(st, 1 / 60);
+  eq('pin fully out after 0.25s+', st.pins[0].state, 'out');
+}
+
 // pinpull event must survive PP.step (frame order: tap -> step -> drainEvents).
 // Regression: step() used to wipe st.events, killing the pin slide animation.
 {

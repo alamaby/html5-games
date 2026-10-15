@@ -188,7 +188,6 @@ const VW = PP.W, VH = PP.H;
 let screen = 'menu';       // menu | play
 let st = null;             // logic state
 let levelIdx = 0;
-let pinAnims = [];         // per-pin pull animation t
 let particles = [];
 let shake = 0;
 let hintT = 0;
@@ -213,7 +212,6 @@ window.addEventListener('resize', fitCanvas);
 function startLevel(i) {
   levelIdx = i;
   st = PP.createGame(i);
-  pinAnims = st.pins.map(() => ({ t: 0 }));
   particles = []; confetti = [];
   shake = 0; hintT = 3.2; panel = null; winStars = 0; newBestFlag = false;
   achAtStart = Object.keys(achUnlocked).length;
@@ -267,12 +265,19 @@ function onLose(why) {
 
 function drainEvents() {
   for (const e of st.events) {
-    if (e.t === 'pinpull') { pinAnims[e.i].t = 0.0001; sfx.pinpull(); unlock('first_pull'); }
+    if (e.t === 'pinpull') { sfx.pinpull(); unlock('first_pull'); }
     else if (e.t === 'capture') { sfx.capture(); spawnPoof(e.x, e.y, '#7df9ff'); }
     else if (e.t === 'explode') { sfx.explode(); shake = 1; spawnExplosion(e.x, e.y); }
     else if (e.t === 'lavaboom') { sfx.lavaboom(); spawnPoof(e.x, e.y, '#ff9f43'); }
     else if (e.t === 'lavalost') { spawnPoof(e.x, e.y, '#ff9f43'); }
-    else if (e.t === 'bounce' || e.t === 'pinbounce') sfx.bounce();
+    else if (e.t === 'bounce' || e.t === 'pinbounce') {
+      sfx.bounce();
+      const b = st.balls[e.bi];
+      if (b) {
+        b.squash = Math.min(1, (e.v || 120) / 400);   // harder hit = bigger squash
+        b.spin = (b.spin || 0) + 5 * (b.vx >= 0 ? 1 : -1); // kick of spin on impact
+      }
+    }
     else if (e.t === 'win') onWin();
     else if (e.t === 'lose') onLose(e.why);
   }
@@ -317,36 +322,45 @@ function rr(x, y, w, h, r) {
 
 function drawBall(b) {
   const R = PP.BALL_R;
+  g.save();
+  g.translate(b.x, b.y);
+  const sq = b.squash || 0;
+  g.scale(1 + 0.32 * sq, 1 - 0.32 * sq);   // squash & stretch on impact
+  g.rotate(b.rot || 0);                     // rolling spin
   let grad;
   if (b.kind === 'bomb') {
-    grad = g.createRadialGradient(b.x - 5, b.y - 6, 3, b.x, b.y, R);
+    grad = g.createRadialGradient(-5, -6, 3, 0, 0, R);
     grad.addColorStop(0, '#5a5f6e'); grad.addColorStop(1, '#23262e');
   } else {
     const hue = (190 + levelIdx * 24) % 360;
-    grad = g.createRadialGradient(b.x - 5, b.y - 6, 3, b.x, b.y, R);
+    grad = g.createRadialGradient(-5, -6, 3, 0, 0, R);
     grad.addColorStop(0, 'hsl(' + hue + ',85%,72%)');
     grad.addColorStop(1, 'hsl(' + hue + ',75%,45%)');
   }
   g.fillStyle = grad;
-  g.beginPath(); g.arc(b.x, b.y, R, 0, 7); g.fill();
+  g.beginPath(); g.arc(0, 0, R, 0, 7); g.fill();
+  // spin marker dot (makes rotation visible even without the face)
+  g.fillStyle = 'rgba(255,255,255,.55)';
+  g.beginPath(); g.arc(R * 0.55, -R * 0.35, 3.2, 0, 7); g.fill();
   // eyes
   g.fillStyle = '#fff';
-  g.beginPath(); g.arc(b.x - 5, b.y - 3, 4.4, 0, 7); g.arc(b.x + 5, b.y - 3, 4.4, 0, 7); g.fill();
+  g.beginPath(); g.arc(-5, -3, 4.4, 0, 7); g.arc(5, -3, 4.4, 0, 7); g.fill();
   g.fillStyle = '#1c2130';
-  g.beginPath(); g.arc(b.x - 5, b.y - 2, 2.1, 0, 7); g.arc(b.x + 5, b.y - 2, 2.1, 0, 7); g.fill();
+  g.beginPath(); g.arc(-5, -2, 2.1, 0, 7); g.arc(5, -2, 2.1, 0, 7); g.fill();
   if (b.kind === 'bomb') {
     // fuse spark
     g.strokeStyle = '#8a6a3f'; g.lineWidth = 3;
-    g.beginPath(); g.moveTo(b.x, b.y - R); g.quadraticCurveTo(b.x + 6, b.y - R - 10, b.x + 12, b.y - R - 8); g.stroke();
+    g.beginPath(); g.moveTo(0, -R); g.quadraticCurveTo(6, -R - 10, 12, -R - 8); g.stroke();
     const tw = 3 + Math.random() * 3;
     g.fillStyle = '#ffd76a';
-    g.beginPath(); g.arc(b.x + 12, b.y - R - 8, tw, 0, 7); g.fill();
+    g.beginPath(); g.arc(12, -R - 8, tw, 0, 7); g.fill();
   }
+  g.restore();
 }
 
-function drawPin(p, anim) {
-  // anim.t is already normalized 0..1 by the frame loop (0.25s duration)
-  const slide = Math.min(1, Math.max(0, anim.t));
+function drawPin(p) {
+  // pullT is driven by logic (0..1 over 0.25s); matches the collision segment
+  const slide = Math.min(1, Math.max(0, p.pullT || 0));
   const dir = p.handle === 'r' ? 1 : -1;
   const off = slide * slide * VW * dir;
   const grad = g.createLinearGradient(0, p.y - 7, 0, p.y + 7);
@@ -419,7 +433,7 @@ function render(time, dt) {
         drawBall({ x: bx, y: by, kind: b.kind });
       }
     }
-    st.pins.forEach((p, i) => { if (p.state === 'in' || pinAnims[i].t < 1) drawPin(p, pinAnims[i]); });
+    st.pins.forEach((p) => { if (p.state !== 'out') drawPin(p); });
     // pin hint arrow on level 1
     if (hintT > 0 && levelIdx === 0 && st.pins[0].state === 'in') {
       const p = st.pins[0];
@@ -458,7 +472,13 @@ function frame(timeMs) {
   if (screen === 'play' && st) {
     PP.step(st, dt);
     drainEvents();
-    for (const a of pinAnims) if (a.t > 0 && a.t < 1) a.t = Math.min(1, a.t + dt / 0.25);
+    // ball visual state: rolling rotation + decaying spin kick & squash
+    for (const b of st.balls) {
+      if (b.state !== 'active') continue;
+      b.rot = (b.rot || 0) + (b.vx / PP.BALL_R + (b.spin || 0)) * dt;
+      b.spin = (b.spin || 0) * Math.max(0, 1 - 3 * dt);
+      b.squash = Math.max(0, (b.squash || 0) - dt * 3.5);
+    }
     if (hintT > 0) hintT -= dt;
     if (panel && (st.status === 'won' || st.status === 'lost')) {
       panelT -= dt;

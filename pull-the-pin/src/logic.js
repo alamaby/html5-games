@@ -95,7 +95,8 @@ const PP = {
     const L = PP.LEVELS[levelIdx];
     return {
       level: levelIdx,
-      pins: L.pins.map((p) => ({ x1: p.x1, x2: p.x2, y: p.y, handle: p.handle, state: 'in' })),
+      pins: L.pins.map((p) => ({ x1: p.x1, x2: p.x2, y: p.y, handle: p.handle,
+                                state: 'in', pullT: 0 })),
       balls: L.balls.map((b) => ({
         x: b.x, y: b.y, px: b.x, py: b.y, vx: 0, vy: 0,
         kind: b.kind, state: 'active',
@@ -115,7 +116,8 @@ const PP = {
   pullPin(st, i) {
     const p = st.pins[i];
     if (!p || p.state !== 'in' || st.status === 'won' || st.status === 'lost') return false;
-    p.state = 'out';
+    p.state = 'pulling';   // retracts progressively; collision segment shrinks with it
+    p.pullT = 0;
     if (st.status === 'aim') st.status = 'sim';
     st.events.push({ t: 'pinpull', i });
     return true;
@@ -130,6 +132,13 @@ const PP = {
     // NOTE: do NOT clear st.events here — external events (e.g. 'pinpull' from
     // the tap handler) are pushed between frames and must survive until drained.
     // drainEvents() in game.js clears the queue after processing.
+    // advance retracting pins (0.25s slide, ease matched by the renderer)
+    for (const p of st.pins) {
+      if (p.state === 'pulling') {
+        p.pullT += dt / 0.25;
+        if (p.pullT >= 1) { p.pullT = 1; p.state = 'out'; }
+      }
+    }
     const h = dt / 3;
     for (let s = 0; s < 3; s++) PP.substep(st, h);
     // win / lose evaluation
@@ -170,14 +179,23 @@ const PP = {
       if (b.y - R < PP.CTOP) { b.y = PP.CTOP + R; b.vy = Math.abs(b.vy) * 0.3; }
       if (b.y + R > PP.FLOOR) {
         b.y = PP.FLOOR - R;
-        if (Math.abs(b.vy) > 60) { b.vy = -b.vy * 0.25; st.events.push({ t: 'bounce', x: b.x, y: b.y }); }
+        if (Math.abs(b.vy) > 60) {
+          b.vy = -b.vy * 0.25;
+          st.events.push({ t: 'bounce', bi: st.balls.indexOf(b), x: b.x, y: b.y, v: Math.abs(b.vy) });
+        }
         else b.vy = 0;
         b.vx *= (1 - 2.5 * h);
       }
-      // pins (capsule collision)
+      // pins (capsule collision). A retracting pin keeps the segment that is
+      // still under the balls — so they drop in the order the pin uncovers them.
       for (const p of st.pins) {
-        if (p.state !== 'in') continue;
-        const cx = Math.max(p.x1, Math.min(b.x, p.x2));
+        if (p.state === 'out') continue;
+        let sx1 = p.x1, sx2 = p.x2;
+        if (p.state === 'pulling') {
+          const off = p.pullT * p.pullT * PP.W * (p.handle === 'r' ? 1 : -1);
+          sx1 += off; sx2 += off;
+        }
+        const cx = Math.max(sx1, Math.min(b.x, sx2));
         const dx = b.x - cx, dy = b.y - p.y;
         const d = Math.hypot(dx, dy), minD = R + PP.PIN_R;
         if (d < minD && d > 1e-6) {
@@ -187,7 +205,7 @@ const PP = {
           if (vn < 0) {
             b.vx -= 1.1 * vn * nx; b.vy -= 1.1 * vn * ny;
             b.vx *= 0.985; b.vy *= 0.985;
-            if (vn < -120) st.events.push({ t: 'pinbounce', x: b.x, y: b.y });
+            if (vn < -120) st.events.push({ t: 'pinbounce', bi: st.balls.indexOf(b), x: b.x, y: b.y, v: -vn });
           }
         }
       }
