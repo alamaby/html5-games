@@ -27,7 +27,8 @@ def sub(placeholder, code):
         sys.exit(f'placeholder {placeholder} missing in template.html')
     tpl = tpl.replace(placeholder, code, 1)
 
-sub('/*__THREE_INLINE__*/', three if inline else CDN_TAG)
+three_tag = '<script>\n' + three + '\n</script>' if inline else CDN_TAG
+sub('<!--__THREE_TAG__-->', three_tag)
 sub('/*__LOGIC_INLINE__*/', logic)
 sub('/*__GAME_INLINE__*/', game)
 
