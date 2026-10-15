@@ -93,6 +93,13 @@ G.newGame();
 eq('newGame: mode play', G.state().mode, 'play');
 eq('newGame: score 0', G.state().score, 0);
 
+// game-over achievement summary (regression: t('newAch', n) call shape)
+G.newGame();
+G.die();
+G.gameOver();
+ok('overAch summary shown for fresh unlock', /🏆/.test(elements['overAch'].textContent));
+eq('overAch text', elements['overAch'].textContent, '🏆 1 new achievement!');
+
 // Guided descent: align platform 0's gap under the ball and verify the ball
 // actually drops, lands and scores. If the landing sector on platform 1 is a
 // kill sector the ball dies instead (valid flow, covered below) — retry with a
@@ -123,6 +130,16 @@ try {
 if (threw) { fail++; console.log('  FAIL guided descent threw:\n' + (threw && threw.stack ? threw.stack.split('\n').slice(0, 4).join('\n') : threw)); }
 else { pass++; console.log('  ok  guided descent: no exception'); }
 eq('5 clean descents observed', descents, 5);
+
+// achievements (guided descent above already earned first_drop)
+const ach = G.achState();
+eq('11 achievements defined', ach.total, 11);
+ok('first_drop unlocked by guided descent', ach.unlocked.includes('first_drop'));
+G.unlock('marathon');
+ok('manual unlock persists', G.achState().unlocked.includes('marathon'));
+ok('toast shown for unlock(s)', G.achState().shows >= 1);
+G.renderAchGrid();
+eq('gallery renders 11 cards', (G.achState().grid.match(/class="achcard/g) || []).length, 11);
 
 // dying -> over flow
 G.newGame();

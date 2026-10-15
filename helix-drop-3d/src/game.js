@@ -14,6 +14,8 @@ const STR = {
       '🔥 Pass 3+ platforms in one fall for a <b>COMBO</b>',
     ],
     combo: (n) => 'COMBO ×' + n,
+    achTitle: 'ACHIEVEMENTS', achClose: 'TAP TO CLOSE', locked: '???',
+    newAch: (n) => '🏆 ' + n + ' new achievement' + (n > 1 ? 's!' : '!'),
   },
   id: {
     tapStart: 'KETUK UNTUK MULAI', best: 'TERBAIK', gameOver: 'GAME OVER', newBest: '★ REKOR BARU ★',
@@ -25,6 +27,8 @@ const STR = {
       '🔥 Lewati 3+ platform dalam sekali jatuh untuk <b>KOMBO</b>',
     ],
     combo: (n) => 'KOMBO ×' + n,
+    achTitle: 'PENCAPAIAN', achClose: 'KETUK UNTUK TUTUP', locked: '???',
+    newAch: (n) => '🏆 ' + n + ' pencapaian baru!',
   },
 };
 let lang = 'en';
@@ -99,6 +103,7 @@ const sfx = {
   combo: (n) => { beep(520, 0.1, 'triangle', 0.35); setTimeout(() => beep(660 + n * 20, 0.12, 'triangle', 0.35), 70); },
   death: () => { noiseBurst(0.35, 0.7); beep(220, 0.3, 'sawtooth', 0.3, 60); },
   ui: () => beep(500, 0.06, 'sine', 0.25),
+  ach: () => { beep(880, 0.12, 'sine', 0.3); setTimeout(() => beep(1318, 0.18, 'sine', 0.3), 110); },
   fanfare: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.16, 'triangle', 0.4), i * 95)); },
 };
 
@@ -228,6 +233,80 @@ function updateParticles(dt) {
   }
 }
 
+/* ============================== achievements ============================== */
+const ACHS = [
+  { id:'first_drop',   icon:'🕳️', name:{en:'First Drop',id:'Jatuhan Pertama'}, desc:{en:'Pass your first platform',id:'Lewati platform pertamamu'} },
+  { id:'warming_up',   icon:'🔥', name:{en:'Warming Up',id:'Pemanasan'}, desc:{en:'Pass 10 platforms in one game',id:'Lewati 10 platform dalam satu game'} },
+  { id:'deep_dive',    icon:'🌊', name:{en:'Deep Dive',id:'Penyelaman Dalam'}, desc:{en:'Pass 25 platforms in one game',id:'Lewati 25 platform dalam satu game'} },
+  { id:'abyss_master', icon:'🌀', name:{en:'Abyss Master',id:'Master Jurang'}, desc:{en:'Pass 50 platforms in one game',id:'Lewati 50 platform dalam satu game'} },
+  { id:'marathon',     icon:'🏁', name:{en:'Marathon',id:'Maraton'}, desc:{en:'Pass 100 platforms in one game',id:'Lewati 100 platform dalam satu game'} },
+  { id:'triple_drop',  icon:'⚡', name:{en:'Triple Drop',id:'Triple Drop'}, desc:{en:'Land a ×3 combo',id:'Dapatkan kombo ×3'} },
+  { id:'skydiver',     icon:'🪂', name:{en:'Skydiver',id:'Penerjun Bebas'}, desc:{en:'Land a ×5 combo',id:'Dapatkan kombo ×5'} },
+  { id:'daredevil',    icon:'😱', name:{en:'Daredevil',id:'Pemberani'}, desc:{en:'Land a ×8 combo',id:'Dapatkan kombo ×8'} },
+  { id:'red_touch',    icon:'🔴', name:{en:'Red Touch',id:'Sentuhan Merah'}, desc:{en:'Touch red for the first time',id:'Sentuh zona merah untuk pertama kali'} },
+  { id:'steady_hands', icon:'🎯', name:{en:'Steady Hands',id:'Tangan Stabil'}, desc:{en:'Pass 20 platforms in one game without a single combo',id:'Lewati 20 platform dalam satu game tanpa kombo sekalipun'} },
+  { id:'persistent',   icon:'💪', name:{en:'Persistent',id:'Pantang Menyerah'}, desc:{en:'Play 10 games',id:'Mainkan 10 game'} },
+];
+let achUnlocked = {};
+try { achUnlocked = JSON.parse(localStorage.getItem('helixdrop_ach') || '{}'); } catch (e) { achUnlocked = {}; }
+let totalGames = 0;
+try { totalGames = parseInt(localStorage.getItem('helixdrop_games') || '0', 10) || 0; } catch (e) {}
+let runStats = null, achAtStart = 0;
+const toastQueue = [];
+let toastBusy = false, toastShows = 0;
+
+function unlock(id) {
+  if (achUnlocked[id]) return;
+  achUnlocked[id] = 1;
+  try { localStorage.setItem('helixdrop_ach', JSON.stringify(achUnlocked)); } catch (e) {}
+  toastQueue.push(id);
+  pumpToast();
+}
+function pumpToast() {
+  if (toastBusy || !toastQueue.length) return;
+  toastBusy = true;
+  toastShows++;
+  const qid = toastQueue.shift();
+  const a = ACHS.find((x) => x.id === qid);
+  if (!a) { toastBusy = false; pumpToast(); return; } // unknown id — skip defensively
+  const el = $('achToast');
+  el.innerHTML = '<div class="ticon">' + a.icon + '</div><div><div class="tname">' +
+    a.name[lang] + '</div><div class="tdesc">' + a.desc[lang] + '</div></div>';
+  el.classList.add('show');
+  sfx.ach();
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => { toastBusy = false; pumpToast(); }, 400);
+  }, 2600);
+}
+function notePass(n) {
+  if (!runStats || !n) return;
+  runStats.passes += n;
+  const p = runStats.passes;
+  if (p >= 1) unlock('first_drop');
+  if (p >= 10) unlock('warming_up');
+  if (p >= 25) unlock('deep_dive');
+  if (p >= 50) unlock('abyss_master');
+  if (p >= 100) unlock('marathon');
+  if (p >= 20 && runStats.combos === 0) unlock('steady_hands');
+}
+function noteCombo(n) {
+  if (!runStats) return;
+  runStats.combos++;
+  runStats.maxCombo = Math.max(runStats.maxCombo, n);
+  if (runStats.maxCombo >= 3) unlock('triple_drop');
+  if (runStats.maxCombo >= 5) unlock('skydiver');
+  if (runStats.maxCombo >= 8) unlock('daredevil');
+}
+function renderAchGrid() {
+  $('achGrid').innerHTML = ACHS.map((a) => {
+    const un = !!achUnlocked[a.id];
+    return '<div class="achcard' + (un ? '' : ' locked') + '"><div class="aicon">' + a.icon +
+      '</div><div class="aname">' + (un ? a.name[lang] : t('locked')) +
+      '</div><div class="adesc">' + (un ? a.desc[lang] : '···') + '</div></div>';
+  }).join('');
+}
+
 /* ============================== game state ============================== */
 let mode = 'menu';           // menu | play | dying | over
 let rotY = 0, targetRotY = 0;
@@ -253,6 +332,11 @@ function newGame() {
   score = 0; fallPass = 0; newBestFlag = false; overShown = false;
   shake = 0; camY = ballY;
   ball.visible = true;
+  runStats = { passes: 0, maxCombo: 0, combos: 0 };
+  achAtStart = Object.keys(achUnlocked).length;
+  totalGames++;
+  try { localStorage.setItem('helixdrop_games', String(totalGames)); } catch (e) {}
+  if (totalGames >= 10) unlock('persistent');
   mode = 'play';
   if (CG.game) { try { CG.game.gameplayStart(); } catch (e) {} }
   updateScoreHud();
@@ -264,10 +348,12 @@ function onLandSafe(p, passedCount) {
   vy = BOUNCE_V;
   addScore(passedCount);
   fallPass += passedCount;
+  notePass(passedCount);
   spawnBurst(0, ballY - BALL_R, BALL_RING, new THREE.Color('hsl(' + hueFor(p.i) + ',80%,62%)').getHex(), 7, 4);
   if (fallPass >= 3) {
     const bonus = HDLogic.fallScore(fallPass) - fallPass;
     addScore(bonus);
+    noteCombo(fallPass);
     showCombo(fallPass);
     sfx.combo(fallPass);
   } else {
@@ -288,6 +374,7 @@ function die() {
   dieTimer = 0.75;
   shake = 1;
   ball.visible = false;
+  unlock('red_touch');
   spawnBurst(0, ballY, BALL_RING, 0xff2d55, 22, 8);
   spawnBurst(0, ballY, BALL_RING, 0xffffff, 10, 6);
   sfx.death();
@@ -329,12 +416,13 @@ function stepPlay(dt) {
     }
   }
   if (landed) {
-    if (landed.sec === 'kill') { addScore(passed.length); die(); return; }
+    if (landed.sec === 'kill') { addScore(passed.length); notePass(passed.length); die(); return; }
     onLandSafe(landed.p, passed.length);
   } else if (passed.length) {
     // still falling through gaps — count when we eventually land or die
     addScore(passed.length);
     fallPass += passed.length;
+    notePass(passed.length);
     for (const p of passed) sfx.pass();
   }
 
@@ -373,7 +461,7 @@ function showPass(n) {
 }
 
 function showCombo(n) {
-  comboEl.textContent = t('combo')(n);
+  comboEl.textContent = t('combo', n);
   comboEl.classList.remove('show');
   void comboEl.offsetWidth;
   comboEl.classList.add('show');
@@ -386,7 +474,10 @@ function applyTexts() {
   $('menuBest').textContent = t('best') + ': ' + best;
   $('overKicker').textContent = t('gameOver');
   $('tapRetry').textContent = t('tapRetry');
+  $('achGalTitle').textContent = t('achTitle');
+  $('achClose').textContent = t('achClose');
   $('langBtn').textContent = lang === 'en' ? 'ID' : 'EN';
+  if (!$('achGal').classList.contains('hidden')) renderAchGrid();
   if (overShown) {
     $('overBest').textContent = t('best') + ': ' + best;
     $('newBest').textContent = newBestFlag ? t('newBest') : '';
@@ -396,6 +487,8 @@ function applyTexts() {
 function showOverPanel() {
   overShown = true;
   $('overScore').textContent = score;
+  const newAch = Object.keys(achUnlocked).length - achAtStart;
+  $('overAch').textContent = newAch > 0 ? t('newAch', newAch) : '';
   applyTexts();
   show(overEl);
 }
@@ -442,6 +535,17 @@ $('langBtn').addEventListener('click', (e) => {
   lang = lang === 'en' ? 'id' : 'en';
   try { localStorage.setItem('helixdrop_lang', lang); } catch (err) {}
   sfx.ui(); applyTexts();
+});
+$('trophyBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  sfx.ui();
+  renderAchGrid();
+  show($('achGal'));
+});
+$('achGal').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  sfx.ui();
+  hide($('achGal'));
 });
 $('sndBtn').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -511,6 +615,9 @@ if (typeof module !== 'undefined') {
   module.exports = { HDLogic, newGame, stepPlay, die, gameOver,
     setRot: (v) => { targetRotY = v; },
     platTypes: (i) => { const p = platforms.find((x) => x.i === i); return p ? p.types.slice() : null; },
+    unlock, renderAchGrid,
+    achState: () => ({ unlocked: Object.keys(achUnlocked).sort(), total: ACHS.length,
+                       queue: toastQueue.length, shows: toastShows, grid: $('achGrid').innerHTML }),
     state: () => ({ mode, score, ballY, curIndex, rotY, platforms: platforms.length }) };
 }
 
