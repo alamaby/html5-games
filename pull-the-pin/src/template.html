@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#12162e">
+<title>Pull the Pin</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#0b0e1f; }
+  body { display:flex; align-items:center; justify-content:center;
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif; color:#fff;
+         touch-action:none; user-select:none; -webkit-user-select:none; }
+  #wrap { position:relative; }
+  canvas { display:block; border-radius:14px; box-shadow:0 12px 60px rgba(0,0,0,.6); }
+  .hidden { display:none !important; }
+
+  .corner { position:absolute; top:max(10px, env(safe-area-inset-top)); z-index:10; display:flex; gap:8px; }
+  #topLeft { left:10px; } #topRight { right:10px; }
+  .iconbtn { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18);
+             background:rgba(10,14,32,.55); color:#fff; font-size:20px; cursor:pointer;
+             display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+  .iconbtn:active { transform:scale(.92); }
+  #hud { position:absolute; top:max(10px, env(safe-area-inset-top)); left:0; right:0; z-index:5;
+         text-align:center; pointer-events:none; }
+  #hudLevel { font-size:15px; font-weight:800; letter-spacing:1px; text-shadow:0 2px 8px rgba(0,0,0,.6); }
+  #hudTarget { font-size:13px; color:#9fe8ff; font-weight:700; margin-top:2px;
+               text-shadow:0 2px 8px rgba(0,0,0,.6); }
+
+  .overlay { position:absolute; inset:0; z-index:20; display:flex; flex-direction:column;
+             align-items:center; justify-content:center; text-align:center;
+             background:rgba(8,10,24,.72); backdrop-filter:blur(3px); border-radius:14px; padding:20px; }
+  .kicker { font-size:13px; letter-spacing:4px; color:#8a93b8; font-weight:700; }
+  .bigtitle { font-size:44px; font-weight:900; letter-spacing:1px; margin:8px 0 2px;
+              background:linear-gradient(135deg,#7df9ff,#c39bff); -webkit-background-clip:text;
+              background-clip:text; -webkit-text-fill-color:transparent; }
+  .subtitle { color:#aab4d8; font-size:14px; margin-bottom:18px; }
+  .lvlgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-width:340px; margin:6px 0 16px; }
+  .lvlcard { background:rgba(255,255,255,.06); border:1px solid rgba(125,249,255,.25);
+             border-radius:14px; padding:14px 8px; cursor:pointer; }
+  .lvlcard:active { transform:scale(.95); }
+  .lvlcard.locked { opacity:.35; cursor:default; }
+  .lnum { font-size:26px; font-weight:900; color:#7df9ff; }
+  .lname { font-size:11px; font-weight:700; margin-top:4px; min-height:28px; }
+  .lstars { font-size:13px; color:#ffd76a; margin-top:2px; }
+  .btnrow { display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; justify-content:center; }
+  .btn { border:none; border-radius:14px; padding:13px 30px; font-size:16px; font-weight:800;
+         letter-spacing:2px; cursor:pointer; }
+  .btn:active { transform:scale(.95); }
+  .btn.primary { background:linear-gradient(135deg,#7df9ff,#4aa8ff); color:#0b1020; }
+  .btn.ghost { background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.2); }
+  .winstars { font-size:52px; color:#ffd76a; margin:6px 0; text-shadow:0 0 24px rgba(255,215,106,.5); }
+  #winNewBest, #winAch { min-height:22px; font-weight:700; }
+  #winNewBest { color:#ffd76a; } #winAch { color:#ffd76a; font-size:14px; }
+
+  #achToast { position:absolute; top:calc(70px + env(safe-area-inset-top)); left:50%;
+              transform:translate(-50%,-16px); z-index:30; display:flex; gap:10px; align-items:center;
+              background:rgba(20,26,52,.94); border:1px solid rgba(255,215,106,.45);
+              border-radius:14px; padding:10px 16px 10px 12px; opacity:0; transition:all .3s ease;
+              pointer-events:none; max-width:86%; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  #achToast.show { opacity:1; transform:translate(-50%,0); }
+  #achToast .ticon { font-size:26px; }
+  #achToast .tname { font-weight:800; font-size:14px; color:#ffd76a; }
+  #achToast .tdesc { font-size:12px; color:#cdd6f4; }
+  .achgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-width:340px; margin-top:14px; }
+  .achcard { background:rgba(255,255,255,.06); border:1px solid rgba(255,215,106,.35);
+             border-radius:12px; padding:10px 6px; }
+  .achcard .aicon { font-size:26px; }
+  .achcard .aname { font-size:11.5px; font-weight:800; color:#ffd76a; margin-top:4px; }
+  .achcard .adesc { font-size:10px; color:#aab4d8; margin-top:2px; line-height:1.35; }
+  .achcard.locked { opacity:.38; filter:grayscale(.9); border-color:rgba(255,255,255,.12); }
+  .achcard.locked .aname { color:#8a93b8; }
+  .tap { margin-top:18px; color:#8a93b8; font-size:13px; letter-spacing:2px; font-weight:700; }
+  .foot { position:absolute; bottom:max(10px, env(safe-area-inset-bottom)); left:0; right:0;
+          text-align:center; font-size:11px; letter-spacing:3px; color:rgba(170,180,216,.5); z-index:5; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="420" height="740"></canvas>
+
+  <div class="corner" id="topLeft"><button class="iconbtn" id="langBtn">ID</button></div>
+  <div class="corner" id="topRight">
+    <button class="iconbtn" id="homeBtn">⌂</button>
+    <button class="iconbtn" id="trophyBtn">🏆</button>
+    <button class="iconbtn" id="sndBtn">♪</button>
+  </div>
+  <div id="hud"><div id="hudLevel"></div><div id="hudTarget"></div></div>
+
+  <div id="achToast"></div>
+
+  <div class="overlay" id="menuEl">
+    <div class="kicker">PLAYABLE AD DEMO</div>
+    <div class="bigtitle" id="titleMain"></div>
+    <div class="subtitle" id="titleSub"></div>
+    <div class="lvlgrid" id="levelGrid"></div>
+    <div class="btnrow">
+      <button class="btn ghost" id="menuShare">SHARE</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="winEl">
+    <div class="kicker" id="winKicker"></div>
+    <div class="winstars" id="winStars"></div>
+    <div id="winNewBest"></div>
+    <div id="winAch"></div>
+    <div class="btnrow">
+      <button class="btn ghost" id="winRetry"></button>
+      <button class="btn primary" id="winNext"></button>
+    </div>
+    <div class="btnrow"><button class="btn ghost" id="winShare"></button></div>
+  </div>
+
+  <div class="overlay hidden" id="loseEl">
+    <div class="kicker" id="loseKicker"></div>
+    <div class="btnrow">
+      <button class="btn primary" id="loseRetry"></button>
+      <button class="btn ghost" id="loseMenu"></button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="achGal">
+    <div class="kicker" id="menuAchTitle"></div>
+    <div class="achgrid" id="achGrid"></div>
+    <div class="tap" id="achClose"></div>
+  </div>
+
+  <div class="foot">PULL THE PIN</div>
+</div>
+
+<script>/*__LOGIC_INLINE__*/</script>
+<script>/*__GAME_INLINE__*/</script>
+</body>
+</html>

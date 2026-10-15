@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#12162e">
+<title>Pull the Pin</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#0b0e1f; }
+  body { display:flex; align-items:center; justify-content:center;
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif; color:#fff;
+         touch-action:none; user-select:none; -webkit-user-select:none; }
+  #wrap { position:relative; }
+  canvas { display:block; border-radius:14px; box-shadow:0 12px 60px rgba(0,0,0,.6); }
+  .hidden { display:none !important; }
+
+  .corner { position:absolute; top:max(10px, env(safe-area-inset-top)); z-index:10; display:flex; gap:8px; }
+  #topLeft { left:10px; } #topRight { right:10px; }
+  .iconbtn { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18);
+             background:rgba(10,14,32,.55); color:#fff; font-size:20px; cursor:pointer;
+             display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+  .iconbtn:active { transform:scale(.92); }
+  #hud { position:absolute; top:max(10px, env(safe-area-inset-top)); left:0; right:0; z-index:5;
+         text-align:center; pointer-events:none; }
+  #hudLevel { font-size:15px; font-weight:800; letter-spacing:1px; text-shadow:0 2px 8px rgba(0,0,0,.6); }
+  #hudTarget { font-size:13px; color:#9fe8ff; font-weight:700; margin-top:2px;
+               text-shadow:0 2px 8px rgba(0,0,0,.6); }
+
+  .overlay { position:absolute; inset:0; z-index:20; display:flex; flex-direction:column;
+             align-items:center; justify-content:center; text-align:center;
+             background:rgba(8,10,24,.72); backdrop-filter:blur(3px); border-radius:14px; padding:20px; }
+  .kicker { font-size:13px; letter-spacing:4px; color:#8a93b8; font-weight:700; }
+  .bigtitle { font-size:44px; font-weight:900; letter-spacing:1px; margin:8px 0 2px;
+              background:linear-gradient(135deg,#7df9ff,#c39bff); -webkit-background-clip:text;
+              background-clip:text; -webkit-text-fill-color:transparent; }
+  .subtitle { color:#aab4d8; font-size:14px; margin-bottom:18px; }
+  .lvlgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-width:340px; margin:6px 0 16px; }
+  .lvlcard { background:rgba(255,255,255,.06); border:1px solid rgba(125,249,255,.25);
+             border-radius:14px; padding:14px 8px; cursor:pointer; }
+  .lvlcard:active { transform:scale(.95); }
+  .lvlcard.locked { opacity:.35; cursor:default; }
+  .lnum { font-size:26px; font-weight:900; color:#7df9ff; }
+  .lname { font-size:11px; font-weight:700; margin-top:4px; min-height:28px; }
+  .lstars { font-size:13px; color:#ffd76a; margin-top:2px; }
+  .btnrow { display:flex; gap:10px; margin-top:8px; flex-wrap:wrap; justify-content:center; }
+  .btn { border:none; border-radius:14px; padding:13px 30px; font-size:16px; font-weight:800;
+         letter-spacing:2px; cursor:pointer; }
+  .btn:active { transform:scale(.95); }
+  .btn.primary { background:linear-gradient(135deg,#7df9ff,#4aa8ff); color:#0b1020; }
+  .btn.ghost { background:rgba(255,255,255,.1); color:#fff; border:1px solid rgba(255,255,255,.2); }
+  .winstars { font-size:52px; color:#ffd76a; margin:6px 0; text-shadow:0 0 24px rgba(255,215,106,.5); }
+  #winNewBest, #winAch { min-height:22px; font-weight:700; }
+  #winNewBest { color:#ffd76a; } #winAch { color:#ffd76a; font-size:14px; }
+
+  #achToast { position:absolute; top:calc(70px + env(safe-area-inset-top)); left:50%;
+              transform:translate(-50%,-16px); z-index:30; display:flex; gap:10px; align-items:center;
+              background:rgba(20,26,52,.94); border:1px solid rgba(255,215,106,.45);
+              border-radius:14px; padding:10px 16px 10px 12px; opacity:0; transition:all .3s ease;
+              pointer-events:none; max-width:86%; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  #achToast.show { opacity:1; transform:translate(-50%,0); }
+  #achToast .ticon { font-size:26px; }
+  #achToast .tname { font-weight:800; font-size:14px; color:#ffd76a; }
+  #achToast .tdesc { font-size:12px; color:#cdd6f4; }
+  .achgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-width:340px; margin-top:14px; }
+  .achcard { background:rgba(255,255,255,.06); border:1px solid rgba(255,215,106,.35);
+             border-radius:12px; padding:10px 6px; }
+  .achcard .aicon { font-size:26px; }
+  .achcard .aname { font-size:11.5px; font-weight:800; color:#ffd76a; margin-top:4px; }
+  .achcard .adesc { font-size:10px; color:#aab4d8; margin-top:2px; line-height:1.35; }
+  .achcard.locked { opacity:.38; filter:grayscale(.9); border-color:rgba(255,255,255,.12); }
+  .achcard.locked .aname { color:#8a93b8; }
+  .tap { margin-top:18px; color:#8a93b8; font-size:13px; letter-spacing:2px; font-weight:700; }
+  .foot { position:absolute; bottom:max(10px, env(safe-area-inset-bottom)); left:0; right:0;
+          text-align:center; font-size:11px; letter-spacing:3px; color:rgba(170,180,216,.5); z-index:5; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="420" height="740"></canvas>
+
+  <div class="corner" id="topLeft"><button class="iconbtn" id="langBtn">ID</button></div>
+  <div class="corner" id="topRight">
+    <button class="iconbtn" id="homeBtn">⌂</button>
+    <button class="iconbtn" id="trophyBtn">🏆</button>
+    <button class="iconbtn" id="sndBtn">♪</button>
+  </div>
+  <div id="hud"><div id="hudLevel"></div><div id="hudTarget"></div></div>
+
+  <div id="achToast"></div>
+
+  <div class="overlay" id="menuEl">
+    <div class="kicker">PLAYABLE AD DEMO</div>
+    <div class="bigtitle" id="titleMain"></div>
+    <div class="subtitle" id="titleSub"></div>
+    <div class="lvlgrid" id="levelGrid"></div>
+    <div class="btnrow">
+      <button class="btn ghost" id="menuShare">SHARE</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="winEl">
+    <div class="kicker" id="winKicker"></div>
+    <div class="winstars" id="winStars"></div>
+    <div id="winNewBest"></div>
+    <div id="winAch"></div>
+    <div class="btnrow">
+      <button class="btn ghost" id="winRetry"></button>
+      <button class="btn primary" id="winNext"></button>
+    </div>
+    <div class="btnrow"><button class="btn ghost" id="winShare"></button></div>
+  </div>
+
+  <div class="overlay hidden" id="loseEl">
+    <div class="kicker" id="loseKicker"></div>
+    <div class="btnrow">
+      <button class="btn primary" id="loseRetry"></button>
+      <button class="btn ghost" id="loseMenu"></button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="achGal">
+    <div class="kicker" id="menuAchTitle"></div>
+    <div class="achgrid" id="achGrid"></div>
+    <div class="tap" id="achClose"></div>
+  </div>
+
+  <div class="foot">PULL THE PIN</div>
+</div>
+
+<script>/* Pull the Pin — pure game logic (no DOM, no audio). Testable in Node. */
+'use strict';
+
+const PP = {
+  W: 420, H: 740,
+  CX1: 40, CX2: 380, CTOP: 130, FLOOR: 670,   // container bounds
+  BALL_R: 16, PIN_R: 7,
+  GRAV: 1500, MAXV: 1000,
+
+  LEVELS: [
+    {
+      name: { en: 'First Pull', id: 'Tarikan Pertama' },
+      pins: [{ x1: 40, x2: 380, y: 360, handle: 'r' }],
+      balls: [
+        { x: 160, y: 290, kind: 'good' }, { x: 210, y: 290, kind: 'good' },
+        { x: 260, y: 290, kind: 'good' },
+      ],
+      cup: { x: 210, w: 130, y: 600 },
+      lava: null,
+      target: 3,
+      hint: { en: 'Tap the pin to pull it!', id: 'Ketuk pin untuk menariknya!' },
+      solve: [0],
+    },
+    {
+      name: { en: 'Order Matters', id: 'Urutan Penting' },
+      pins: [
+        { x1: 40, x2: 380, y: 330, handle: 'r' },
+        { x1: 40, x2: 380, y: 510, handle: 'l' },
+      ],
+      balls: [
+        { x: 110, y: 260, kind: 'good' }, { x: 150, y: 260, kind: 'good' },
+        { x: 190, y: 260, kind: 'good' },
+        { x: 215, y: 460, kind: 'bomb' }, { x: 260, y: 460, kind: 'bomb' },
+      ],
+      cup: { x: 150, w: 100, y: 600 },
+      lava: { x1: 190, x2: 370, y: 640 },
+      target: 3,
+      hint: { en: 'Wrong order goes BOOM!', id: 'Urutan salah bisa DUAR!' },
+      solve: [1, 0],
+    },
+    {
+      name: { en: 'Split Path', id: 'Jalan Terpisah' },
+      pins: [
+        { x1: 40, x2: 380, y: 330, handle: 'r' },
+        { x1: 40, x2: 200, y: 510, handle: 'l' },
+      ],
+      balls: [
+        { x: 90, y: 260, kind: 'good' }, { x: 130, y: 260, kind: 'good' },
+        { x: 170, y: 260, kind: 'good' },
+        { x: 270, y: 260, kind: 'bomb' }, { x: 310, y: 260, kind: 'bomb' },
+      ],
+      cup: { x: 130, w: 100, y: 600 },
+      lava: { x1: 240, x2: 370, y: 640 },
+      target: 3,
+      hint: { en: 'Bombs love lava.', id: 'Bom suka lava.' },
+      solve: [0, 1],
+    },
+    {
+      name: { en: 'Zigzag', id: 'Zigzag' },
+      pins: [
+        { x1: 40, x2: 210, y: 300, handle: 'l' },
+        { x1: 210, x2: 380, y: 460, handle: 'r' },
+      ],
+      balls: [
+        { x: 100, y: 230, kind: 'good' }, { x: 140, y: 230, kind: 'good' },
+        { x: 180, y: 230, kind: 'good' },
+        { x: 300, y: 400, kind: 'bomb' },
+      ],
+      cup: { x: 140, w: 100, y: 600 },
+      lava: { x1: 260, x2: 370, y: 640 },
+      target: 3,
+      hint: { en: 'Staggered pins, steady hands.', id: 'Pin zigzag, tangan stabil.' },
+      solve: [0, 1],
+    },
+    {
+      name: { en: 'Grand Finale', id: 'Final Akbar' },
+      pins: [
+        { x1: 40, x2: 380, y: 320, handle: 'r' },
+        { x1: 260, x2: 380, y: 500, handle: 'l' },
+      ],
+      balls: [
+        { x: 110, y: 250, kind: 'good' }, { x: 150, y: 250, kind: 'good' },
+        { x: 300, y: 250, kind: 'bomb' },
+        { x: 300, y: 450, kind: 'bomb' }, { x: 340, y: 450, kind: 'bomb' },
+      ],
+      cup: { x: 130, w: 80, y: 600 },
+      lava: { x1: 270, x2: 370, y: 640 },
+      target: 2,
+      hint: { en: 'Everything you learned, at once.', id: 'Semua yang kupelajari, sekaligus.' },
+      solve: [1, 0],
+    },
+  ],
+
+  createGame(levelIdx) {
+    const L = PP.LEVELS[levelIdx];
+    return {
+      level: levelIdx,
+      pins: L.pins.map((p) => ({ x1: p.x1, x2: p.x2, y: p.y, handle: p.handle, state: 'in' })),
+      balls: L.balls.map((b) => ({
+        x: b.x, y: b.y, px: b.x, py: b.y, vx: 0, vy: 0,
+        kind: b.kind, state: 'active',
+      })),
+      cup: { x: L.cup.x, w: L.cup.w, y: L.cup.y },
+      lava: L.lava ? { x1: L.lava.x1, x2: L.lava.x2, y: L.lava.y } : null,
+      target: L.target,
+      totalGood: L.balls.filter((b) => b.kind === 'good').length,
+      cupCount: 0, exploded: 0, lavaBombs: 0,
+      status: 'aim',           // aim | sim | won | lost
+      time: 0, settleT: 0, endT: 0,
+      capTimes: [],
+      events: [],
+    };
+  },
+
+  pullPin(st, i) {
+    const p = st.pins[i];
+    if (!p || p.state !== 'in' || st.status === 'won' || st.status === 'lost') return false;
+    p.state = 'out';
+    if (st.status === 'aim') st.status = 'sim';
+    st.events.push({ t: 'pinpull', i });
+    return true;
+  },
+
+  activeBalls(st) { return st.balls.filter((b) => b.state === 'active'); },
+  activeGood(st) { return st.balls.filter((b) => b.state === 'active' && b.kind === 'good'); },
+
+  step(st, dt) {
+    if (st.status === 'won' || st.status === 'lost') return;
+    st.time += dt;
+    st.events.length = 0;
+    const h = dt / 3;
+    for (let s = 0; s < 3; s++) PP.substep(st, h);
+    // win / lose evaluation
+    if (st.cupCount >= st.target) {
+      st.endT += dt;
+      if (st.endT > 0.6) { st.status = 'won'; st.events.push({ t: 'win' }); }
+      return;
+    }
+    st.endT = 0;
+    let maxSp = 0;
+    const act = PP.activeBalls(st);
+    for (const b of act) {
+      const sp = Math.hypot(b.vx, b.vy);
+      if (sp > maxSp) maxSp = sp;
+    }
+    const pinsIn = st.pins.some((p) => p.state === 'in');
+    if (!pinsIn && maxSp < 15) st.settleT += dt; else st.settleT = 0;
+    if (PP.activeGood(st).length + st.cupCount < st.target) {
+      st.status = 'lost'; st.events.push({ t: 'lose', why: 'impossible' }); return;
+    }
+    if (st.settleT > 0.7) {
+      st.status = st.cupCount >= st.target ? 'won' : 'lost';
+      st.events.push({ t: st.status, why: 'settled' });
+    }
+  },
+
+  substep(st, h) {
+    const R = PP.BALL_R;
+    for (const b of st.balls) {
+      if (b.state !== 'active') continue;
+      b.px = b.x; b.py = b.y;
+      b.vy = Math.min(b.vy + PP.GRAV * h, PP.MAXV);
+      b.vx *= (1 - 0.12 * h); b.vy *= (1 - 0.02 * h);
+      b.x += b.vx * h; b.y += b.vy * h;
+      // walls
+      if (b.x - R < PP.CX1) { b.x = PP.CX1 + R; b.vx = Math.abs(b.vx) * 0.3; }
+      if (b.x + R > PP.CX2) { b.x = PP.CX2 - R; b.vx = -Math.abs(b.vx) * 0.3; }
+      if (b.y - R < PP.CTOP) { b.y = PP.CTOP + R; b.vy = Math.abs(b.vy) * 0.3; }
+      if (b.y + R > PP.FLOOR) {
+        b.y = PP.FLOOR - R;
+        if (Math.abs(b.vy) > 60) { b.vy = -b.vy * 0.25; st.events.push({ t: 'bounce', x: b.x, y: b.y }); }
+        else b.vy = 0;
+        b.vx *= (1 - 2.5 * h);
+      }
+      // pins (capsule collision)
+      for (const p of st.pins) {
+        if (p.state !== 'in') continue;
+        const cx = Math.max(p.x1, Math.min(b.x, p.x2));
+        const dx = b.x - cx, dy = b.y - p.y;
+        const d = Math.hypot(dx, dy), minD = R + PP.PIN_R;
+        if (d < minD && d > 1e-6) {
+          const nx = dx / d, ny = dy / d;
+          b.x = cx + nx * minD; b.y = p.y + ny * minD;
+          const vn = b.vx * nx + b.vy * ny;
+          if (vn < 0) {
+            b.vx -= 1.1 * vn * nx; b.vy -= 1.1 * vn * ny;
+            b.vx *= 0.985; b.vy *= 0.985;
+            if (vn < -120) st.events.push({ t: 'pinbounce', x: b.x, y: b.y });
+          }
+        }
+      }
+      // (no per-substep sleep: substep gravity is below any sane threshold;
+      // resting jitter stays under the settle-detection limit instead)
+    }
+    // ball-ball collisions
+    const act = PP.activeBalls(st);
+    for (let i = 0; i < act.length; i++) {
+      for (let j = i + 1; j < act.length; j++) {
+        const a = act[i], c = act[j];
+        const dx = c.x - a.x, dy = c.y - a.y;
+        const d = Math.hypot(dx, dy), minD = R * 2;
+        if (d < minD && d > 1e-6) {
+          const nx = dx / d, ny = dy / d, ov = (minD - d) / 2;
+          a.x -= nx * ov; a.y -= ny * ov;
+          c.x += nx * ov; c.y += ny * ov;
+          const rvx = c.vx - a.vx, rvy = c.vy - a.vy;
+          const vn = rvx * nx + rvy * ny;
+          if (vn < 0) {
+            const imp = -(1 + 0.25) * vn / 2;
+            a.vx -= imp * nx; a.vy -= imp * ny;
+            c.vx += imp * nx; c.vy += imp * ny;
+          }
+          // bomb touches good ball -> both destroyed
+          if ((a.kind === 'bomb' && c.kind === 'good') || (a.kind === 'good' && c.kind === 'bomb')) {
+            const bx = (a.x + c.x) / 2, by = (a.y + c.y) / 2;
+            a.state = 'dead'; c.state = 'dead';
+            st.exploded++;
+            st.events.push({ t: 'explode', x: bx, y: by });
+          }
+        }
+      }
+    }
+    // cup capture + lava
+    for (const b of st.balls) {
+      if (b.state !== 'active') continue;
+      const cup = st.cup;
+      if (b.vy > 0 && b.py <= cup.y && b.y > cup.y &&
+          Math.abs(b.x - cup.x) < cup.w / 2 - 6) {
+        b.state = 'cup';
+        if (b.kind === 'bomb') {
+          st.status = 'lost'; st.events.push({ t: 'lose', why: 'bombcup', x: b.x, y: b.y });
+          return;
+        }
+        st.cupCount++;
+        st.capTimes.push(st.time);
+        st.events.push({ t: 'capture', x: b.x, y: cup.y, n: st.cupCount });
+        continue;
+      }
+      const lv = st.lava;
+      if (lv && b.y + R > lv.y && b.x > lv.x1 && b.x < lv.x2) {
+        b.state = 'dead';
+        if (b.kind === 'bomb') { st.lavaBombs++; st.events.push({ t: 'lavaboom', x: b.x, y: lv.y }); }
+        else st.events.push({ t: 'lavalost', x: b.x, y: lv.y });
+      }
+    }
+  },
+};
+
+if (typeof module !== 'undefined') module.exports = PP;
+</script>
+<script>'use strict';
+/* Pull the Pin — browser shell: render, input, audio, i18n, SDK. Game logic in PP. */
+
+// ---------- CrazyGames SDK ----------
+const CG = { game: null, ready: false, muted: false };
+(function initCG() {
+  function boot() {
+    if (CG.ready || !window.CrazyGames || !window.CrazyGames.SDK) return;
+    const SDK = window.CrazyGames.SDK;
+    try {
+      SDK.init().then(() => {
+        CG.ready = true; CG.game = SDK.game;
+        try {
+          const go = SDK.game && SDK.game.settings;
+          CG.muted = !!(go && go.muteAudio);
+          if (CG.game && CG.game.onMuteStateChanged) {
+            CG.game.onMuteStateChanged((m) => { CG.muted = !!m; });
+          }
+        } catch (e) {}
+        syncMuteUI();
+      }).catch(() => {});
+    } catch (e) {}
+  }
+  if (document.readyState === 'complete') boot();
+  else window.addEventListener('load', boot);
+  setTimeout(boot, 1500);
+})();
+function requestMidgameAd(onDone) {
+  const done = () => { if (onDone) onDone(); };
+  if (!CG.ready || !CG.game || !CG.game.midgame) { done(); return; }
+  let finished = false;
+  const finish = () => { if (!finished) { finished = true; done(); } };
+  const watchdog = setTimeout(finish, 8000);
+  try {
+    CG.game.midgame('midgame', () => {
+      clearTimeout(watchdog);
+      try { CG.game.gameplayStop(); } catch (e) {}
+      setTimeout(finish, 50);
+    }, (err) => { clearTimeout(watchdog); finish(); });
+  } catch (e) { clearTimeout(watchdog); finish(); }
+}
+
+// ---------- audio ----------
+let AC = null;
+function ac() {
+  if (typeof window === 'undefined') return null;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!AC) { try { AC = new Ctx(); } catch (e) { return null; } }
+  if (AC.state === 'suspended') AC.resume().catch(() => {});
+  return AC;
+}
+function isMuted() {
+  if (CG.muted) return true;
+  try { return localStorage.getItem('ppp_mute') === '1'; } catch (e) { return false; }
+}
+function beep(freq, dur, type, vol, slideTo) {
+  if (isMuted()) return;
+  const c = ac(); if (!c) return;
+  try {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, c.currentTime);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, c.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.25, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(); o.stop(c.currentTime + dur);
+  } catch (e) {}
+}
+function noise(dur, vol, low) {
+  if (isMuted()) return;
+  const c = ac(); if (!c) return;
+  try {
+    const n = Math.floor(c.sampleRate * dur);
+    const buf = c.createBuffer(1, n, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = c.createBufferSource(); src.buffer = buf;
+    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = low || 1200;
+    const g = c.createGain(); g.gain.value = vol || 0.4;
+    src.connect(f); f.connect(g); g.connect(c.destination); src.start();
+  } catch (e) {}
+}
+const sfx = {
+  ui: () => beep(520, 0.06, 'sine', 0.22),
+  pinpull: () => { noise(0.18, 0.25, 3000); beep(300, 0.16, 'square', 0.12, 900); },
+  bounce: () => beep(220, 0.05, 'triangle', 0.12),
+  capture: () => { beep(660, 0.09, 'sine', 0.3, 990); setTimeout(() => beep(990, 0.12, 'sine', 0.25), 70); },
+  explode: () => { noise(0.4, 0.5, 700); beep(90, 0.35, 'sawtooth', 0.35, 40); },
+  lavaboom: () => { noise(0.25, 0.3, 900); beep(150, 0.2, 'sawtooth', 0.25, 60); },
+  win: () => { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => beep(f, 0.22, 'triangle', 0.3), i * 110)); },
+  lose: () => beep(220, 0.4, 'sawtooth', 0.2, 110),
+  ach: () => { beep(880, 0.12, 'sine', 0.3); setTimeout(() => beep(1318, 0.18, 'sine', 0.3), 110); },
+};
+
+// ---------- i18n ----------
+const STR = {
+  en: {
+    title: 'PULL THE PIN', subtitle: 'Guide the balls. Dodge the bombs.',
+    level: 'LEVEL', target: (o) => o.c + ' / ' + o.t + ' in the cup',
+    retry: 'RETRY', next: 'NEXT', menu: 'MENU', share: 'SHARE',
+    youWin: 'LEVEL CLEAR!', youLose: 'BOOM!',
+    stars: (n) => '★'.repeat(n) + '☆'.repeat(3 - n),
+    newBest: '★ NEW BEST ★',
+    locked: '???', tapClose: 'TAP TO CLOSE', achievements: 'ACHIEVEMENTS',
+    newAch: (n) => '🏆 ' + n + ' new achievement' + (n > 1 ? 's!' : '!'),
+    imgSaved: 'Image saved — share it to WhatsApp / Status!',
+    shareText: (o) => 'I cleared ' + o.l + '/5 Pull the Pin levels with ' + o.s + ' stars! Can you beat it?',
+    cardCta: 'Can you clear all 5?',
+    playHint: 'Tap a pin to pull it',
+  },
+  id: {
+    title: 'PULL THE PIN', subtitle: 'Arahkan bola. Hindari bom.',
+    level: 'LEVEL', target: (o) => o.c + ' / ' + o.t + ' masuk cup',
+    retry: 'ULANGI', next: 'LANJUT', menu: 'MENU', share: 'BAGIKAN',
+    youWin: 'LEVEL SELESAI!', youLose: 'DUAR!',
+    stars: (n) => '★'.repeat(n) + '☆'.repeat(3 - n),
+    newBest: '★ REKOR BARU ★',
+    locked: '???', tapClose: 'KETUK UNTUK TUTUP', achievements: 'PENCAPAIAN',
+    newAch: (n) => '🏆 ' + n + ' pencapaian baru!',
+    imgSaved: 'Gambar tersimpan — bagikan ke WhatsApp / Status!',
+    shareText: (o) => 'Aku menyelesaikan ' + o.l + '/5 level Pull the Pin dengan ' + o.s + ' bintang! Bisa kalahkan?',
+    cardCta: 'Bisa selesaikan semua 5?',
+    playHint: 'Ketuk pin untuk menariknya',
+  },
+};
+let lang = 'en';
+try { lang = localStorage.getItem('ppp_lang') || 'en'; if (!STR[lang]) lang = 'en'; } catch (e) {}
+const t = (k, arg) => { const v = STR[lang][k]; return typeof v === 'function' ? v(arg) : v; };
+
+// ---------- achievements ----------
+const ACHS = [
+  { id: 'first_pull', icon: '👆', name: { en: 'First Pull', id: 'Tarikan Pertama' }, desc: { en: 'Pull your first pin', id: 'Tarik pin pertamamu' } },
+  { id: 'first_win', icon: '🎉', name: { en: 'First Win', id: 'Menang Pertama' }, desc: { en: 'Clear level 1', id: 'Selesaikan level 1' } },
+  { id: 'sharp', icon: '🎯', name: { en: 'Sharp Shooter', id: 'Penembak Jitu' }, desc: { en: 'Cup every ball in a level', id: 'Masukkan semua bola dalam satu level' } },
+  { id: 'bomb_squad', icon: '🧨', name: { en: 'Bomb Squad', id: 'Penjinak Bom' }, desc: { en: 'Clear a bomb level with zero explosions', id: 'Selesaikan level bom tanpa ledakan' } },
+  { id: 'multi_drop', icon: '🌧️', name: { en: 'Multi Drop', id: 'Hujan Bola' }, desc: { en: 'Cup 3 balls within 1.5 seconds', id: 'Masukkan 3 bola dalam 1,5 detik' } },
+  { id: 'halfway', icon: '🏃', name: { en: 'Halfway', id: 'Setengah Jalan' }, desc: { en: 'Clear 3 levels', id: 'Selesaikan 3 level' } },
+  { id: 'master', icon: '🏆', name: { en: 'Pin Master', id: 'Master Pin' }, desc: { en: 'Clear all 5 levels', id: 'Selesaikan semua 5 level' } },
+  { id: 'persistent', icon: '💪', name: { en: 'Persistent', id: 'Pantang Menyerah' }, desc: { en: 'Retry 5 times', id: 'Ulangi 5 kali' } },
+];
+let achUnlocked = {};
+try { achUnlocked = JSON.parse(localStorage.getItem('ppp_ach') || '{}'); } catch (e) { achUnlocked = {}; }
+let achAtStart = 0;
+const toastQueue = [];
+let toastBusy = false, toastShows = 0;
+function unlock(id) {
+  if (achUnlocked[id]) return;
+  achUnlocked[id] = 1;
+  try { localStorage.setItem('ppp_ach', JSON.stringify(achUnlocked)); } catch (e) {}
+  toastQueue.push(id);
+  pumpToast();
+}
+function pumpToast() {
+  if (toastBusy || !toastQueue.length) return;
+  toastBusy = true;
+  toastShows++;
+  const qid = toastQueue.shift();
+  const a = ACHS.find((x) => x.id === qid);
+  if (!a) { toastBusy = false; pumpToast(); return; }
+  const el = document.getElementById('achToast');
+  el.innerHTML = '<div class="ticon">' + a.icon + '</div><div><div class="tname">' +
+    a.name[lang] + '</div><div class="tdesc">' + a.desc[lang] + '</div></div>';
+  el.classList.add('show');
+  sfx.ach();
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => { toastBusy = false; pumpToast(); }, 400);
+  }, 2600);
+}
+
+// ---------- progress ----------
+let progress = { unlocked: 1, stars: [0, 0, 0, 0, 0] };
+try {
+  const p = JSON.parse(localStorage.getItem('ppp_progress') || 'null');
+  if (p && p.stars && p.stars.length === 5) progress = p;
+} catch (e) {}
+function saveProgress() {
+  try { localStorage.setItem('ppp_progress', JSON.stringify(progress)); } catch (e) {}
+}
+let fails = 0;
+try { fails = parseInt(localStorage.getItem('ppp_fails') || '0', 10) || 0; } catch (e) {}
+
+// ---------- game state ----------
+const cv = document.getElementById('game');
+const g = cv.getContext('2d');
+const VW = PP.W, VH = PP.H;
+let screen = 'menu';       // menu | play
+let st = null;             // logic state
+let levelIdx = 0;
+let pinAnims = [];         // per-pin pull animation t
+let particles = [];
+let shake = 0;
+let hintT = 0;
+let panel = null;          // null | 'win' | 'lose'
+let panelT = 0;
+let winStars = 0, newBestFlag = false;
+let confetti = [];
+
+function $(id) { return document.getElementById(id); }
+function show(el) { el.classList.remove('hidden'); }
+function hide(el) { el.classList.add('hidden'); }
+
+function fitCanvas() {
+  const ww = window.innerWidth, wh = window.innerHeight;
+  const s = Math.min(ww / VW, wh / VH);
+  cv.style.width = Math.floor(VW * s) + 'px';
+  cv.style.height = Math.floor(VH * s) + 'px';
+}
+window.addEventListener('resize', fitCanvas);
+
+// ---------- flow ----------
+function startLevel(i) {
+  levelIdx = i;
+  st = PP.createGame(i);
+  pinAnims = st.pins.map(() => ({ t: 0 }));
+  particles = []; confetti = [];
+  shake = 0; hintT = 3.2; panel = null; winStars = 0; newBestFlag = false;
+  achAtStart = Object.keys(achUnlocked).length;
+  screen = 'play';
+  hide($('menuEl')); hide($('winEl')); hide($('loseEl')); hide($('achGal'));
+  applyTexts();
+  if (CG.game) { try { CG.game.gameplayStart(); } catch (e) {} }
+}
+
+function levelStars() {
+  if (st.cupCount >= st.totalGood) return 3;
+  if (st.cupCount >= st.target + 1) return 2;
+  return 1;
+}
+
+function onWin() {
+  winStars = levelStars();
+  const prev = progress.stars[levelIdx] || 0;
+  newBestFlag = winStars > prev;
+  if (newBestFlag) progress.stars[levelIdx] = winStars;
+  if (levelIdx + 1 < 5) progress.unlocked = Math.max(progress.unlocked, levelIdx + 2);
+  else progress.unlocked = 5;
+  saveProgress();
+  // achievements
+  unlock('first_win');
+  if (st.cupCount >= st.totalGood) unlock('sharp');
+  const hasBomb = PP.LEVELS[levelIdx].balls.some((b) => b.kind === 'bomb');
+  if (hasBomb && st.exploded === 0) unlock('bomb_squad');
+  const ct = st.capTimes;
+  outer: for (let i = 0; i < ct.length; i++)
+    for (let j = i + 2; j < ct.length; j++)
+      if (ct[j] - ct[i] <= 1.5) { unlock('multi_drop'); break outer; }
+  const cleared = progress.stars.filter((s) => s > 0).length;
+  if (cleared >= 3) unlock('halfway');
+  if (cleared >= 5) unlock('master');
+  if (CG.game) { try { CG.game.gameplayStop(); } catch (e) {} }
+  sfx.win();
+  spawnConfetti();
+  panelT = 0.9; panel = 'win';
+}
+
+function onLose(why) {
+  fails++;
+  try { localStorage.setItem('ppp_fails', String(fails)); } catch (e) {}
+  if (fails >= 5) unlock('persistent');
+  if (CG.game) { try { CG.game.gameplayStop(); } catch (e) {} }
+  sfx.lose();
+  panelT = 0.9; panel = 'lose';
+  requestMidgameAd(() => { if (panel === 'lose') { applyTexts(); show($('loseEl')); } });
+}
+
+function drainEvents() {
+  for (const e of st.events) {
+    if (e.t === 'pinpull') { pinAnims[e.i].t = 0.0001; sfx.pinpull(); unlock('first_pull'); }
+    else if (e.t === 'capture') { sfx.capture(); spawnPoof(e.x, e.y, '#7df9ff'); }
+    else if (e.t === 'explode') { sfx.explode(); shake = 1; spawnExplosion(e.x, e.y); }
+    else if (e.t === 'lavaboom') { sfx.lavaboom(); spawnPoof(e.x, e.y, '#ff9f43'); }
+    else if (e.t === 'lavalost') { spawnPoof(e.x, e.y, '#ff9f43'); }
+    else if (e.t === 'bounce' || e.t === 'pinbounce') sfx.bounce();
+    else if (e.t === 'win') onWin();
+    else if (e.t === 'lose') onLose(e.why);
+  }
+  st.events.length = 0;
+}
+
+// ---------- particles ----------
+function spawnPoof(x, y, color) {
+  for (let i = 0; i < 10; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 140;
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
+                     life: 0.5, t: 0, r: 3 + Math.random() * 4, color });
+  }
+}
+function spawnExplosion(x, y) {
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 80 + Math.random() * 260;
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120,
+                     life: 0.8, t: 0, r: 3 + Math.random() * 6,
+                     color: ['#ff5c5c', '#ffb35c', '#5c5c5c'][i % 3] });
+  }
+}
+function spawnConfetti() {
+  for (let i = 0; i < 90; i++) {
+    confetti.push({ x: Math.random() * VW, y: -20 - Math.random() * 200,
+                    vx: (Math.random() - 0.5) * 60, vy: 120 + Math.random() * 160,
+                    w: 6 + Math.random() * 6, h: 4 + Math.random() * 4,
+                    rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 8,
+                    color: ['#7df9ff', '#ffd76a', '#ff5c7a', '#9dff6e', '#c39bff'][i % 5],
+                    t: 0, life: 2.6 });
+  }
+}
+
+// ---------- rendering ----------
+function rr(x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+
+function drawBall(b) {
+  const R = PP.BALL_R;
+  let grad;
+  if (b.kind === 'bomb') {
+    grad = g.createRadialGradient(b.x - 5, b.y - 6, 3, b.x, b.y, R);
+    grad.addColorStop(0, '#5a5f6e'); grad.addColorStop(1, '#23262e');
+  } else {
+    const hue = (190 + levelIdx * 24) % 360;
+    grad = g.createRadialGradient(b.x - 5, b.y - 6, 3, b.x, b.y, R);
+    grad.addColorStop(0, 'hsl(' + hue + ',85%,72%)');
+    grad.addColorStop(1, 'hsl(' + hue + ',75%,45%)');
+  }
+  g.fillStyle = grad;
+  g.beginPath(); g.arc(b.x, b.y, R, 0, 7); g.fill();
+  // eyes
+  g.fillStyle = '#fff';
+  g.beginPath(); g.arc(b.x - 5, b.y - 3, 4.4, 0, 7); g.arc(b.x + 5, b.y - 3, 4.4, 0, 7); g.fill();
+  g.fillStyle = '#1c2130';
+  g.beginPath(); g.arc(b.x - 5, b.y - 2, 2.1, 0, 7); g.arc(b.x + 5, b.y - 2, 2.1, 0, 7); g.fill();
+  if (b.kind === 'bomb') {
+    // fuse spark
+    g.strokeStyle = '#8a6a3f'; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(b.x, b.y - R); g.quadraticCurveTo(b.x + 6, b.y - R - 10, b.x + 12, b.y - R - 8); g.stroke();
+    const tw = 3 + Math.random() * 3;
+    g.fillStyle = '#ffd76a';
+    g.beginPath(); g.arc(b.x + 12, b.y - R - 8, tw, 0, 7); g.fill();
+  }
+}
+
+function drawPin(p, anim) {
+  const slide = anim.t > 0 ? Math.min(1, anim.t / 0.25) : 0;
+  const dir = p.handle === 'r' ? 1 : -1;
+  const off = slide * slide * (VW) * dir;
+  const grad = g.createLinearGradient(0, p.y - 7, 0, p.y + 7);
+  grad.addColorStop(0, '#d7dce8'); grad.addColorStop(0.5, '#9aa2b5'); grad.addColorStop(1, '#6d7488');
+  g.fillStyle = grad;
+  rr(p.x1 + off, p.y - 7, p.x2 - p.x1, 14, 7); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.35)';
+  rr(p.x1 + off, p.y - 7, p.x2 - p.x1, 5, 3); g.fill();
+  // ring handle
+  const hx = (p.handle === 'r' ? p.x2 : p.x1) + off + dir * 22;
+  g.strokeStyle = '#ffd76a'; g.lineWidth = 7;
+  g.beginPath(); g.arc(hx, p.y, 13, 0, 7); g.stroke();
+  g.strokeStyle = 'rgba(255,215,106,.35)'; g.lineWidth = 11;
+  g.beginPath(); g.arc(hx, p.y, 13, 0, 7); g.stroke();
+}
+
+function drawCup(cup) {
+  const top = cup.y, w = cup.w, x = cup.x;
+  g.strokeStyle = '#4aa8ff'; g.lineWidth = 10; g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(x - w / 2, top); g.lineTo(x - w / 2, top + 46);
+  g.lineTo(x + w / 2, top + 46); g.lineTo(x + w / 2, top);
+  g.stroke();
+  g.strokeStyle = 'rgba(125,249,255,.35)'; g.lineWidth = 16;
+  g.beginPath();
+  g.moveTo(x - w / 2, top); g.lineTo(x - w / 2, top + 46);
+  g.lineTo(x + w / 2, top + 46); g.lineTo(x + w / 2, top);
+  g.stroke();
+}
+
+function drawLava(lv, time) {
+  const grad = g.createLinearGradient(0, lv.y, 0, PP.FLOOR);
+  grad.addColorStop(0, '#ffdd55'); grad.addColorStop(0.35, '#ff9f43'); grad.addColorStop(1, '#c0392b');
+  g.fillStyle = grad;
+  g.fillRect(lv.x1, lv.y, lv.x2 - lv.x1, PP.FLOOR - lv.y);
+  g.fillStyle = 'rgba(255,240,180,.8)';
+  for (let i = 0; i < 4; i++) {
+    const bx = lv.x1 + ((i * 53 + time * 30) % (lv.x2 - lv.x1));
+    const br = 4 + 3 * Math.sin(time * 5 + i * 2);
+    g.beginPath(); g.arc(bx, lv.y + 8 + 4 * Math.sin(time * 3 + i), Math.max(1, br), 0, 7); g.fill();
+  }
+}
+
+function render(time, dt) {
+  g.save();
+  g.clearRect(0, 0, VW, VH);
+  if (shake > 0) {
+    g.translate((Math.random() - 0.5) * 10 * shake, (Math.random() - 0.5) * 10 * shake);
+    shake = Math.max(0, shake - dt * 2.2);
+  }
+  // bg
+  const bg = g.createLinearGradient(0, 0, 0, VH);
+  bg.addColorStop(0, '#232a4d'); bg.addColorStop(1, '#12162e');
+  g.fillStyle = bg; g.fillRect(-20, -20, VW + 40, VH + 40);
+  // container glass
+  g.fillStyle = 'rgba(255,255,255,.05)';
+  rr(PP.CX1 - 12, PP.CTOP - 12, PP.CX2 - PP.CX1 + 24, PP.FLOOR - PP.CTOP + 24, 22); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 2;
+  rr(PP.CX1 - 12, PP.CTOP - 12, PP.CX2 - PP.CX1 + 24, PP.FLOOR - PP.CTOP + 24, 22); g.stroke();
+
+  if (screen === 'play' && st) {
+    if (st.lava) drawLava(st.lava, time);
+    drawCup(st.cup);
+    for (const b of st.balls) {
+      if (b.state === 'active') drawBall(b);
+      else if (b.state === 'cup') {
+        // stacked in cup
+        const idx = st.balls.filter((x) => x.state === 'cup').indexOf(b);
+        const bx = st.cup.x + (idx % 3 - 1) * 20, by = st.cup.y + 30 + Math.floor(idx / 3) * 18;
+        drawBall({ x: bx, y: by, kind: b.kind });
+      }
+    }
+    st.pins.forEach((p, i) => { if (p.state === 'in' || pinAnims[i].t < 1) drawPin(p, pinAnims[i]); });
+    // pin hint arrow on level 1
+    if (hintT > 0 && levelIdx === 0 && st.pins[0].state === 'in') {
+      const p = st.pins[0];
+      const bob = Math.sin(time * 6) * 8;
+      g.fillStyle = '#ffd76a';
+      g.font = '800 20px -apple-system, sans-serif'; g.textAlign = 'center';
+      g.fillText(t('playHint'), VW / 2, p.y - 44 + bob);
+      g.beginPath();
+      g.moveTo(p.x2 + 44, p.y - 18 + bob); g.lineTo(p.x2 + 44, p.y + 18 + bob); g.lineTo(p.x2 + 66, p.y + bob);
+      g.closePath(); g.fill();
+    }
+  }
+
+  // particles
+  for (const p of particles) {
+    g.globalAlpha = Math.max(0, 1 - p.t / p.life);
+    g.fillStyle = p.color;
+    g.beginPath(); g.arc(p.x, p.y, p.r, 0, 7); g.fill();
+  }
+  g.globalAlpha = 1;
+  // confetti
+  for (const c of confetti) {
+    g.save(); g.translate(c.x, c.y); g.rotate(c.rot);
+    g.globalAlpha = Math.max(0, 1 - c.t / c.life);
+    g.fillStyle = c.color; g.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
+    g.restore();
+  }
+  g.globalAlpha = 1;
+  g.restore();
+}
+
+function frame(timeMs) {
+  requestAnimationFrame(frame);
+  const time = timeMs / 1000;
+  const dt = Math.min(0.05, 1 / 60);
+  if (screen === 'play' && st) {
+    PP.step(st, dt);
+    drainEvents();
+    for (const a of pinAnims) if (a.t > 0 && a.t < 1) a.t = Math.min(1, a.t + dt / 0.25);
+    if (hintT > 0) hintT -= dt;
+    if (panel && (st.status === 'won' || st.status === 'lost')) {
+      panelT -= dt;
+      if (panelT <= 0) {
+        if (panel === 'win') { applyTexts(); show($('winEl')); }
+        // lose panel is shown by the ad callback
+        panel = panel === 'win' ? 'shown' : panel;
+      }
+    }
+  }
+  // particles update
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.t += dt; p.vy += 500 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.t >= p.life) particles.splice(i, 1);
+  }
+  for (let i = confetti.length - 1; i >= 0; i--) {
+    const c = confetti[i];
+    c.t += dt; c.x += c.vx * dt; c.y += c.vy * dt; c.rot += c.vr * dt;
+    if (c.t >= c.life) confetti.splice(i, 1);
+  }
+  render(time, dt);
+}
+
+// ---------- HUD / panels ----------
+function fmtTarget() {
+  return t('target', { c: st ? st.cupCount : 0, t: st ? st.target : 0 });
+}
+function applyTexts() {
+  document.documentElement.lang = lang === 'id' ? 'id' : 'en';
+  $('titleMain').textContent = t('title');
+  $('titleSub').textContent = t('subtitle');
+  $('menuAchTitle').textContent = t('achievements');
+  $('achGalTitle').textContent = t('achievements');
+  $('achClose').textContent = t('tapClose');
+  $('langBtn').textContent = lang === 'en' ? 'ID' : 'EN';
+  syncMuteUI();
+  if (screen === 'play' && st) {
+    const L = PP.LEVELS[levelIdx];
+    $('hudLevel').textContent = t('level') + ' ' + (levelIdx + 1) + ' · ' + L.name[lang];
+    $('hudTarget').textContent = fmtTarget();
+  }
+  // win panel
+  const newAch = Object.keys(achUnlocked).length - achAtStart;
+  $('winKicker').textContent = t('youWin');
+  $('winStars').textContent = t('stars', winStars);
+  $('winNewBest').textContent = newBestFlag ? t('newBest') : '';
+  $('winAch').textContent = newAch > 0 ? t('newAch', newAch) : '';
+  $('winNext').textContent = levelIdx + 1 < 5 ? t('next') : t('menu');
+  $('winRetry').textContent = t('retry');
+  $('winShare').textContent = t('share');
+  // lose panel
+  $('loseKicker').textContent = t('youLose');
+  $('loseRetry').textContent = t('retry');
+  $('loseMenu').textContent = t('menu');
+  renderLevelGrid();
+  if (!$('achGal').classList.contains('hidden')) renderAchGrid();
+}
+
+function renderLevelGrid() {
+  const grid = $('levelGrid');
+  grid.innerHTML = '';
+  PP.LEVELS.forEach((L, i) => {
+    const d = document.createElement('div');
+    const locked = i >= progress.unlocked;
+    d.className = 'lvlcard' + (locked ? ' locked' : '');
+    d.innerHTML = '<div class="lnum">' + (i + 1) + '</div>' +
+      '<div class="lname">' + (locked ? t('locked') : L.name[lang]) + '</div>' +
+      '<div class="lstars">' + (locked ? '···' : t('stars', progress.stars[i] || 0)) + '</div>';
+    if (!locked) d.addEventListener('click', (e) => { e.stopPropagation(); sfx.ui(); startLevel(i); });
+    grid.appendChild(d);
+  });
+}
+
+function renderAchGrid() {
+  $('achGrid').innerHTML = ACHS.map((a) => {
+    const un = !!achUnlocked[a.id];
+    return '<div class="achcard' + (un ? '' : ' locked') + '"><div class="aicon">' + a.icon +
+      '</div><div class="aname">' + (un ? a.name[lang] : t('locked')) +
+      '</div><div class="adesc">' + (un ? a.desc[lang] : '···') + '</div></div>';
+  }).join('');
+}
+
+// ---------- share card ----------
+function drawShareCard(c2d) {
+  const W2 = 1080, H2 = 1350;
+  const bg = c2d.createLinearGradient(0, 0, 0, H2);
+  bg.addColorStop(0, '#232a4d'); bg.addColorStop(1, '#12162e');
+  c2d.fillStyle = bg; c2d.fillRect(0, 0, W2, H2);
+  // pins motif
+  c2d.save(); c2d.globalAlpha = 0.5;
+  for (let i = 0; i < 4; i++) {
+    const y = 380 + i * 130;
+    const grad = c2d.createLinearGradient(0, y - 12, 0, y + 12);
+    grad.addColorStop(0, '#d7dce8'); grad.addColorStop(1, '#6d7488');
+    c2d.fillStyle = grad;
+    c2d.fillRect(180, y - 12, 720, 24);
+    c2d.strokeStyle = '#ffd76a'; c2d.lineWidth = 12;
+    c2d.beginPath(); c2d.arc(180 + 720 + 40, y, 22, 0, 7); c2d.stroke();
+    // balls above first pin
+    if (i === 0) {
+      const cols = ['#4dd0e1', '#ffd76a', '#ff5c7a'];
+      cols.forEach((col, bi) => {
+        c2d.fillStyle = col;
+        c2d.beginPath(); c2d.arc(420 + bi * 100, y - 70, 34, 0, 7); c2d.fill();
+      });
+    }
+  }
+  c2d.restore();
+  c2d.textAlign = 'center';
+  c2d.fillStyle = '#fff';
+  c2d.font = '800 84px -apple-system, "Segoe UI", Roboto, sans-serif';
+  c2d.fillText('PULL THE PIN', W2 / 2, 170);
+  const lv = progress.stars.filter((s) => s > 0).length;
+  const stars = progress.stars.reduce((a, b) => a + b, 0);
+  c2d.fillStyle = '#ffd76a';
+  c2d.font = '800 150px -apple-system, "Segoe UI", Roboto, sans-serif';
+  c2d.fillText(lv + '/5', W2 / 2, 980);
+  c2d.fillStyle = 'rgba(255,255,255,.8)';
+  c2d.font = '700 52px -apple-system, "Segoe UI", Roboto, sans-serif';
+  c2d.fillText(t('stars', Math.min(3, stars)) + '  ' + stars + ' ★', W2 / 2, 1075);
+  c2d.fillStyle = 'rgba(255,255,255,.6)';
+  c2d.font = '600 40px -apple-system, "Segoe UI", Roboto, sans-serif';
+  c2d.fillText(t('cardCta'), W2 / 2, 1180);
+  c2d.fillStyle = '#7df9ff';
+  c2d.font = '700 36px -apple-system, "Segoe UI", Roboto, sans-serif';
+  c2d.fillText('alamaby.github.io/html5-games/pull-the-pin/', W2 / 2, 1252);
+}
+
+async function shareScore() {
+  sfx.ui();
+  const c = document.createElement('canvas');
+  c.width = 1080; c.height = 1350;
+  drawShareCard(c.getContext('2d'));
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  if (!blob) return;
+  const file = new File([blob], 'pull-the-pin.png', { type: 'image/png' });
+  const lv = progress.stars.filter((s) => s > 0).length;
+  const stars = progress.stars.reduce((a, b) => a + b, 0);
+  const text = t('shareText', { l: lv, s: stars });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Pull the Pin', text });
+      return;
+    }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'pull-the-pin-levels.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ---------- input ----------
+function canvasPos(e) {
+  const r = cv.getBoundingClientRect();
+  const cx = (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX);
+  const cy = (e.touches && e.touches[0] ? e.touches[0].clientY : e.clientY);
+  return { x: (cx - r.left) / r.width * VW, y: (cy - r.top) / r.height * VH };
+}
+function pinHit(p, x, y) {
+  const hx = p.handle === 'r' ? p.x2 + 22 : p.x1 - 22;
+  if (Math.hypot(x - hx, y - p.y) < 34) return true;
+  if (y > p.y - 26 && y < p.y + 26 && x > p.x1 - 10 && x < p.x2 + 10) return true;
+  return false;
+}
+cv.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  if (screen !== 'play' || !st || panel === 'shown') return;
+  if (st.status === 'won' || st.status === 'lost') return;
+  const { x, y } = canvasPos(e);
+  for (let i = 0; i < st.pins.length; i++) {
+    if (st.pins[i].state === 'in' && pinHit(st.pins[i], x, y)) {
+      PP.pullPin(st, i);
+      break;
+    }
+  }
+});
+
+// ---------- buttons ----------
+function syncMuteUI() {
+  const b = $('sndBtn');
+  if (b) b.textContent = isMuted() ? '✕' : '♪';
+}
+$('sndBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const m = !isMuted();
+  try { localStorage.setItem('ppp_mute', m ? '1' : '0'); } catch (err) {}
+  syncMuteUI(); sfx.ui();
+});
+$('langBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  lang = lang === 'en' ? 'id' : 'en';
+  try { localStorage.setItem('ppp_lang', lang); } catch (err) {}
+  applyTexts(); sfx.ui();
+});
+$('trophyBtn').addEventListener('click', (e) => {
+  e.stopPropagation(); sfx.ui(); renderAchGrid(); show($('achGal'));
+});
+$('achGal').addEventListener('pointerdown', (e) => {
+  e.preventDefault(); sfx.ui(); hide($('achGal'));
+});
+$('homeBtn').addEventListener('click', (e) => {
+  e.stopPropagation(); sfx.ui();
+  if (CG.game) { try { CG.game.gameplayStop(); } catch (err) {} }
+  screen = 'menu'; show($('menuEl')); hide($('winEl')); hide($('loseEl'));
+  applyTexts();
+});
+$('retryBtn').addEventListener('click', (e) => {
+  e.stopPropagation(); sfx.ui(); startLevel(levelIdx);
+});
+$('winRetry').addEventListener('click', (e) => { e.stopPropagation(); sfx.ui(); startLevel(levelIdx); });
+$('winNext').addEventListener('click', (e) => {
+  e.stopPropagation(); sfx.ui();
+  if (levelIdx + 1 < 5) startLevel(levelIdx + 1);
+  else { screen = 'menu'; show($('menuEl')); hide($('winEl')); applyTexts(); }
+});
+$('winShare').addEventListener('click', (e) => { e.stopPropagation(); shareScore(); });
+$('menuShare').addEventListener('click', (e) => { e.stopPropagation(); shareScore(); });
+$('loseRetry').addEventListener('click', (e) => { e.stopPropagation(); sfx.ui(); startLevel(levelIdx); });
+$('loseMenu').addEventListener('click', (e) => {
+  e.stopPropagation(); sfx.ui();
+  screen = 'menu'; show($('menuEl')); hide($('loseEl')); applyTexts();
+});
+
+// ---------- boot ----------
+fitCanvas();
+applyTexts();
+show($('menuEl'));
+requestAnimationFrame(frame);
+
+if (typeof module !== 'undefined') {
+  module.exports = { PP, startLevel, drawShareCard, shareScore, unlock,
+    state: () => ({ screen, levelIdx, panel, status: st && st.status }) };
+}
+</script>
+</body>
+</html>
