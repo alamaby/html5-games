@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#12162e">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📌</text></svg>">
 <title>Pull the Pin</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -871,7 +872,6 @@ function applyTexts() {
   $('titleMain').textContent = t('title');
   $('titleSub').textContent = t('subtitle');
   $('menuAchTitle').textContent = t('achievements');
-  $('achGalTitle').textContent = t('achievements');
   $('achClose').textContent = t('tapClose');
   $('langBtn').textContent = lang === 'en' ? 'ID' : 'EN';
   syncMuteUI();
@@ -1045,9 +1045,6 @@ $('homeBtn').addEventListener('click', (e) => {
   if (CG.game) { try { CG.game.gameplayStop(); } catch (err) {} }
   screen = 'menu'; show($('menuEl')); hide($('winEl')); hide($('loseEl'));
   applyTexts();
-});
-$('retryBtn').addEventListener('click', (e) => {
-  e.stopPropagation(); sfx.ui(); startLevel(levelIdx);
 });
 $('winRetry').addEventListener('click', (e) => { e.stopPropagation(); sfx.ui(); startLevel(levelIdx); });
 $('winNext').addEventListener('click', (e) => {

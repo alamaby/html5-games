@@ -68,6 +68,15 @@ function ok(name, cond) { eq(name, !!cond, true); }
 
 eq('boot: menu screen', G.state().screen, 'menu');
 ok('boot: menu visible', !elements['menuEl'].classList.contains('hidden'));
+// every $('id') used in game.js must exist in template.html (regression: retryBtn crash)
+{
+  const tplSrc = fs.readFileSync(DIR + 'template.html', 'utf8');
+  const gameSrc = fs.readFileSync(DIR + 'game.js', 'utf8');
+  const tplIds = new Set([...tplSrc.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const usedIds = new Set([...gameSrc.matchAll(/\$\('([^']+)'\)/g)].map((m) => m[1]));
+  const missing = [...usedIds].filter((id) => !tplIds.has(id));
+  eq('all game.js element ids exist in template', missing, []);
+}
 ok('boot: 5 level cards', (elements['levelGrid']._kids || []).length === 5);
 
 G.startLevel(0);

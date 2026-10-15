@@ -491,7 +491,6 @@ function applyTexts() {
   $('titleMain').textContent = t('title');
   $('titleSub').textContent = t('subtitle');
   $('menuAchTitle').textContent = t('achievements');
-  $('achGalTitle').textContent = t('achievements');
   $('achClose').textContent = t('tapClose');
   $('langBtn').textContent = lang === 'en' ? 'ID' : 'EN';
   syncMuteUI();
@@ -665,9 +664,6 @@ $('homeBtn').addEventListener('click', (e) => {
   if (CG.game) { try { CG.game.gameplayStop(); } catch (err) {} }
   screen = 'menu'; show($('menuEl')); hide($('winEl')); hide($('loseEl'));
   applyTexts();
-});
-$('retryBtn').addEventListener('click', (e) => {
-  e.stopPropagation(); sfx.ui(); startLevel(levelIdx);
 });
 $('winRetry').addEventListener('click', (e) => { e.stopPropagation(); sfx.ui(); startLevel(levelIdx); });
 $('winNext').addEventListener('click', (e) => {
