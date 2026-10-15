@@ -726,9 +726,10 @@ function drawBall(b) {
 }
 
 function drawPin(p, anim) {
-  const slide = anim.t > 0 ? Math.min(1, anim.t / 0.25) : 0;
+  // anim.t is already normalized 0..1 by the frame loop (0.25s duration)
+  const slide = Math.min(1, Math.max(0, anim.t));
   const dir = p.handle === 'r' ? 1 : -1;
-  const off = slide * slide * (VW) * dir;
+  const off = slide * slide * VW * dir;
   const grad = g.createLinearGradient(0, p.y - 7, 0, p.y + 7);
   grad.addColorStop(0, '#d7dce8'); grad.addColorStop(0.5, '#9aa2b5'); grad.addColorStop(1, '#6d7488');
   g.fillStyle = grad;
