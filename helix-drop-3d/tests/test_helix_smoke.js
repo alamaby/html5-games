@@ -36,6 +36,8 @@ const THREE = {
   CylinderGeometry: class { constructor() {} dispose() {} },
   SphereGeometry: class { constructor() {} dispose() {} },
   BoxGeometry: class { constructor() {} dispose() {} },
+  Shape: class { constructor() {} absarc() {} closePath() {} },
+  ExtrudeGeometry: class { constructor() {} rotateX() {} translate() {} dispose() {} },
   MeshStandardMaterial: class { constructor() {} dispose() {} },
   MeshBasicMaterial: class { constructor() {} dispose() {} },
   Clock: class { getDelta() { return 0.016; } },
@@ -48,6 +50,7 @@ function fakeEl(id) {
     classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } },
     addEventListener() {}, offsetWidth: 0,
     setPointerCapture() {},
+    remove() {},
     appendChild(c) { (this._kids = this._kids || []).push(c); },
     removeChild(c) { const k = (this._kids || []).indexOf(c); if (k >= 0) this._kids.splice(k, 1); },
   };
@@ -62,6 +65,7 @@ const sandbox = {
   window: { innerWidth: 390, innerHeight: 844, devicePixelRatio: 2, addEventListener() {} },
   document: {
     getElementById: (id) => elements[id] || (elements[id] = fakeEl(id)),
+    createElement: (tag) => fakeEl(tag),
     addEventListener() {},
     documentElement: { lang: '' },
   },

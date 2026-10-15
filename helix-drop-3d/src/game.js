@@ -124,7 +124,7 @@ window.addEventListener('resize', () => {
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 /* ============================== world ============================== */
-const R_OUT = 3.4, R_COL = 1.15, PLAT_DY = 4, BALL_R = 0.36, BALL_RING = 2.25;
+const R_OUT = 3.4, R_COL = 1.15, R_IN = 1.0, PLAT_DY = 4, BALL_R = 0.36, BALL_RING = 2.25;
 const TAU = Math.PI * 2;
 const tower = new THREE.Group();
 scene.add(tower);
@@ -139,6 +139,21 @@ const platforms = []; // {i, y, group, types, safeMat, killMat}
 const hueFor = (i) => (205 + i * 7) % 360;
 const topY = (p) => p.y + 0.275 + BALL_R;
 
+/* Solid ring-sector geometry (closed on all sides — unlike partial
+   CylinderGeometry, whose radial cut faces are left open and look hollow). */
+function sectorGeo(s) {
+  const seg = TAU / HDLogic.SECTORS;
+  const a0 = s * seg - Math.PI / 2, a1 = (s + 1) * seg - Math.PI / 2;
+  const shape = new THREE.Shape();
+  shape.absarc(0, 0, R_OUT, a0, a1, false);
+  shape.absarc(0, 0, R_IN, a1, a0, true);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.55, bevelEnabled: false, curveSegments: 8 });
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, -0.275, 0);
+  return geo;
+}
+
 function makePlatform(i) {
   const types = HDLogic.genPlatform(i, Math.random);
   const y = -i * PLAT_DY;
@@ -150,11 +165,9 @@ function makePlatform(i) {
   const killMat = new THREE.MeshStandardMaterial({
     color: 0xff2d55, roughness: 0.4, emissive: 0x550008, emissiveIntensity: 0.6,
   });
-  const seg = TAU / HDLogic.SECTORS;
   for (let s = 0; s < HDLogic.SECTORS; s++) {
     if (types[s] === 'gap') continue;
-    const geo = new THREE.CylinderGeometry(R_OUT, R_OUT, 0.55, 7, 1, false, s * seg, seg);
-    group.add(new THREE.Mesh(geo, types[s] === 'kill' ? killMat : safeMat));
+    group.add(new THREE.Mesh(sectorGeo(s), types[s] === 'kill' ? killMat : safeMat));
   }
   tower.add(group);
   const p = { i, y, group, types, safeMat, killMat };
@@ -249,12 +262,12 @@ function onLandSafe(p, passedCount) {
   curIndex = p.i;
   ballY = topY(p);
   vy = BOUNCE_V;
-  score += passedCount;
+  addScore(passedCount);
   fallPass += passedCount;
   spawnBurst(0, ballY - BALL_R, BALL_RING, new THREE.Color('hsl(' + hueFor(p.i) + ',80%,62%)').getHex(), 7, 4);
   if (fallPass >= 3) {
     const bonus = HDLogic.fallScore(fallPass) - fallPass;
-    score += bonus;
+    addScore(bonus);
     showCombo(fallPass);
     sfx.combo(fallPass);
   } else {
@@ -316,14 +329,13 @@ function stepPlay(dt) {
     }
   }
   if (landed) {
-    if (landed.sec === 'kill') { score += passed.length; die(); return; }
+    if (landed.sec === 'kill') { addScore(passed.length); die(); return; }
     onLandSafe(landed.p, passed.length);
   } else if (passed.length) {
     // still falling through gaps — count when we eventually land or die
-    score += passed.length;
+    addScore(passed.length);
     fallPass += passed.length;
     for (const p of passed) sfx.pass();
-    updateScoreHud();
   }
 
   // Safety: ball fell below all generated platforms (shouldn't happen) — extend.
@@ -336,7 +348,29 @@ const menuEl = $('menu'), overEl = $('over'), scoreEl = $('score'), comboEl = $(
 const show = (el) => el.classList.remove('hidden');
 const hide = (el) => el.classList.add('hidden');
 
-function updateScoreHud() { scoreEl.textContent = score; }
+function updateScoreHud() {
+  scoreEl.textContent = score;
+  scoreEl.classList.remove('pulse');
+  void scoreEl.offsetWidth;
+  scoreEl.classList.add('pulse');
+}
+
+/* Central scoring: HUD pulse + floating "+n" at every increment. */
+function addScore(n) {
+  if (!n) return;
+  score += n;
+  updateScoreHud();
+  showPass(n);
+}
+
+function showPass(n) {
+  const d = document.createElement('div');
+  d.className = 'passpop';
+  d.textContent = '+' + n;
+  d.style.left = (50 + (Math.random() * 12 - 6)) + '%';
+  $('passLayer').appendChild(d);
+  setTimeout(() => d.remove(), 900);
+}
 
 function showCombo(n) {
   comboEl.textContent = t('combo')(n);

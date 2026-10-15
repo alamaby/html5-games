@@ -37,6 +37,15 @@
          padding-top:max(14px, env(safe-area-inset-top)); pointer-events:none; }
   #score { font-size:52px; font-weight:900; color:#fff; text-shadow:0 2px 18px rgba(120,110,255,.6);
            font-variant-numeric:tabular-nums; }
+  #score.pulse { animation:scorePulse .3s ease-out; }
+  @keyframes scorePulse { 0%{transform:scale(1);} 40%{transform:scale(1.18);} 100%{transform:scale(1);} }
+  #passLayer { position:fixed; inset:0; pointer-events:none; z-index:6; overflow:hidden; }
+  .passpop { position:absolute; top:38%; transform:translateX(-50%); font-size:26px; font-weight:900;
+             color:#7df9ff; text-shadow:0 0 14px rgba(125,249,255,.8);
+             animation:floatUp .85s ease-out forwards; }
+  @keyframes floatUp { 0%{opacity:0; transform:translate(-50%,12px) scale(.7);}
+                      20%{opacity:1; transform:translate(-50%,0) scale(1.12);}
+                      100%{opacity:0; transform:translate(-50%,-48px) scale(1);} }
   #comboPop { position:fixed; top:22%; left:0; right:0; text-align:center; z-index:6;
               font-size:34px; font-weight:900; letter-spacing:3px; color:#ffd76a;
               text-shadow:0 0 22px rgba(255,180,60,.8); opacity:0; pointer-events:none; }
@@ -66,6 +75,7 @@
 <div id="c"></div>
 
 <div id="hud"><div id="score">0</div></div>
+<div id="passLayer"></div>
 <div id="comboPop"></div>
 
 <div class="corner" id="topLeft"><button class="iconbtn" id="langBtn">ID</button></div>
