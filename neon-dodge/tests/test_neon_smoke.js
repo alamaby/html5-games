@@ -16,10 +16,12 @@ const els = {};
 function makeEl() {
   return {
     textContent: '', innerHTML: '',
+    _handlers: {},
     classList: { _s: new Set(['hidden']),
       add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } },
     style: {},
-    addEventListener() {},
+    addEventListener(ev, fn) { (this._handlers[ev] = this._handlers[ev] || []).push(fn); },
+    fire(ev, e) { (this._handlers[ev] || []).forEach((fn) => fn(e || { preventDefault() {}, stopPropagation() {} })); },
   };
 }
 global.document = {
@@ -57,7 +59,7 @@ global.File = function () {};
 // canvas 2d context for the real canvas element
 els.game = makeEl();
 els.game.getContext = () => stub2d();
-els.game.addEventListener = () => {};
+els.game.getBoundingClientRect = () => ({ left: 0, top: 0, width: 420, height: 740 });
 els.game.style = {};
 
 // ---- load sources ----
@@ -116,7 +118,21 @@ let G;
   eq('menu hidden', els.menuEl.classList.contains('hidden'), true);
 }
 
-// 6. language toggle applies ID strings
+// 5b. REGRESSION: tapping the menu overlay must start the game
+// (the overlay covers the canvas and eats pointer events)
+{
+  const fresh = (function () {
+    const mod = { exports: {} };
+    const fn = new Function('module', 'exports', 'require', 'window', 'document', 'navigator',
+      'requestAnimationFrame', 'localStorage', 'setTimeout', 'URL', 'File',
+      logicSrc + '\n' + gameSrc + '\nreturn module.exports;');
+    return fn(mod, mod.exports, require, global.window, global.document, global.navigator,
+      global.requestAnimationFrame, global.localStorage, global.setTimeout, global.URL, global.File);
+  })();
+  eq('menu visible before tap', fresh.state().screen, 'menu');
+  els.menuEl.fire('pointerdown', { preventDefault() {}, stopPropagation() {}, clientX: 210, clientY: 400 });
+  eq('menu tap starts game', fresh.state().screen, 'play');
+}
 {
   G.applyTexts();
   els.langBtn.textContent; // noop, just exists

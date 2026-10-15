@@ -511,18 +511,20 @@ function canvasPos(e) {
   return { x: (cx - r.left) / r.width * VW, y: (cy - r.top) / r.height * VH };
 }
 let dragging = false;
+// menu overlay covers the whole canvas and eats pointer events — it needs its own start tap
+$('menuEl').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  if (screen !== 'menu' || !$('overEl').classList.contains('hidden')) return;
+  ac(); // unlock audio on first gesture
+  sfx.ui();
+  newGame();
+  const { x, y } = canvasPos(e);
+  ND.setTarget(st, x, y);
+  dragging = true;
+});
 cv.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   ac(); // unlock audio on first gesture
-  if (screen === 'menu') {
-    if (!$('overEl').classList.contains('hidden')) return; // over panel handles itself
-    sfx.ui();
-    newGame();
-    const { x, y } = canvasPos(e);
-    ND.setTarget(st, x, y);
-    dragging = true;
-    return;
-  }
   if (screen === 'play' && st && st.status === 'play') {
     const { x, y } = canvasPos(e);
     ND.setTarget(st, x, y);
