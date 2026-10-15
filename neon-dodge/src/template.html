@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a1e">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>">
+<title>Neon Dodge</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#07070f; }
+  body { display:flex; align-items:center; justify-content:center;
+         font-family:-apple-system,"Segoe UI",Roboto,sans-serif; color:#fff;
+         touch-action:none; user-select:none; -webkit-user-select:none; }
+  #wrap { position:relative; }
+  canvas { display:block; border-radius:14px; box-shadow:0 12px 60px rgba(0,229,255,.12); }
+  .hidden { display:none !important; }
+
+  .corner { position:absolute; top:max(10px, env(safe-area-inset-top)); z-index:10; display:flex; gap:8px; }
+  #topLeft { left:10px; } #topRight { right:10px; }
+  .iconbtn { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18);
+             background:rgba(10,14,32,.55); color:#fff; font-size:20px; cursor:pointer;
+             display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
+  .iconbtn:active { transform:scale(.92); }
+  #hud { position:absolute; top:max(10px, env(safe-area-inset-top)); left:0; right:0; z-index:5;
+         text-align:center; pointer-events:none; }
+  #hudScore { font-size:44px; font-weight:900; color:#d8fbff;
+              text-shadow:0 0 18px rgba(125,249,255,.7); font-variant-numeric:tabular-nums; }
+
+  .overlay { position:absolute; inset:0; z-index:20; display:flex; flex-direction:column;
+             align-items:center; justify-content:center; text-align:center;
+             background:rgba(6,6,16,.78); backdrop-filter:blur(3px); border-radius:14px; padding:20px; }
+  .kicker { font-size:13px; letter-spacing:4px; color:#8a93b8; font-weight:700; }
+  .bigtitle { font-size:46px; font-weight:900; letter-spacing:2px; margin:10px 0 4px;
+              color:#d8fbff; text-shadow:0 0 30px rgba(125,249,255,.8); }
+  .subtitle { color:#aab4d8; font-size:15px; margin-bottom:18px; }
+  .howto { display:flex; flex-direction:column; gap:8px; margin:2px 0 20px; max-width:330px; }
+  .hrow { font-size:14.5px; color:#cdd6f4; background:rgba(255,255,255,.05);
+          border:1px solid rgba(125,249,255,.25); padding:9px 14px; border-radius:12px; line-height:1.45; }
+  .hrow b { color:#fff; }
+  .tap { font-size:19px; font-weight:800; letter-spacing:2px; color:#7df9ff;
+         text-shadow:0 0 14px rgba(125,249,255,.6); animation:blink 1.4s infinite; }
+  @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:.45;} }
+  #menuBest, #overTime { color:#ffd76a; font-weight:700; letter-spacing:1px; margin-top:10px; font-size:15px; }
+  #overScore { font-size:84px; font-weight:900; color:#d8fbff; margin:4px 0;
+               text-shadow:0 0 30px rgba(125,249,255,.8); font-variant-numeric:tabular-nums; }
+  #overNewBest, #overAch { min-height:22px; font-weight:700; color:#ffd76a; font-size:14px; }
+  .shareBtn { margin-top:14px; background:linear-gradient(135deg,#7df9ff,#4aa8ff); color:#0b1020;
+              border:none; border-radius:14px; padding:12px 34px; font-size:16px; font-weight:800;
+              letter-spacing:2px; cursor:pointer; }
+  .shareBtn:active { transform:scale(.95); }
+
+  #achToast { position:absolute; top:calc(76px + env(safe-area-inset-top)); left:50%;
+              transform:translate(-50%,-16px); z-index:30; display:flex; gap:10px; align-items:center;
+              background:rgba(20,26,52,.94); border:1px solid rgba(255,215,106,.45);
+              border-radius:14px; padding:10px 16px 10px 12px; opacity:0; transition:all .3s ease;
+              pointer-events:none; max-width:86%; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  #achToast.show { opacity:1; transform:translate(-50%,0); }
+  #achToast .ticon { font-size:26px; }
+  #achToast .tname { font-weight:800; font-size:14px; color:#ffd76a; }
+  #achToast .tdesc { font-size:12px; color:#cdd6f4; }
+  .achgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; max-width:340px; margin-top:14px; }
+  .achcard { background:rgba(255,255,255,.06); border:1px solid rgba(255,215,106,.35);
+             border-radius:12px; padding:10px 6px; }
+  .achcard .aicon { font-size:26px; }
+  .achcard .aname { font-size:11.5px; font-weight:800; color:#ffd76a; margin-top:4px; }
+  .achcard .adesc { font-size:10px; color:#aab4d8; margin-top:2px; line-height:1.35; }
+  .achcard.locked { opacity:.38; filter:grayscale(.9); border-color:rgba(255,255,255,.12); }
+  .achcard.locked .aname { color:#8a93b8; }
+  .tap2 { margin-top:18px; color:#8a93b8; font-size:13px; letter-spacing:2px; font-weight:700; }
+  .foot { position:absolute; bottom:max(10px, env(safe-area-inset-bottom)); left:0; right:0;
+          text-align:center; font-size:11px; letter-spacing:3px; color:rgba(170,180,216,.5); z-index:5; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="420" height="740"></canvas>
+
+  <div class="corner" id="topLeft"><button class="iconbtn" id="langBtn">ID</button></div>
+  <div class="corner" id="topRight">
+    <button class="iconbtn" id="trophyBtn">🏆</button><button class="iconbtn" id="sndBtn">♪</button>
+  </div>
+  <div id="hud"><div id="hudScore">0</div></div>
+
+  <div id="achToast"></div>
+
+  <div class="overlay" id="menuEl">
+    <div class="kicker">NEON ARCADE</div>
+    <div class="bigtitle" id="titleMain"></div>
+    <div class="subtitle" id="titleSub"></div>
+    <div class="howto" id="howto"></div>
+    <div class="tap" id="tapStart"></div>
+    <div id="menuBest"></div>
+  </div>
+
+  <div class="overlay hidden" id="overEl">
+    <div class="kicker" id="overKicker"></div>
+    <div id="overScore">0</div>
+    <div id="overTime"></div>
+    <div id="overNewBest"></div>
+    <div id="overAch"></div>
+    <button id="shareBtn" class="shareBtn"></button>
+    <div class="tap" id="tapRetry" style="margin-top:16px;"></div>
+  </div>
+
+  <div class="overlay hidden" id="achGal">
+    <div class="kicker" id="achGalTitle"></div>
+    <div class="achgrid" id="achGrid"></div>
+    <div class="tap2" id="achClose"></div>
+  </div>
+
+  <div class="foot">NEON DODGE</div>
+</div>
+
+<script>/*__LOGIC_INLINE__*/</script>
+<script>/*__GAME_INLINE__*/</script>
+</body>
+</html>
