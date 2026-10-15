@@ -127,7 +127,9 @@ const PP = {
   step(st, dt) {
     if (st.status === 'won' || st.status === 'lost') return;
     st.time += dt;
-    st.events.length = 0;
+    // NOTE: do NOT clear st.events here — external events (e.g. 'pinpull' from
+    // the tap handler) are pushed between frames and must survive until drained.
+    // drainEvents() in game.js clears the queue after processing.
     const h = dt / 3;
     for (let s = 0; s < 3; s++) PP.substep(st, h);
     // win / lose evaluation

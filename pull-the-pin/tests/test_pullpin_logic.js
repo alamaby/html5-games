@@ -58,6 +58,15 @@ PP.LEVELS.forEach((L, i) => {
   eq('pullPin twice returns false', PP.pullPin(st, 0), false);
 }
 
+// pinpull event must survive PP.step (frame order: tap -> step -> drainEvents).
+// Regression: step() used to wipe st.events, killing the pin slide animation.
+{
+  const st = PP.createGame(0);
+  PP.pullPin(st, 0);
+  PP.step(st, 1 / 60);
+  ok('pinpull event survives step', st.events.some((e) => e.t === 'pinpull'));
+}
+
 // bomb in cup = instant loss
 {
   const st = PP.createGame(0);
