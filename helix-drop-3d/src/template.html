@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Helix Drop 3D</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#0b1020; }
+  body { font-family:'Segoe UI', system-ui, -apple-system, sans-serif; color:#fff;
+         touch-action:none; user-select:none; -webkit-user-select:none; }
+  #c { position:fixed; inset:0; }
+  #c canvas { display:block; }
+
+  .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+             justify-content:center; z-index:10; text-align:center; padding:24px;
+             background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88));
+             transition:opacity .35s ease; }
+  .overlay.hidden { opacity:0; pointer-events:none; }
+  .kicker { font-size:13px; letter-spacing:6px; color:#8a9bff; margin-bottom:10px; font-weight:600; }
+  h1.title { font-size:clamp(44px, 13vw, 76px); font-weight:900; line-height:.95; letter-spacing:2px;
+             background:linear-gradient(180deg,#7df9ff,#4f7cff 55%,#c44fff);
+             -webkit-background-clip:text; background-clip:text; color:transparent;
+             filter:drop-shadow(0 4px 24px rgba(120,110,255,.45)); margin-bottom:6px; }
+  .subtitle { color:#aab4d8; font-size:15px; margin:10px 0 26px; max-width:320px; line-height:1.5; }
+  .best { font-size:15px; color:#ffd76a; letter-spacing:2px; margin-bottom:22px; font-weight:700; }
+  .tap { font-size:20px; font-weight:800; letter-spacing:4px; color:#fff;
+         animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1; transform:scale(1);} 50%{opacity:.55; transform:scale(.97);} }
+
+  #hud { position:fixed; top:0; left:0; right:0; z-index:5; display:flex; justify-content:center;
+         padding-top:max(14px, env(safe-area-inset-top)); pointer-events:none; }
+  #score { font-size:52px; font-weight:900; color:#fff; text-shadow:0 2px 18px rgba(120,110,255,.6);
+           font-variant-numeric:tabular-nums; }
+  #comboPop { position:fixed; top:22%; left:0; right:0; text-align:center; z-index:6;
+              font-size:34px; font-weight:900; letter-spacing:3px; color:#ffd76a;
+              text-shadow:0 0 22px rgba(255,180,60,.8); opacity:0; pointer-events:none; }
+  #comboPop.show { animation:pop .9s ease-out; }
+  @keyframes pop { 0%{opacity:0; transform:scale(.5);} 18%{opacity:1; transform:scale(1.15);}
+                   35%{transform:scale(1);} 75%{opacity:1;} 100%{opacity:0; transform:scale(1) translateY(-14px);} }
+
+  #overScore { font-size:84px; font-weight:900; line-height:1; margin:6px 0;
+               text-shadow:0 4px 30px rgba(120,110,255,.5); font-variant-numeric:tabular-nums; }
+  #newBest { color:#ffd76a; font-weight:800; letter-spacing:3px; font-size:16px; margin-bottom:8px;
+             min-height:22px; }
+  #overBest { color:#aab4d8; letter-spacing:2px; font-size:14px; margin-bottom:26px; }
+
+  .corner { position:fixed; z-index:20; display:flex; gap:10px;
+            top:max(12px, env(safe-area-inset-top)); }
+  #topLeft { left:12px; } #topRight { right:12px; }
+  .iconbtn { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18);
+             background:rgba(15,22,45,.72); color:#fff; font-size:15px; font-weight:800;
+             display:flex; align-items:center; justify-content:center; cursor:pointer;
+             backdrop-filter:blur(6px); }
+  .iconbtn:active { transform:scale(.92); }
+  .foot { position:fixed; bottom:max(10px, env(safe-area-inset-bottom)); left:0; right:0;
+          text-align:center; font-size:11px; letter-spacing:3px; color:rgba(170,180,216,.5); z-index:5; }
+</style>
+</head>
+<body>
+<div id="c"></div>
+
+<div id="hud"><div id="score">0</div></div>
+<div id="comboPop"></div>
+
+<div class="corner" id="topLeft"><button class="iconbtn" id="langBtn">ID</button></div>
+<div class="corner" id="topRight"><button class="iconbtn" id="sndBtn">♪</button></div>
+
+<div class="overlay" id="menu">
+  <div class="kicker">ALAMABY · HTML5</div>
+  <h1 class="title">HELIX<br>DROP 3D</h1>
+  <div class="subtitle" id="menuHint"></div>
+  <div class="best" id="menuBest"></div>
+  <div class="tap" id="tapStart"></div>
+</div>
+
+<div class="overlay hidden" id="over">
+  <div class="kicker" id="overKicker"></div>
+  <div id="newBest"></div>
+  <div id="overScore">0</div>
+  <div id="overBest"></div>
+  <div class="tap" id="tapRetry"></div>
+</div>
+
+<div class="foot">HELIX DROP 3D</div>
+
+<script>/*__THREE_INLINE__*/</script>
+<script>/*__LOGIC_INLINE__*/</script>
+<script>/*__GAME_INLINE__*/</script>
+</body>
+</html>

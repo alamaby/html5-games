@@ -12,8 +12,8 @@ Stack blocks to the sky in Tower Rush! Tap to drop each sliding block onto the t
 Tap or click anywhere to drop the block. Time your taps to land perfect drops and build combos. The tower gets faster the higher you go — one miss ends the run!
 ```
 
-### Tags (suggested)
-Arcade, Hypercasual, Stacking, 1 Player, Mobile, Timing, Puzzle
+### Tags (max 5 — pick from the portal's predefined list)
+Arcade, Hypercasual, Timing, Puzzle, 1 Player
 
 ## Assets
 | Asset | File | Spec |
