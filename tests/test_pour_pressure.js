@@ -71,6 +71,9 @@ const driver = `
 ;globalThis.__PP = window.__PP_TEST__;
 ;globalThis.__PPD = {
   showOrder, showShifts, startBrew, finishOrder, shareCard, simUpdate,
+  inputDown, inputUp, inputMove,
+  press(pid, x, y, t) { inputDown({ pointerId: pid, clientX: x, clientY: y, timeStamp: t, cancelable: true, preventDefault() {} }); },
+  release(pid) { inputUp({ pointerId: pid }); },
   setShiftOrder(si, oi) { curShift = si; curOrder = oi; },
   setSim(patch) { if (S) Object.assign(S, patch); },
   pokeLastMT(v) { lastMT = v; },
@@ -383,6 +386,34 @@ eq('no double unlock', T.unlockAch('sweet_spot'), false);
   T.TUT.skip();
 
   ok('menu tutorial replay button wired', !!elements['menuTutBtn']);
+
+  // ---- regression: finger held through bloom_wait → extract keeps pouring ----
+  // (reported 2026-10-16: game went dead in level 1 when the finger never
+  // lifted — pourOn was cleared at the bloom_wait transition and never restored)
+  console.log('— pour handoff');
+  T.saveGet().tutorialDone = true;
+  T.saveGet().stars = {}; T.saveGet().unlocked = 1; T.saveGet().ach = {};
+  D.setShiftOrder(0, 0);
+  D.startBrew(); // bloom_pour, real order (not tutorial)
+  D.press(7, 195, 700, 1000); // finger down, pouring
+  eq('pouring on press', D.simState().pourOn, true);
+  let guard = 0; // pour in 1s steps until the bloom meter fills (finger STILL down)
+  while (D.simState().mode === 'bloom_pour' && guard++ < 30) D.simUpdate(1);
+  eq('reached bloom_wait while holding', D.simState().mode, 'bloom_wait');
+  guard = 0; // through the 8s wait, still holding
+  while (D.simState().mode === 'bloom_wait' && guard++ < 30) D.simUpdate(1);
+  eq('reached extract', D.simState().mode, 'extract');
+  eq('pour resumes with finger held through transition', D.simState().pourOn, true);
+  const wBefore = D.simState().W;
+  D.simUpdate(2);
+  ok('water rises while held', D.simState().W > wBefore + 10);
+  D.release(7);
+  D.simUpdate(0.5);
+  eq('pour stops on release', D.simState().pourOn, false);
+  // and the normal path (fresh press in extract) still works
+  D.press(7, 195, 700, 50000);
+  eq('fresh press pours', D.simState().pourOn, true);
+  D.release(7);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

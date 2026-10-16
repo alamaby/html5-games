@@ -732,6 +732,10 @@ function simUpdate(dt) {
     }
     if (o.bloomT <= 0) {
       o.mode = 'extract'; mode = 'extract'; refreshTpHint();
+      // A finger already resting on the touchpad keeps pouring across the
+      // transition — otherwise the game goes dead until the player lifts
+      // and re-touches (pourOn was cleared when bloom_wait began).
+      if (activePid !== null) { o.pourOn = true; o.v = 0; }
       if (tutorialMode && tutStep === 1) { tutStep = 2; coachShow(2, 'tut2_coach'); tutChrome(); }
     }
   }
