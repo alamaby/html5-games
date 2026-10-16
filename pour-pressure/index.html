@@ -506,6 +506,7 @@ const ACHIEVEMENTS = [
              id: 'Selesaikan order <60 dtk dengan ★★ atau lebih.' } },
 ];
 function unlockAch(id) {
+  if (tutorialMode) return false; // tutorial = practice mode: no achievements, ever
   if (save.ach[id]) return false;
   save.ach[id] = 1; persist();
   const a = ACHIEVEMENTS.find(x => x.id === id);
@@ -1332,7 +1333,6 @@ function finishTutorial() {
   $('touchpad').classList.add('hidden');
   coachHide();
   CG.gameplayStop();
-  if (S.E >= 18 && S.E <= 22) unlockAch('sweet_spot');
   const f0 = flavorAt(S.E), R = S.W / CONFIG.DOSE;
   const flav = applyPenalties(
     { acidity: f0.acidity, sweetness: f0.sweetness, bitterness: f0.bitterness,

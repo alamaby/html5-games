@@ -272,6 +272,7 @@ eq('no double unlock', T.unlockAch('sweet_spot'), false);
   // hermetic: earlier (non-tutorial) tests may have scored real orders —
   // tutorial "fresh player" assertions need a clean progress slate.
   T.saveGet().stars = {}; T.saveGet().unlocked = 1;
+  T.saveGet().ach = {};
   T.saveGet().tutorialDone = false;
   T.TUT.brewPress();
   eq('first PLAY → tutorial starts', T.TUT.active, true);
@@ -294,6 +295,7 @@ eq('no double unlock', T.unlockAch('sweet_spot'), false);
   eq('coach switches to tut1_done', elements['coachText'].textContent, T.t('tut1_done'));
   D.simUpdate(4.9);
   eq('extract after tutorial bloom', D.simState().mode, 'extract');
+  eq('no first_bloom achievement in tutorial', T.saveGet().ach['first_bloom'] || 0, 0);
   eq('step 2 reached', T.TUT.step, 2);
   eq('step 2 coach', elements['coachText'].textContent, T.t('tut2_coach'));
 
@@ -329,6 +331,7 @@ eq('no double unlock', T.unlockAch('sweet_spot'), false);
   eq('start-shift button labeled', elements['tutStartBtn'].textContent, T.t('tut3_start'));
   T.TUT.finish();
   eq('completing tutorial sets tutorialDone', T.saveGet().tutorialDone, true);
+  eq('tutorial awards zero achievements', Object.keys(T.saveGet().ach).length, 0);
   eq('lands on shift 1 order 1', T.getShiftOrder(), [0, 0]);
   eq('order card shown', D.getMode(), 'order');
 
