@@ -105,6 +105,29 @@
   .help-lines div { margin-bottom:10px; }
   .foot { position:fixed; left:0; right:0; bottom:max(10px, env(safe-area-inset-bottom));
           text-align:center; font-size:11px; letter-spacing:3px; opacity:.35; z-index:5; pointer-events:none; }
+  /* ---- Tutorial (§13): coach overlay above canvas, never blocks the touchpad ---- */
+  #coach { position:fixed; inset:0; z-index:8; pointer-events:none; }
+  #coach.hidden { display:none; }
+  #coachBubble { position:absolute; top:21%; left:50%; transform:translateX(-50%);
+                 max-width:88vw; background:rgba(30,20,12,.93); border:1px solid rgba(255,224,138,.55);
+                 border-radius:14px; padding:10px 16px; font-size:14px; font-weight:700;
+                 text-align:center; line-height:1.5; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  #coachStep { font-size:11px; letter-spacing:2px; color:#ffe08a; opacity:.85; margin-bottom:4px; }
+  #skipBtn { position:absolute; top:calc(max(52px, env(safe-area-inset-top)) + 4px); right:12px;
+             pointer-events:auto; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.25);
+             color:#f5e9d6; font-size:12px; font-weight:800; letter-spacing:1px; padding:8px 14px;
+             border-radius:20px; cursor:pointer; backdrop-filter:blur(6px); }
+  #skipBtn:active { transform:scale(.94); }
+  #touchpad.pulse { animation:tpPulse 1.1s ease-in-out infinite; }
+  @keyframes tpPulse {
+    0%,100% { box-shadow:inset 0 0 0 0 rgba(255,224,138,0); border-top-color:rgba(255,179,92,.45); }
+    50%     { box-shadow:inset 0 0 60px 10px rgba(255,224,138,.35); border-top-color:#ffe08a; }
+  }
+  #stopBtn.pulseBtn { animation:btnPulse .9s ease-in-out infinite; }
+  @keyframes btnPulse {
+    0%,100% { transform:scale(1); box-shadow:0 6px 24px rgba(224,78,42,.45); }
+    50%     { transform:scale(1.07); box-shadow:0 6px 34px rgba(120,220,120,.85); }
+  }
 </style>
 </head>
 <body>
@@ -124,6 +147,7 @@
   <button class="bigBtn" id="brewBtn"></button><br>
   <button class="ghostBtn" id="menuAchBtn">🏆 <span id="menuAchLabel"></span></button>
   <button class="ghostBtn" id="menuHelpBtn">❓ <span id="menuHelpLabel"></span></button>
+  <button class="ghostBtn" id="menuTutBtn">📖 <span id="menuTutLabel"></span></button>
   <p style="margin-top:14px; font-size:12px; opacity:.6;" id="menuStats"></p>
 </div>
 
@@ -160,6 +184,14 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="tutDoneOverlay">
+  <div class="ocard">
+    <canvas id="tutRadar" width="240" height="240" style="width:200px;height:200px;"></canvas>
+    <p id="tutRadarCoach" style="margin:12px 0 4px;"></p>
+    <button class="bigBtn" id="tutStartBtn"></button>
+  </div>
+</div>
+
 <div class="overlay hidden" id="shiftDoneOverlay">
   <h1 id="sdTitle" style="font-size:32px;"></h1>
   <div id="sdStars" style="font-size:40px; margin:8px 0;"></div>
@@ -180,6 +212,10 @@
   <button class="ghostBtn" id="helpBack"></button>
 </div>
 
+<div id="coach" class="hidden">
+  <div id="coachBubble"><div id="coachStep"></div><div id="coachText"></div></div>
+  <button id="skipBtn"></button>
+</div>
 <div id="toast" class="hidden"></div>
 <div class="foot">POUR &amp; PRESSURE</div>
 
@@ -215,6 +251,11 @@ const CONFIG = {
   TECH_RMIN: 0.15, TECH_RMAX: 0.85, // technique "good" radius window (fraction of Rd)
   AXIS_TOL: 12,        // default scoring tolerance per axis
   STAR3: 85, STAR2: 70, STAR1: 50, // star thresholds on total score
+  // Tutorial tuning (DESIGN-MVP.md §13) — same single-point rule as everything above.
+  TUT_BLOOM_WAIT: 5,   // sec — shortened bloom wait in tutorial step 1
+  TUT_STEP2_TIME: 15,  // sec — pour time required in tutorial step 2
+  TUT_STEP2_TECH: 60,  // % — technique required in tutorial step 2
+  TUT_STEP2_E: 12,     // % — alt completion: reach this extraction in step 2
 };
 
 /* ============================ I18N ============================ */
@@ -242,6 +283,15 @@ en: {
   helpL3: '3. EXTRACTION: swirl in a spiral. STOP in the 18–22% sweet spot to match the customer radar.',
   helpL4: '4. Never park the stream (channeling!) and never thrash it (too rough!). Watch the numbers, not just the color.',
   shiftStars: '{s}/12 stars',
+  tut_skip: 'SKIP ⏭', tut_menu: 'TUTORIAL', tut_step: 'TUTORIAL {a} / 3',
+  tut1_coach: 'Hold your finger here to pour.',
+  tut1_done: 'Nice! Let the bloom finish…',
+  tut2_coach: "Swirl your finger in a spiral. Don't stay in one spot!",
+  tut2_warn_channel: 'That was channeling! The coffee turns sour AND bitter.',
+  tut2_warn_agitation: 'Too rough! The coffee turns astringent.',
+  tut3_coach: 'Watch the extraction %. Hit STOP in the green zone (18–22%)!',
+  tut3_radar: "This is your flavor radar. Each customer has their own target — match it!",
+  tut3_start: 'START SHIFT 1',
 },
 id: {
   tagline: 'Seduh dengan sentuhan. Setiap milidetik jarimu mengubah kimia di dalam cangkir.',
@@ -266,6 +316,15 @@ id: {
   helpL3: '3. EKSTRAKSI: putar spiral. STOP di sweet spot 18–22% agar cocok dengan radar pelanggan.',
   helpL4: '4. Jangan diam di satu titik (channeling!) dan jangan terlalu kasar! Perhatikan angkanya, bukan cuma warnanya.',
   shiftStars: '{s}/12 bintang',
+  tut_skip: 'LEWATI ⏭', tut_menu: 'TUTORIAL', tut_step: 'TUTORIAL {a} / 3',
+  tut1_coach: 'Tahan jarimu di sini untuk menuang air.',
+  tut1_done: 'Bagus! Tunggu blooming selesai…',
+  tut2_coach: 'Putar jarimu seperti spiral. Jangan diam di satu titik!',
+  tut2_warn_channel: 'Itu channeling! Kopi jadi asam sekaligus pahit.',
+  tut2_warn_agitation: 'Terlalu kasar! Kopi jadi sepat.',
+  tut3_coach: 'Awasi % ekstraksi. Tekan STOP saat masuk zona hijau (18–22%)!',
+  tut3_radar: 'Ini radar rasamu. Nanti tiap pelanggan punya target sendiri — cocokkan!',
+  tut3_start: 'MULAI SHIFT 1',
 },
 };
 let lang = 'en';
@@ -289,7 +348,8 @@ function getLang() { return lang; }
 /* ============================ SAVE ============================ */
 const SAVE_KEY = 'pp_save_v1';
 function defaultSave() {
-  return { lang: 'en', muted: false, unlocked: 1, stars: {}, coins: 0, ach: {}, bestTech: 0 };
+  return { lang: 'en', muted: false, unlocked: 1, stars: {}, coins: 0, ach: {}, bestTech: 0,
+           tutorialDone: false };
 }
 let save = defaultSave();
 function loadSave() {
@@ -631,6 +691,9 @@ function simUpdate(dt) {
       o.chanMarks.push({ x: o.cx, y: o.cy });
       o.shakeT = 0.3; flashWarn('chanWarn'); buzz(30);
       if (o.chanEvents >= 3) unlockAch('channel_chaos');
+      if (tutorialMode && tutStep === 2 && !tutWarnedChan) {
+        tutWarnedChan = true; coachSay('tut2_warn_channel', 4);
+      }
     }
     o.agitNow = (o.v > CONFIG.AGIT_V || o.r > CONFIG.WALL_R * o.Rd);
     if (o.agitNow) {
@@ -638,6 +701,9 @@ function simUpdate(dt) {
       o.shakeT = Math.max(o.shakeT, 0.12);
       flashWarn('roughWarn');
       if (o.G >= 1) { unlockAch('astringent'); buzz([30, 50, 30]); }
+      if (tutorialMode && tutStep === 2 && !tutWarnedAgit) {
+        tutWarnedAgit = true; coachSay('tut2_warn_agitation', 4);
+      }
     }
     // 6. Technique
     o.pourT += dt;
@@ -647,8 +713,10 @@ function simUpdate(dt) {
   // bloom transitions (module `mode` tracks S.mode so finishOrder()'s guard works)
   if (o.mode === 'bloom_pour' && o.W >= CONFIG.BLOOM_WATER) {
     o.mode = 'bloom_wait'; mode = 'bloom_wait';
-    o.bloomT = CONFIG.BLOOM_WAIT; o.pourOn = false;
+    o.bloomT = (tutorialMode && tutStep === 1) ? CONFIG.TUT_BLOOM_WAIT : CONFIG.BLOOM_WAIT;
+    o.pourOn = false;
     unlockAch('first_bloom'); refreshTpHint();
+    if (tutorialMode && tutStep === 1) { coachShow(1, 'tut1_done'); tutChrome(); }
   }
   if (o.mode === 'bloom_wait') {
     o.bloomT -= dt; o.blipT -= dt;
@@ -661,7 +729,10 @@ function simUpdate(dt) {
       const b = o.bubbles[i]; b.life -= dt; b.y -= dt * 12;
       if (b.life <= 0) o.bubbles.splice(i, 1);
     }
-    if (o.bloomT <= 0) { o.mode = 'extract'; mode = 'extract'; refreshTpHint(); }
+    if (o.bloomT <= 0) {
+      o.mode = 'extract'; mode = 'extract'; refreshTpHint();
+      if (tutorialMode && tutStep === 1) { tutStep = 2; coachShow(2, 'tut2_coach'); tutChrome(); }
+    }
   }
   if (o.mode === 'extract' && o.W >= CONFIG.MAX_WATER) finishOrder(); // auto-stop
   if (o.warnT > 0) o.warnT -= dt;
@@ -768,9 +839,13 @@ function drawDripper(nowS) {
     ctx.fillStyle = 'rgba(20,10,5,.75)'; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,80,40,.7)'; ctx.stroke();
   });
-  // spiral guide (extraction phase)
+  // spiral guide (extraction phase) — bright + animated in tutorial step 2
   if (o.mode === 'extract') {
-    ctx.save(); ctx.setLineDash([6, 8]); ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 2;
+    const tut = tutorialMode && tutStep === 2;
+    ctx.save(); ctx.setLineDash([6, 8]);
+    if (tut) { try { ctx.lineDashOffset = -nowS * 30; } catch (e) {} }
+    ctx.strokeStyle = tut ? 'rgba(255,224,138,.9)' : 'rgba(255,255,255,.28)';
+    ctx.lineWidth = tut ? 4 : 2;
     ctx.beginPath();
     for (let a = 0; a < Math.PI * 7; a += 0.08) {
       const rr = Rd * 0.85 * a / (Math.PI * 7);
@@ -843,9 +918,11 @@ function drawHUD() {
   ctx.fillStyle = '#fff'; ctx.fillRect(mx - 1.5, by - 4, 3, 18);
   ctx.fillStyle = '#8a7358'; ctx.font = '700 10px sans-serif';
   ctx.fillText('18–22%', sx - 8, by + 24);
-  // right: mini target radar + live chips
-  const cust = CUSTOMERS[curSpec().c];
-  drawRadar(ctx, W - 62, y0 + 42, 44, cust.target, null, null);
+  // right: mini target radar (hidden in tutorial — no customer yet) + live chips
+  if (!tutorialMode) {
+    const cust = CUSTOMERS[curSpec().c];
+    drawRadar(ctx, W - 62, y0 + 42, 44, cust.target, null, null);
+  }
   ctx.textAlign = 'right'; ctx.fillStyle = '#f5e9d6'; ctx.font = '700 13px sans-serif';
   const cx0 = W - 122;
   ctx.fillText('🌡 ' + o.T.toFixed(0) + '°C', cx0, y0 + 14);
@@ -906,7 +983,7 @@ let mode = 'menu', curShift = 0, curOrder = 0;
 let S = null, lastResult = null, runUnlocks = [];
 let paused = false;
 let muted = false, sdkForceMute = false, cgAudioMuted = false, adPaused = false;
-const OVERLAYS = ['menuOverlay','shiftOverlay','orderOverlay','resultOverlay','shiftDoneOverlay','achOverlay','helpOverlay'];
+const OVERLAYS = ['menuOverlay','shiftOverlay','orderOverlay','resultOverlay','tutDoneOverlay','shiftDoneOverlay','achOverlay','helpOverlay'];
 function showOverlay(id) {
   OVERLAYS.forEach(o => $(o).classList.add('hidden'));
   if (id) $(id).classList.remove('hidden');
@@ -998,6 +1075,7 @@ function updateTechBar() {
 }
 function finishOrder() {
   if (mode !== 'extract' || !S) return;
+  if (tutorialMode) { finishTutorial(); return; } // no stars/coins in tutorial
   mode = 'result';
   S.pourOn = false; audioPour(false);
   $('touchpad').classList.add('hidden');
@@ -1123,6 +1201,7 @@ function applyLang() {
   $('brewBtn').textContent = t('startBrewing');
   $('menuAchLabel').textContent = t('achievements');
   $('menuHelpLabel').textContent = t('howTo');
+  $('menuTutLabel').textContent = t('tut_menu');
   $('shiftTitle').textContent = t('selectShift');
   $('shiftBack').textContent = t('back');
   $('orderBack').textContent = t('back');
@@ -1144,11 +1223,19 @@ function applyLang() {
   if (mode === 'ach') renderAchGrid();
   if (mode === 'help') fillHelp();
   if (mode === 'order') showOrder();
+  if (tutorialMode && !$('coach').classList.contains('hidden')) {
+    $('coachStep').textContent = t('tut_step', { a: tutStep });
+    $('coachText').textContent = t(tutSayT > 0 ? tutSayKey : tutCoachKey);
+    $('skipBtn').textContent = t('tut_skip');
+  }
   refreshTpHint();
 }
 
 /* ---- UI wiring ---- */
-$('brewBtn').addEventListener('click', () => { sfxClick(); showShifts(); });
+$('brewBtn').addEventListener('click', onBrewPress);
+$('menuTutBtn').addEventListener('click', () => { sfxClick(); startTutorial(); });
+$('skipBtn').addEventListener('click', () => { sfxClick(); skipTutorial(); });
+$('tutStartBtn').addEventListener('click', onTutStart);
 $('menuAchBtn').addEventListener('click', () => { sfxClick(); showAch(); });
 $('menuHelpBtn').addEventListener('click', () => { sfxClick(); showHelp(); });
 $('shiftBack').addEventListener('click', () => { sfxClick(); showMenu(); });
@@ -1173,6 +1260,124 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { paused = true; if (S) S.pourOn = false; audioPour(false); }
   else { paused = false; lastMT = performance.now(); }
 });
+
+/* ============================ TUTORIAL ============================
+   3-step teach-by-doing (DESIGN-MVP.md §13). Reuses the brew screen via the
+   tutorialMode flag + a step state machine. Coach overlay is a DOM div above
+   the canvas; all strings go through t() (bilingual, no hardcode). */
+let tutorialMode = false, tutStep = 0;
+let tutCoachKey = null, tutSayKey = null, tutSayT = 0;
+let tutWarnedChan = false, tutWarnedAgit = false;
+
+function coachShow(step, key) {
+  tutCoachKey = key; tutSayT = 0; tutSayKey = null;
+  $('coach').classList.remove('hidden');
+  $('coachStep').textContent = t('tut_step', { a: step });
+  $('coachText').textContent = t(key);
+  $('skipBtn').textContent = t('tut_skip');
+}
+/* Transient explanation (e.g. first channeling) — restores the step's
+   coach text after `secs` seconds. */
+function coachSay(key, secs) {
+  tutSayKey = key; tutSayT = secs;
+  $('coachText').textContent = t(key);
+}
+function coachHide() {
+  $('coach').classList.add('hidden');
+  $('touchpad').classList.remove('pulse');
+  $('stopBtn').classList.remove('pulseBtn');
+}
+/* Step chrome: touchpad pulse on step 1, stop button hidden until step 3. */
+function tutChrome() {
+  if (tutorialMode && tutStep === 1) $('touchpad').classList.add('pulse');
+  else $('touchpad').classList.remove('pulse');
+  if (tutorialMode && S && tutStep < 3) $('stopBtn').style.display = 'none';
+  else if (S && S.mode === 'extract') { $('stopBtn').style.display = ''; }
+}
+function startTutorial() {
+  tutorialMode = true; tutStep = 1;
+  tutWarnedChan = false; tutWarnedAgit = false;
+  S = newOrderState({ g: 'medium', t: 94 }); // neutral spec — no customer, no score
+  runUnlocks = [];
+  mode = 'bloom_pour';
+  showOverlay(null);
+  $('touchpad').classList.remove('hidden');
+  coachShow(1, 'tut1_coach');
+  tutChrome();
+  refreshTpHint(); updateTechBar();
+  CG.gameplayStart();
+}
+/* Tutorial exit: brand-new players drop straight into Shift 1 Order 1;
+   players with existing progress return to the shift map instead of
+   being yanked back to the start. */
+function tutExit() {
+  save.tutorialDone = true; persist();
+  if (totalStars() === 0 && save.unlocked <= 1) { curShift = 0; curOrder = 0; showOrder(); }
+  else showShifts();
+}
+/* Skip: frictionless — no confirm. */
+function skipTutorial() {
+  if (!tutorialMode) return;
+  tutorialMode = false;
+  if (S) S.pourOn = false;
+  S = null; audioPour(false);
+  coachHide();
+  $('touchpad').classList.add('hidden');
+  CG.gameplayStop();
+  tutExit();
+}
+function finishTutorial() {
+  mode = 'tutdone';
+  S.pourOn = false; audioPour(false);
+  $('touchpad').classList.add('hidden');
+  coachHide();
+  CG.gameplayStop();
+  if (S.E >= 18 && S.E <= 22) unlockAch('sweet_spot');
+  const f0 = flavorAt(S.E), R = S.W / CONFIG.DOSE;
+  const flav = applyPenalties(
+    { acidity: f0.acidity, sweetness: f0.sweetness, bitterness: f0.bitterness,
+      body: bodyAt(R, S.grind, S.E) },
+    S.C, S.G, S.flooding);
+  const tc = $('tutRadar').getContext('2d');
+  if (tc) {
+    tc.clearRect(0, 0, 240, 240);
+    drawRadar(tc, 120, 120, 84, null,
+      { a: flav.acidity, s: flav.sweetness, b: flav.bitterness, body: flav.body },
+      radarLabels());
+  }
+  $('tutRadarCoach').textContent = t('tut3_radar');
+  $('tutStartBtn').textContent = (totalStars() === 0 && save.unlocked <= 1) ? t('tut3_start') : t('continue');
+  tutorialMode = false;
+  showOverlay('tutDoneOverlay');
+}
+function onTutStart() {
+  sfxClick();
+  tutExit();
+}
+/* Per-frame tutorial logic: transient coach timer, step-2 objective,
+   step-3 stop-button pulse in the sweet zone. */
+function tutTick(dt) {
+  if (tutSayT > 0) {
+    tutSayT -= dt;
+    if (tutSayT <= 0) { tutSayT = 0; $('coachText').textContent = t(tutCoachKey); }
+  }
+  if (tutStep === 2 && S && S.mode === 'extract') {
+    const tech = S.pourT > 0 ? S.goodT / S.pourT : 0;
+    if ((S.pourT >= CONFIG.TUT_STEP2_TIME && tech >= CONFIG.TUT_STEP2_TECH / 100) ||
+        S.E >= CONFIG.TUT_STEP2_E) {
+      tutStep = 3; coachShow(3, 'tut3_coach'); tutChrome(); refreshTpHint();
+    }
+  }
+  const inZone = tutStep === 3 && S && S.mode === 'extract' && S.E >= 18 && S.E <= 22;
+  if (inZone) $('stopBtn').classList.add('pulseBtn');
+  else $('stopBtn').classList.remove('pulseBtn');
+}
+/* Main-menu PLAY: first run goes to the tutorial, afterwards to shifts. */
+function onBrewPress() {
+  sfxClick();
+  if (!save.tutorialDone) startTutorial();
+  else showShifts();
+}
 
 /* ============================ SDK ============================
    CrazyGames SDK v3 adapter — same verified pattern as tower-rush.
@@ -1251,6 +1456,7 @@ function loop(ts) {
   if (dt > 0.05) dt = 0.05;
   if (!paused && !adPaused && S && (mode === 'bloom_pour' || mode === 'bloom_wait' || mode === 'extract'))
     simUpdate(dt);
+  if (tutorialMode) tutTick(dt);
   render(now / 1000);
 }
 save = loadSave();
@@ -1269,6 +1475,18 @@ window.__PP_TEST__ = {
   t, setLang, getLang, unlockAch,
   achUnlocked: () => Object.keys(save.ach).sort(),
   saveGet: () => save,
+  reloadSave: () => { save = loadSave(); },
+  getShiftOrder: () => [curShift, curOrder],
+  TUT: {
+    start: () => startTutorial(),
+    skip: () => skipTutorial(),
+    finish: () => onTutStart(),
+    brewPress: () => onBrewPress(),
+    tick: (dt) => tutTick(dt),
+    get step() { return tutStep; },
+    get active() { return tutorialMode; },
+    warned: () => ({ chan: tutWarnedChan, agit: tutWarnedAgit }),
+  },
   CG,
 };
 </script>

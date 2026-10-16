@@ -216,3 +216,37 @@ index.html
 - Ini build terbesar di portofolio sejauh ini — estimasi kasar **2–3× effort Tower Rush** (sim engine + 3 fase + radar + 20 order).
 - Urutan build yang disarankan: **Sim engine (§4) → Bloom → Ekstraksi+touchpad → Radar+skor → Audio → Meta (shift/achievements/save) → SDK → i18n**.
 - Setelah MVP live dan tuning stabil: Chapter 2 (French Press plunging) sebagai update konten.
+
+## 13. Tutorial (3 langkah, bisa di-skip)
+
+Ditampilkan sekali saat pertama main (flag `tutorialDone` di `pp_save_v1`). Bisa di-skip kapan saja via tombol "Lewati ⏭" → langsung ke Shift 1 Order 1. Bisa diulang via tombol "📖 Tutorial" di menu utama (tidak menghapus progres shift).
+
+**Prinsip:** teach by doing, satu konsep per langkah, teks coach maksimal 2 baris, bahasa santai, bilingual.
+
+**Langkah 1 — Tuang & Bloom** (konsep: touchpad = keran air)
+- Layar seduh tanpa pelanggan/skor; touchpad berkedip sebagai highlight.
+- Coach: "Tahan jarimu di sini untuk menuang air." / "Hold your finger here to pour."
+- Objective: isi bloom meter sampai penuh (60 g).
+- Lalu: "Bagus! Tunggu blooming selesai…" — timer dipersingkat jadi 5 detik khusus tutorial.
+- Selesai → Langkah 2.
+
+**Langkah 2 — Spiral** (konsep: gerak = teknik)
+- Coach: "Putar jarimu seperti spiral. Jangan diam di satu titik!" / "Swirl your finger in a spiral. Don't stay in one spot!"
+- Spiral guide ditampilkan tebal/terang.
+- Objective: tuang 15 detik dengan teknik ≥ 60% (atau capai E = 12%).
+- Peringatan pertama kali muncul disertai penjelasan: channeling → "Itu channeling! Kopi jadi asam sekaligus pahit."; agitasi → "Terlalu kasar! Kopi jadi sepat."
+- Selesai → Langkah 3.
+
+**Langkah 3 — Sweet Spot** (konsep: kapan berhenti)
+- Coach: "Awasi % ekstraksi. Tekan STOP saat masuk zona hijau (18–22%)!" / "Watch the extraction %. Hit STOP in the green zone (18–22%)!"
+- Extraction bar menampilkan zona hijau; tombol Stop berdenyut saat E di dalam zona.
+- Saat Stop: tampilkan radar mini + coach: "Ini radar rasamu. Nanti tiap pelanggan punya target sendiri — cocokkan!" / "This is your flavor radar. Each customer has their own target — match it!"
+- Tombol "Mulai Shift 1" → `tutorialDone = true` → masuk Shift 1 Order 1.
+
+**Implementasi:**
+- Flag `tutorialMode`; reuse brew screen; state machine langkah tutorial terpisah.
+- Coach overlay sebagai div DOM di atas canvas (bilingual via `t()`).
+- Tombol "Lewati ⏭" selalu terlihat selama tutorial.
+- Semua string coach masuk dict i18n (EN/ID), tidak ada teks hardcode.
+
+**Keluar dari tutorial (`tutExit`):** pemain baru (belum ada bintang/progres) langsung masuk Shift 1 Order 1; pemain yang me-replay tutorial padahal sudah punya progres kembali ke peta shift — tidak dilempar balik ke awal. Label tombol finish menyesuaikan: "MULAI SHIFT 1" untuk pemain baru, "LANJUTKAN" untuk yang sudah progres.

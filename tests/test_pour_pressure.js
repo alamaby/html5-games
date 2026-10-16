@@ -75,7 +75,7 @@ const driver = `
   setSim(patch) { if (S) Object.assign(S, patch); },
   pokeLastMT(v) { lastMT = v; },
   getMode: () => mode,
-  simState: () => S ? { mode: S.mode, E: S.E, W: S.W, C: S.C, G: S.G, pourOn: S.pourOn } : null,
+  simState: () => S ? { mode: S.mode, E: S.E, W: S.W, C: S.C, G: S.G, pourOn: S.pourOn, bloomT: S.bloomT } : null,
   adState: () => ({ adPaused, cgAudioMuted }),
   midroll: (cb) => Ads.midroll(cb),
   cgState: () => ({ ready: CG.ready, sdkForceMute, muted }),
@@ -266,6 +266,120 @@ eq('no double unlock', T.unlockAch('sweet_spot'), false);
   } else {
     eq('CG not ready without SDK', cgs.ready, false);
   }
+
+  // ---- tutorial (§13) ----
+  console.log('— tutorial');
+  // hermetic: earlier (non-tutorial) tests may have scored real orders —
+  // tutorial "fresh player" assertions need a clean progress slate.
+  T.saveGet().stars = {}; T.saveGet().unlocked = 1;
+  T.saveGet().tutorialDone = false;
+  T.TUT.brewPress();
+  eq('first PLAY → tutorial starts', T.TUT.active, true);
+  eq('tutorial begins at step 1', T.TUT.step, 1);
+  eq('tutorial brew mode', D.getMode(), 'bloom_pour');
+  eq('coach shows tut1_coach', elements['coachText'].textContent, T.t('tut1_coach'));
+  eq('skip button labeled', elements['skipBtn'].textContent, T.t('tut_skip'));
+  eq('touchpad pulses in step 1', elements['touchpad'].classList.contains('pulse'), true);
+  eq('stop hidden in step 1', elements['stopBtn'].style.display, 'none');
+
+  // step 1: pour to 60g → shortened 5s bloom → extract advances to step 2
+  D.setSim({ pourOn: true });
+  D.pokeLastMT(0);
+  D.simUpdate(7.4);
+  eq('still pouring before 60g', D.simState().mode, 'bloom_pour');
+  D.simUpdate(0.2);
+  eq('bloom_wait after 60g', D.simState().mode, 'bloom_wait');
+  ok('tutorial bloom wait is 5s', D.simState().bloomT > 4 && D.simState().bloomT <= 5.01);
+  eq('still step 1 during wait', T.TUT.step, 1);
+  eq('coach switches to tut1_done', elements['coachText'].textContent, T.t('tut1_done'));
+  D.simUpdate(4.9);
+  eq('extract after tutorial bloom', D.simState().mode, 'extract');
+  eq('step 2 reached', T.TUT.step, 2);
+  eq('step 2 coach', elements['coachText'].textContent, T.t('tut2_coach'));
+
+  // first-time warnings with explanations
+  D.setSim({ pourOn: true, v: 0 }); D.pokeLastMT(0); D.simUpdate(1.3);
+  eq('channeling flagged once', T.TUT.warned().chan, true);
+  eq('channeling explanation shown', elements['coachText'].textContent, T.t('tut2_warn_channel'));
+  T.TUT.tick(4.1);
+  eq('coach restores after explanation', elements['coachText'].textContent, T.t('tut2_coach'));
+  D.setSim({ pourOn: true, v: 300, r: 1e9 }); D.pokeLastMT(Date.now()); D.simUpdate(0.5);
+  eq('agitation flagged once', T.TUT.warned().agit, true);
+  eq('agitation explanation shown', elements['coachText'].textContent, T.t('tut2_warn_agitation'));
+  T.TUT.tick(4.1);
+
+  // step 2 objective: 15s pour at ≥60% technique → step 3
+  D.setSim({ pourOn: true, v: 300, r: 50, pourT: 15, goodT: 9.6 });
+  D.pokeLastMT(Date.now());
+  T.TUT.tick(0.1);
+  eq('step 3 reached', T.TUT.step, 3);
+  eq('step 3 coach', elements['coachText'].textContent, T.t('tut3_coach'));
+  eq('stop button shown in step 3', elements['stopBtn'].style.display, '');
+  D.setSim({ E: 20 }); T.TUT.tick(0.1);
+  eq('stop pulses in sweet zone', elements['stopBtn'].classList.contains('pulseBtn'), true);
+  D.setSim({ E: 10 }); T.TUT.tick(0.1);
+  eq('stop stops pulsing outside zone', elements['stopBtn'].classList.contains('pulseBtn'), false);
+
+  // step 3: STOP → mini radar + explanation → tutorialDone
+  D.setSim({ E: 20 });
+  D.finishOrder();
+  eq('tutorial result mode', D.getMode(), 'tutdone');
+  eq('tutorial done overlay shown', elements['tutDoneOverlay'].classList.contains('hidden'), false);
+  eq('radar explanation shown', elements['tutRadarCoach'].textContent, T.t('tut3_radar'));
+  eq('start-shift button labeled', elements['tutStartBtn'].textContent, T.t('tut3_start'));
+  T.TUT.finish();
+  eq('completing tutorial sets tutorialDone', T.saveGet().tutorialDone, true);
+  eq('lands on shift 1 order 1', T.getShiftOrder(), [0, 0]);
+  eq('order card shown', D.getMode(), 'order');
+
+  // after tutorialDone, PLAY goes straight to shifts
+  T.reloadSave();
+  eq('tutorialDone survives save round-trip', T.saveGet().tutorialDone, true);
+  T.TUT.brewPress();
+  eq('PLAY after tutorial → shifts', D.getMode(), 'shifts');
+  eq('tutorial not re-triggered', T.TUT.active, false);
+
+  // skip: frictionless, sets flag, lands on shift 1 order 1
+  T.TUT.start();
+  eq('replay starts at step 1', T.TUT.step, 1);
+  T.TUT.skip();
+  eq('skip sets tutorialDone', T.saveGet().tutorialDone, true);
+  eq('skip lands on shift 1 order 1', T.getShiftOrder(), [0, 0]);
+  eq('skip shows order card', D.getMode(), 'order');
+  eq('coach hidden after skip', elements['coach'].classList.contains('hidden'), true);
+  ok('skip persisted tutorialDone', sandbox.localStorage.getItem('pp_save_v1').includes('"tutorialDone":true'));
+
+  // replay preserves shift progress
+  T.saveGet().stars['s2o1'] = 3; T.saveGet().unlocked = 3;
+  T.TUT.start();
+  eq('replay keeps stars', T.saveGet().stars['s2o1'], 3);
+  eq('replay keeps unlocked shifts', T.saveGet().unlocked, 3);
+  T.TUT.skip();
+  eq('progress survives skip persist', T.saveGet().stars['s2o1'], 3);
+
+  // tutExit: progressed player returns to shift map, NOT yanked to shift 1
+  T.TUT.start();
+  T.TUT.skip();
+  eq('skip with progress → shift map', D.getMode(), 'shifts');
+  eq('skip with progress keeps tutorialDone', T.saveGet().tutorialDone, true);
+
+  // tutExit: brand-new player still drops straight into shift 1 order 1
+  T.saveGet().stars = {}; T.saveGet().unlocked = 1;
+  T.TUT.start();
+  T.TUT.skip();
+  eq('skip fresh → shift 1 order 1', T.getShiftOrder(), [0, 0]);
+  eq('skip fresh → order card', D.getMode(), 'order');
+
+  // alt completion: E reaches 12% in step 2
+  T.TUT.start();
+  D.setSim({ pourOn: true }); D.pokeLastMT(0); D.simUpdate(7.6); D.simUpdate(5.1);
+  eq('step 2 (alt path)', T.TUT.step, 2);
+  D.setSim({ E: 12.5 });
+  T.TUT.tick(0.1);
+  eq('E=12% completes step 2', T.TUT.step, 3);
+  T.TUT.skip();
+
+  ok('menu tutorial replay button wired', !!elements['menuTutBtn']);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
