@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#14100b">
+<title>Pour &amp; Pressure</title>
+<!-- CrazyGames SDK v3: ads + game events (docs.crazygames.com/sdk/intro).
+     The game fully works without it — adblock / foreign domains degrade gracefully. -->
+<script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#14100b; }
+  body { font-family:-apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color:#f5e9d6;
+         touch-action:none; user-select:none; -webkit-user-select:none; }
+  #game { position:fixed; inset:0; display:block; }
+  #soundBtn { position:fixed; top:max(12px, env(safe-area-inset-top)); right:14px; z-index:40;
+              background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.22); color:#f5e9d6;
+              font-size:12px; font-weight:700; letter-spacing:1px; padding:8px 12px; border-radius:20px;
+              cursor:pointer; backdrop-filter:blur(6px); }
+  #soundBtn:active { transform:scale(.94); }
+  #langBtn { position:fixed; top:max(12px, env(safe-area-inset-top)); left:14px; z-index:40;
+             background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.22); color:#f5e9d6;
+             font-size:12px; font-weight:700; letter-spacing:1px; padding:8px 12px; border-radius:20px;
+             cursor:pointer; backdrop-filter:blur(6px); }
+  #langBtn:active { transform:scale(.94); }
+  #langBtn .on { color:#ffe08a; }
+  /* Touchpad: bottom 25% — the finger surface. Canvas renders the pour above it (offset cursor). */
+  #touchpad { position:fixed; left:0; right:0; bottom:0; height:25%; z-index:6;
+              background:linear-gradient(180deg, rgba(60,40,22,.35), rgba(30,20,12,.75));
+              border-top:2px dashed rgba(255,179,92,.45); touch-action:none;
+              display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+              padding-bottom:max(8px, env(safe-area-inset-bottom)); }
+  #touchpad.hidden { display:none; }
+  #tpHint { font-size:13px; font-weight:700; letter-spacing:2px; color:#ffe08a; opacity:.9; text-align:center; padding:0 16px; }
+  #techWrap { width:64%; max-width:300px; height:14px; background:rgba(0,0,0,.45); border-radius:8px;
+              border:1px solid rgba(255,224,138,.35); position:relative; overflow:hidden; }
+  #techFill { height:100%; width:0%; border-radius:8px;
+              background:linear-gradient(90deg,#ffb35c,#ffe08a); transition:width .15s; }
+  #techPct { position:absolute; inset:0; text-align:center; font-size:10px; font-weight:800; line-height:14px; color:#1a120b; }
+  #stopBtn { background:linear-gradient(135deg,#ff8a5c,#e04e2a); color:#fff; border:none;
+             font-size:20px; font-weight:800; letter-spacing:4px; padding:14px 54px; border-radius:16px;
+             cursor:pointer; box-shadow:0 6px 24px rgba(224,78,42,.45); }
+  #stopBtn:active { transform:scale(.94); }
+  .overlay { position:fixed; inset:0; z-index:10; display:flex; flex-direction:column;
+             align-items:center; justify-content:center; text-align:center; padding:24px;
+             background:rgba(12,8,5,.72); backdrop-filter:blur(5px); overflow-y:auto; }
+  .overlay.hidden { display:none; }
+  .overlay h1 { font-size:40px; font-weight:800; letter-spacing:3px; margin-bottom:8px; color:#ffe08a;
+                text-shadow:0 6px 30px rgba(0,0,0,.6); }
+  .overlay h2 { font-size:24px; font-weight:800; letter-spacing:2px; margin:6px 0; color:#ffe08a; }
+  .overlay p  { font-size:15px; line-height:1.6; opacity:.88; max-width:330px; }
+  .bigBtn { margin-top:18px; background:linear-gradient(135deg,#ffe08a,#ffb35c); color:#1a120b;
+            font-size:16px; font-weight:800; letter-spacing:2px; padding:14px 34px; border:none;
+            border-radius:14px; cursor:pointer; box-shadow:0 6px 24px rgba(255,179,92,.35); }
+  .bigBtn:active { transform:scale(.95); }
+  .ghostBtn { margin-top:12px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.22);
+              color:#f5e9d6; font-size:13px; font-weight:700; letter-spacing:2px; padding:10px 22px;
+              border-radius:22px; cursor:pointer; }
+  .ghostBtn:active { transform:scale(.95); }
+  .shareBtn { margin-top:14px; background:linear-gradient(135deg,#8fd18f,#4e9e5c); color:#0d1a0d;
+              font-size:15px; font-weight:800; letter-spacing:2px; padding:13px 30px; border:none;
+              border-radius:12px; cursor:pointer; }
+  .shareBtn:active { transform:scale(.95); }
+  .ocard { background:rgba(38,26,15,.92); border:1px solid rgba(255,224,138,.35); border-radius:18px;
+           padding:22px 20px; max-width:360px; width:100%; box-shadow:0 12px 44px rgba(0,0,0,.55); }
+  #oEmoji { font-size:52px; }
+  #oQuote { font-style:italic; color:#ffe08a; margin:8px 0 4px; }
+  #oChips { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:12px 0; }
+  .chip { background:rgba(255,179,92,.14); border:1px solid rgba(255,179,92,.4); border-radius:20px;
+          padding:6px 12px; font-size:12px; font-weight:700; letter-spacing:1px; }
+  #oTip { font-size:13px; opacity:.75; }
+  #rStars { font-size:44px; letter-spacing:6px; margin:4px 0; min-height:54px; }
+  #rAxes { margin:10px auto 4px; max-width:300px; text-align:left; font-size:13px; }
+  #rAxes .axrow { display:flex; justify-content:space-between; padding:3px 2px; border-bottom:1px solid rgba(255,255,255,.08); }
+  #rAxes .axv { font-weight:800; color:#ffe08a; }
+  #rCoins { font-size:16px; font-weight:800; color:#ffe08a; margin-top:8px; letter-spacing:1px; }
+  #rUnlocks { margin-top:8px; font-size:13px; color:#8fd18f; font-weight:700; min-height:18px; }
+  .shift-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px; margin-top:16px;
+                max-width:360px; width:100%; }
+  .shift-card { background:rgba(255,255,255,.06); border:1px solid rgba(255,224,138,.4); border-radius:14px;
+                padding:18px 8px; cursor:pointer; }
+  .shift-card:active { transform:scale(.95); }
+  .shift-card.locked { opacity:.35; border-color:rgba(255,255,255,.12); }
+  .shift-card .s-num { font-size:22px; font-weight:800; color:#ffe08a; letter-spacing:2px; }
+  .shift-card .s-stars { font-size:14px; margin-top:6px; }
+  .ach-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; margin-top:16px;
+              max-width:380px; width:100%; max-height:52vh; overflow-y:auto; padding:2px; }
+  .ach { background:rgba(255,255,255,.06); border:1px solid rgba(255,224,138,.35); border-radius:12px;
+         padding:12px 10px; font-size:12px; }
+  .ach .a-ico { font-size:28px; }
+  .ach .a-name { font-weight:800; letter-spacing:1px; margin:6px 0 4px; color:#ffe08a; font-size:13px; }
+  .ach .a-desc { opacity:.75; line-height:1.45; }
+  .ach.locked { border-color:rgba(255,255,255,.12); opacity:.45; }
+  .ach.locked .a-name { color:#f5e9d6; }
+  #toast { position:fixed; top:calc(max(10px, env(safe-area-inset-top)) + 110px); left:50%; transform:translateX(-50%);
+           z-index:30; background:rgba(30,20,12,.95); border:1px solid rgba(255,224,138,.5); color:#f5e9d6;
+           padding:12px 18px; border-radius:14px; font-size:14px; font-weight:700;
+           display:flex; gap:10px; align-items:center; max-width:88vw; text-align:left;
+           box-shadow:0 8px 30px rgba(0,0,0,.5); pointer-events:none; }
+  #toast.hidden { display:none; }
+  #toast .t-ico { font-size:26px; }
+  #toast .t-name { color:#ffe08a; }
+  .help-lines { text-align:left; max-width:330px; font-size:14px; line-height:1.7; margin-top:12px; }
+  .help-lines div { margin-bottom:10px; }
+  .foot { position:fixed; left:0; right:0; bottom:max(10px, env(safe-area-inset-bottom));
+          text-align:center; font-size:11px; letter-spacing:3px; opacity:.35; z-index:5; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<button id="soundBtn">SOUND ON</button>
+<button id="langBtn"></button>
+
+<div id="touchpad" class="hidden">
+  <div id="tpHint"></div>
+  <div id="techWrap"><div id="techFill"></div><span id="techPct"></span></div>
+  <button id="stopBtn">STOP</button>
+</div>
+
+<div class="overlay" id="menuOverlay">
+  <h1>POUR<br>&amp; PRESSURE</h1>
+  <p id="menuDesc"></p>
+  <button class="bigBtn" id="brewBtn"></button><br>
+  <button class="ghostBtn" id="menuAchBtn">🏆 <span id="menuAchLabel"></span></button>
+  <button class="ghostBtn" id="menuHelpBtn">❓ <span id="menuHelpLabel"></span></button>
+  <p style="margin-top:14px; font-size:12px; opacity:.6;" id="menuStats"></p>
+</div>
+
+<div class="overlay hidden" id="shiftOverlay">
+  <h1 id="shiftTitle" style="font-size:30px;"></h1>
+  <div class="shift-grid" id="shiftGrid"></div>
+  <button class="ghostBtn" id="shiftBack"></button>
+</div>
+
+<div class="overlay hidden" id="orderOverlay">
+  <div class="ocard">
+    <div id="oCount"></div>
+    <div id="oEmoji"></div>
+    <h2 id="oName"></h2>
+    <p id="oQuote"></p>
+    <canvas id="radarMini" width="200" height="200" style="width:170px;height:170px;"></canvas>
+    <div id="oChips"></div>
+    <p id="oTip"></p>
+    <button class="bigBtn" id="startBrewBtn"></button><br>
+    <button class="ghostBtn" id="orderBack"></button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="resultOverlay">
+  <div class="ocard">
+    <div id="rStars"></div>
+    <canvas id="radarBig" width="300" height="300" style="width:250px;height:250px;"></canvas>
+    <div id="rAxes"></div>
+    <div id="rCoins"></div>
+    <div id="rUnlocks"></div>
+    <button class="shareBtn" id="shareBtn"></button><br>
+    <button class="bigBtn" id="nextBtn"></button><br>
+    <button class="ghostBtn" id="retryBtn"></button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="shiftDoneOverlay">
+  <h1 id="sdTitle" style="font-size:32px;"></h1>
+  <div id="sdStars" style="font-size:40px; margin:8px 0;"></div>
+  <p id="sdStats"></p>
+  <p id="sdAd" style="margin-top:10px; font-size:12px; opacity:.6;"></p>
+  <button class="bigBtn" id="sdContinue"></button>
+</div>
+
+<div class="overlay hidden" id="achOverlay">
+  <h1 id="achTitle" style="font-size:28px;"></h1>
+  <div class="ach-grid" id="achGrid"></div>
+  <button class="ghostBtn" id="achBack"></button>
+</div>
+
+<div class="overlay hidden" id="helpOverlay">
+  <h1 id="helpTitle" style="font-size:28px;"></h1>
+  <div class="help-lines" id="helpLines"></div>
+  <button class="ghostBtn" id="helpBack"></button>
+</div>
+
+<div id="toast" class="hidden"></div>
+<div class="foot">POUR &amp; PRESSURE</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   POUR & PRESSURE — MVP (pour-over spiral, Chapter 1: Slow Bar)
+   Single-file HTML5 game. Sections follow DESIGN-MVP.md §10.
+   ===================================================================== */
+
+/* ============================ CONFIG ============================
+   THE single tuning point (DESIGN-MVP.md §4.2). Change numbers here
+   only — no other file, no other object. */
+const CONFIG = {
+  DOSE: 20,            // g coffee, fixed in MVP
+  TARGET_WATER: 300,   // g, ratio 1:15
+  MAX_WATER: 360,      // g, pouring past this = over-dilution
+  POUR_RATE: 8,        // g/sec while finger is down
+  BLOOM_WATER: 60,     // g to fill the bloom meter
+  BLOOM_WAIT: 8,       // sec auto bloom timer
+  EXT_BASE: 0.55,      // %/sec at reference conditions
+  GRIND_EXT:  { fine: 1.4, medium: 1.0, coarse: 0.75 }, // extraction factor
+  GRIND_BODY: { fine: 1.15, medium: 1.0, coarse: 0.85 },// body factor
+  DRAWDOWN:   { fine: 4.5, medium: 6.0, coarse: 8.0 },  // g/sec water leaves bed
+  BED_MAX: 120,        // g; bed water above this = flooding (bypass)
+  POUR_TEMP: 94,       // °C incoming water temp
+  AMBIENT: 78,         // °C idle target temp
+  CHAN_V: 25,          // px/s — below this while pouring = dwelling
+  CHAN_T: 1.2,         // sec of dwelling -> one channeling event (+0.2 C)
+  AGIT_V: 900,         // px/s — above this = too rough
+  WALL_R: 0.85,        // fraction of dripper radius — pouring past this = too rough
+  TECH_VMIN: 60, TECH_VMAX: 700, // technique "good" velocity window
+  TECH_RMIN: 0.15, TECH_RMAX: 0.85, // technique "good" radius window (fraction of Rd)
+  AXIS_TOL: 12,        // default scoring tolerance per axis
+  STAR3: 85, STAR2: 70, STAR1: 50, // star thresholds on total score
+};
+
+/* ============================ I18N ============================ */
+const I18N = {
+en: {
+  tagline: 'Brew by touch. Every millisecond of your finger changes the chemistry in the cup.',
+  startBrewing: 'START BREWING', achievements: 'ACHIEVEMENTS', howTo: 'HOW TO PLAY', back: 'BACK',
+  selectShift: 'SELECT SHIFT', locked: 'LOCKED', order: 'ORDER', of: 'of',
+  grind: 'Grind', water: 'Water', ratio: 'Ratio', target: 'Target', startBrew: 'START BREW',
+  fine: 'Fine', medium: 'Medium', coarse: 'Coarse',
+  bloomHint: 'HOLD the touchpad to pour', bloomWait: 'Bloom… let it degas',
+  extractHint: 'SWIRL! Keep 18–22%', stop: 'STOP', technique: 'Technique',
+  extraction: 'Extraction', temp: 'Temp',
+  chanWarn: 'Channeling! Keep moving!', roughWarn: 'Too rough!', floodWarn: 'Flooding! Bed is drowning!',
+  results: 'RESULTS', total: 'Total', coins: 'coins', tip: 'Tip',
+  nextOrder: 'NEXT ORDER', retry: 'RETRY', shareCard: 'SHARE CARD',
+  cardSaved: 'Card saved — share it!', beatMe: 'Can you brew better?',
+  shiftComplete: 'SHIFT COMPLETE!', continue: 'CONTINUE', adNote: 'A quick ad supports the game',
+  achLocked: 'Locked', newAch: 'Achievement unlocked:', soundOn: 'SOUND ON', soundOff: 'SOUND OFF',
+  audioLocked: 'Audio is controlled by the platform', close: 'TAP TO CLOSE',
+  orderOf: 'Order {a} of {b}', sweetSpot: 'Sweet spot 18–22%',
+  acidity: 'Acidity', sweetness: 'Sweetness', bitterness: 'Bitterness', body: 'Body',
+  helpL1: '1. HOLD the touchpad (bottom) to pour. Your finger steers the stream — it never covers the coffee.',
+  helpL2: '2. BLOOM: pour 60g, then wait 8 seconds.',
+  helpL3: '3. EXTRACTION: swirl in a spiral. STOP in the 18–22% sweet spot to match the customer radar.',
+  helpL4: '4. Never park the stream (channeling!) and never thrash it (too rough!). Watch the numbers, not just the color.',
+  shiftStars: '{s}/12 stars',
+},
+id: {
+  tagline: 'Seduh dengan sentuhan. Setiap milidetik jarimu mengubah kimia di dalam cangkir.',
+  startBrewing: 'MULAI MENYEDUH', achievements: 'PENCAPAIAN', howTo: 'CARA BERMAIN', back: 'KEMBALI',
+  selectShift: 'PILIH SHIFT', locked: 'TERKUNCI', order: 'ORDER', of: 'dari',
+  grind: 'Gilingan', water: 'Air', ratio: 'Rasio', target: 'Target', startBrew: 'MULAI SEDUH',
+  fine: 'Halus', medium: 'Sedang', coarse: 'Kasar',
+  bloomHint: 'TAHAN touchpad untuk menuang', bloomWait: 'Bloom… biarkan berdegas',
+  extractHint: 'PUTAR! Jaga 18–22%', stop: 'STOP', technique: 'Teknik',
+  extraction: 'Ekstraksi', temp: 'Suhu',
+  chanWarn: 'Channeling! Terus bergerak!', roughWarn: 'Terlalu kasar!', floodWarn: 'Banjir! Bed tenggelam!',
+  results: 'HASIL', total: 'Total', coins: 'koin', tip: 'Tip',
+  nextOrder: 'ORDER BERIKUTNYA', retry: 'ULANGI', shareCard: 'BAGIKAN KARTU',
+  cardSaved: 'Kartu tersimpan — bagikan!', beatMe: 'Bisa menyeduh lebih baik?',
+  shiftComplete: 'SHIFT SELESAI!', continue: 'LANJUTKAN', adNote: 'Iklan sebentar mendukung game ini',
+  achLocked: 'Terkunci', newAch: 'Pencapaian terbuka:', soundOn: 'SUARA NYALA', soundOff: 'SUARA MATI',
+  audioLocked: 'Audio dikontrol platform', close: 'KETUK UNTUK TUTUP',
+  orderOf: 'Order {a} dari {b}', sweetSpot: 'Sweet spot 18–22%',
+  acidity: 'Keasaman', sweetness: 'Kemanisan', bitterness: 'Kepahitan', body: 'Body',
+  helpL1: '1. TAHAN touchpad (bawah) untuk menuang. Jarimu mengarahkan kucuran — tanpa menutupi kopi.',
+  helpL2: '2. BLOOM: tuang 60g, lalu tunggu 8 detik.',
+  helpL3: '3. EKSTRAKSI: putar spiral. STOP di sweet spot 18–22% agar cocok dengan radar pelanggan.',
+  helpL4: '4. Jangan diam di satu titik (channeling!) dan jangan terlalu kasar! Perhatikan angkanya, bukan cuma warnanya.',
+  shiftStars: '{s}/12 bintang',
+},
+};
+let lang = 'en';
+function t(k, a2, a3) {
+  let lng = lang, vars = null;
+  if (typeof a2 === 'string') lng = a2; else if (a2) vars = a2;
+  if (typeof a3 === 'string') lng = a3;
+  let s = (I18N[lng] && I18N[lng][k] !== undefined) ? I18N[lng][k] : (I18N.en[k] !== undefined ? I18N.en[k] : k);
+  if (vars) for (const key in vars) s = String(s).split('{' + key + '}').join(String(vars[key]));
+  return s;
+}
+function setLang(l) {
+  if (l !== 'en' && l !== 'id') return;
+  lang = l;
+  try { document.documentElement.lang = l; } catch (e) {}
+  if (save) { save.lang = l; persist(); }
+  applyLang();
+}
+function getLang() { return lang; }
+
+/* ============================ SAVE ============================ */
+const SAVE_KEY = 'pp_save_v1';
+function defaultSave() {
+  return { lang: 'en', muted: false, unlocked: 1, stars: {}, coins: 0, ach: {}, bestTech: 0 };
+}
+let save = defaultSave();
+function loadSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      const d = defaultSave();
+      for (const k in d) if (s[k] !== undefined) d[k] = s[k];
+      return d;
+    }
+  } catch (e) {}
+  return defaultSave();
+}
+function persist() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {}
+}
+
+/* ============================ SIM (pure logic) ============================
+   All flavor math lives here as pure functions — used by the game AND the
+   headless tests (window.__PP_TEST__). Formulas per DESIGN-MVP.md §4.4–4.5. */
+function clamp(x, a, b) { return x < a ? a : (x > b ? b : x); }
+
+/* Pre-penalty flavors from extraction E (%). Returns {acidity, sweetness, bitterness}. */
+function flavorAt(E) {
+  return {
+    acidity:    100 * Math.exp(-Math.pow((E - 8) / 9, 2)),
+    sweetness:  100 * Math.exp(-Math.pow((E - 20) / 7, 2)),
+    bitterness: 100 / (1 + Math.exp(-(E - 24) / 2.5)),
+  };
+}
+/* Pre-penalty body from ratio R (water/dose), grind key, extraction E. */
+function bodyAt(R, grind, E) {
+  const gb = CONFIG.GRIND_BODY[grind] !== undefined ? CONFIG.GRIND_BODY[grind] : 1;
+  return 100 * clamp((22 - R) / 10, 0.15, 1) * gb * clamp(E / 18, 0.4, 1);
+}
+/* Apply channeling (C), agitation (G) and flooding penalties. f has 4 axes. */
+function applyPenalties(f, C, G, flooding) {
+  return {
+    acidity:    clamp(f.acidity + 22 * C, 0, 100),
+    sweetness:  f.sweetness * (1 - 0.25 * C),
+    bitterness: clamp(f.bitterness + 18 * C + 20 * G, 0, 100),
+    body:       f.body * (1 - 0.2 * C) * (flooding ? 0.8 : 1),
+  };
+}
+/* Per-axis score vs customer target zone. */
+function scoreAxis(actual, target, tol) {
+  const over = Math.max(0, Math.abs(actual - target) - tol);
+  return Math.max(0, 100 - over * 2.5);
+}
+/* Full order scoring. o = {E, W, grind, C, G, flooding, cust}. */
+function scoreOrder(o) {
+  const f0 = flavorAt(o.E);
+  const R = o.W / CONFIG.DOSE;
+  const pre = { acidity: f0.acidity, sweetness: f0.sweetness, bitterness: f0.bitterness,
+                body: bodyAt(R, o.grind, o.E) };
+  const flav = applyPenalties(pre, o.C || 0, o.G || 0, !!o.flooding);
+  const tg = o.cust.target, tol = o.cust.tol !== undefined ? o.cust.tol : CONFIG.AXIS_TOL;
+  const axis = {
+    a:    scoreAxis(flav.acidity, tg.a, tol),
+    s:    scoreAxis(flav.sweetness, tg.s, tol),
+    b:    scoreAxis(flav.bitterness, tg.b, tol),
+    body: scoreAxis(flav.body, tg.body, tol),
+  };
+  const total = (axis.a + axis.s + axis.b + axis.body) / 4;
+  const stars = total >= CONFIG.STAR3 ? 3 : total >= CONFIG.STAR2 ? 2 : total >= CONFIG.STAR1 ? 1 : 0;
+  return { flav, axis, total, stars, R };
+}
+
+/* ============================ DATA ============================ */
+/* NOTE (deviation from DESIGN-MVP.md §5, flagged): two customer targets were
+   single-number fixes because the spec's own numbers contradicted its "cara
+   menang" column under the spec's own formulas:
+   - #1 Ibu Rina: sweetness 55 -> 80 (at E=20, sweetness is ~100 by formula;
+     55 made ★★★ unreachable; the quote never mentions sweetness).
+   - #4 Anak Nongkrong: acidity 45 -> 30 (at E=20, acidity is ~17 by formula;
+     45 capped the score at ★★ despite the doc saying sweet spot wins).
+   - #5 Food Critic: retuned 2026-10-16 to (20/95/20/70 ±8) — "textbook-perfect
+     cup, zero mistakes" as the final exam. The spec's 55/60/50/65 demanded high
+     acidity AND high bitterness at once, which the extraction model forbids by
+     construction (acid peaks at E=8, bitterness rises after E=24). At E=20,
+     medium grind, W=300, C=G=0 all four axes land inside ±8 → ★★★ achievable
+     only with near-perfect precision (±1.6% E window). */
+const CUSTOMERS = [
+  { id: 'rina', emoji: '👩🏽',
+    name:  { en: 'Mama Rina',    id: 'Ibu Rina' },
+    quote: { en: '"Bold body, low acid — not too bitter, dear."',
+              id: '"Body tebal, asam rendah, jangan terlalu pahit ya."'},
+    tip:   { en: 'Stop near E 20, keep the ratio around 1:15.',
+              id: 'Stop di sekitar E 20, jaga rasio sekitar 1:15.' },
+    target: { a: 30, s: 80, b: 40, body: 75 }, tol: 12 },
+  { id: 'fruity', emoji: '🧑‍🎤',
+    name:  { en: 'Fruity Fan',   id: 'Kaum Fruity' },
+    quote: { en: '"I want it bright and light!"',
+              id: '"Mau yang bright dan ringan!"' },
+    tip:   { en: 'Coarse grind — stop early at E 14–16.',
+              id: 'Gilingan kasar — stop awal di E 14–16.' },
+    target: { a: 75, s: 60, b: 25, body: 55 }, tol: 14 },
+  { id: 'tubruk', emoji: '👴🏽',
+    name:  { en: 'Old Tubruk',   id: 'Bapak Tubruk' },
+    quote: { en: '"Bitter and thick, like my youth!"',
+              id: '"Pahit pekat, kayak masa mudaku!"' },
+    tip:   { en: 'Fine grind — push to E 25–26, ratio near 1:13.5.',
+              id: 'Gilingan halus — dorong ke E 25–26, rasio dekat 1:13,5.' },
+    target: { a: 25, s: 35, b: 75, body: 85 }, tol: 12 },
+  { id: 'nongkrong', emoji: '🧒',
+    name:  { en: 'Hangout Kid',  id: 'Anak Nongkrong' },
+    quote: { en: '"Just make it sweet and balanced."',
+              id: '"Yang manis seimbang aja."'},
+    tip:   { en: 'Sweet spot: stop at E 19–21.',
+              id: 'Sweet spot: stop di E 19–21.' },
+    target: { a: 30, s: 80, b: 35, body: 55 }, tol: 12 },
+  { id: 'critic', emoji: '🧐',
+    name:  { en: 'Food Critic',  id: 'Kritikus Kuliner' },
+    quote: { en: '"Perfection. Nothing less."',
+              id: '"Sempurna. Tidak kurang."'},
+    tip:   { en: 'A flawless, balanced cup. Zero mistakes.',
+              id: 'Secangkir seimbang tanpa cela. Tanpa kesalahan.' },
+    target: { a: 20, s: 95, b: 20, body: 70 }, tol: 8 },
+];
+/* 5 shifts × 4 orders. {c: customer idx, g: grind, t: start temp °C} */
+const SHIFTS = [
+  [ {c:3,g:'medium',t:94}, {c:0,g:'medium',t:94}, {c:3,g:'medium',t:92}, {c:1,g:'coarse',t:94} ],
+  [ {c:1,g:'coarse',t:92}, {c:2,g:'fine',t:94},   {c:0,g:'medium',t:92}, {c:3,g:'medium',t:94} ],
+  [ {c:0,g:'medium',t:90}, {c:1,g:'coarse',t:96}, {c:3,g:'medium',t:92}, {c:2,g:'fine',t:94}   ],
+  [ {c:1,g:'coarse',t:90}, {c:3,g:'medium',t:96}, {c:2,g:'fine',t:92},   {c:0,g:'medium',t:94} ],
+  [ {c:2,g:'fine',t:94},   {c:1,g:'coarse',t:92}, {c:3,g:'medium',t:94}, {c:4,g:'medium',t:94} ],
+];
+const ACHIEVEMENTS = [
+  { id: 'first_bloom', ico: '🫧',
+    name: { en: 'First Bloom', id: 'Bloom Pertama' },
+    desc: { en: 'Finish your first bloom.', id: 'Selesaikan bloom pertamamu.' } },
+  { id: 'sweet_spot', ico: '🎯',
+    name: { en: 'Sweet Spot', id: 'Titik Manis' },
+    desc: { en: 'Stop between 18–22% extraction.', id: 'Stop di ekstraksi 18–22%.' } },
+  { id: 'surgeon', ico: '🩺',
+    name: { en: 'Surgeon Hands', id: 'Tangan Bedah' },
+    desc: { en: '95%+ technique with zero channeling.', id: 'Teknik 95%+ tanpa channeling.' } },
+  { id: 'triple_star', ico: '⭐',
+    name: { en: 'Triple Star', id: 'Bintang Tiga' },
+    desc: { en: 'Earn ★★★ on any order.', id: 'Raih ★★★ di satu order.' } },
+  { id: 'perfect_shift', ico: '💫',
+    name: { en: 'Perfect Shift', id: 'Shift Sempurna' },
+    desc: { en: '★★★ on all 4 orders of a shift.', id: '★★★ di 4 order dalam satu shift.' } },
+  { id: 'astringent', ico: '🥴',
+    name: { en: 'Astringent Disaster', id: 'Bencana Sepat' },
+    desc: { en: 'Max out the roughness meter. Oops.', id: 'Penuhkan meter kekasaran. Ups.' } },
+  { id: 'channel_chaos', ico: '🕳️',
+    name: { en: 'Channel Chaos', id: 'Kekacauan Channeling' },
+    desc: { en: 'Channel 3 times in one order.', id: 'Channeling 3 kali dalam satu order.' } },
+  { id: 'speed_barista', ico: '⚡',
+    name: { en: 'Speed Barista', id: 'Barista Kilat' },
+    desc: { en: 'Finish an order in under 60s with ★★ or better.',
+             id: 'Selesaikan order <60 dtk dengan ★★ atau lebih.' } },
+];
+function unlockAch(id) {
+  if (save.ach[id]) return false;
+  save.ach[id] = 1; persist();
+  const a = ACHIEVEMENTS.find(x => x.id === id);
+  if (a) showToast('<span class="t-ico">' + a.ico + '</span><span>' + t('newAch') +
+    ' <span class="t-name">' + a.name[lang] + '</span></span>');
+  runUnlocks.push(id);
+  return true;
+}
+
+/* ============================ AUDIO ============================
+   All procedural WebAudio (DESIGN-MVP.md §6). No assets. Every entry is
+   guarded — the game runs fine with no AudioContext (headless tests). */
+let ac = null, pourGain = null, pourFilter = null;
+function audio() {
+  try {
+    if (muted || cgAudioMuted || sdkForceMute) return null;
+    if (!ac) {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return null;
+      ac = new Ctor();
+    }
+    if (ac.state === 'suspended') ac.resume();
+    return ac;
+  } catch (e) { return null; }
+}
+function audioUnlock() { try { audio(); } catch (e) {} }
+function ensurePourNodes() {
+  const a = audio(); if (!a || pourGain) return;
+  try {
+    const len = a.sampleRate | 0;
+    const buf = a.createBuffer(1, len, a.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = a.createBufferSource(); src.buffer = buf; src.loop = true;
+    pourFilter = a.createBiquadFilter(); pourFilter.type = 'bandpass';
+    pourFilter.frequency.value = 800; pourFilter.Q.value = 1.1;
+    pourGain = a.createGain(); pourGain.gain.value = 0.0001;
+    src.connect(pourFilter); pourFilter.connect(pourGain); pourGain.connect(a.destination);
+    src.start();
+  } catch (e) {}
+}
+/* Pour loop: gain follows pourOn, bandpass freq follows pour radius
+   (center stream = deeper tone). */
+function audioPour(on, rr) {
+  ensurePourNodes();
+  if (!ac || !pourGain) return;
+  try {
+    const t = ac.currentTime;
+    pourGain.gain.setTargetAtTime(on ? 0.13 : 0.0001, t, 0.06);
+    if (on) pourFilter.frequency.setTargetAtTime(900 - 500 * clamp(rr || 0, 0, 1), t, 0.08);
+  } catch (e) {}
+}
+function tone(freq, dur, type, vol) {
+  const a = audio(); if (!a) return;
+  try {
+    const t = a.currentTime;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+function sfxBlip()  { tone(600 + Math.random() * 300, 0.09, 'sine', 0.10); } // bloom bubble
+function sfxWarn()  { tone(180, 0.13, 'square', 0.09); }                     // channeling/rough
+function sfxClick() { tone(1250, 0.05, 'sine', 0.08); }
+function sfxChime() {
+  const a = audio(); if (!a) return;
+  [523.25, 659.25, 783.99].forEach((f, i) => {
+    setTimeout(() => tone(f, 0.35, 'triangle', 0.13), i * 120);
+  });
+}
+/* Cosmetic-only vibration (Android). NEVER a gameplay signal — all feedback
+   is visual (canvas shake + red ring), per DESIGN-MVP.md §8. */
+function buzz(pat) { try { if (navigator.vibrate) navigator.vibrate(pat); } catch (e) {} }
+
+/* ============================ INPUT ============================
+   Relative-mode touchpad (DESIGN-MVP.md §3): only pointer DELTAS move the
+   pour cursor — no jumps on touch-down. Secondary pointers ignored. */
+const $ = (id) => document.getElementById(id);
+const tp = $('touchpad');
+let activePid = null, lastPX = 0, lastPY = 0, lastMT = 0;
+function inputDown(e) {
+  if (activePid !== null) return;                 // ignore secondary pointers
+  activePid = e.pointerId;
+  try { tp.setPointerCapture(e.pointerId); } catch (err) {}
+  lastPX = e.clientX; lastPY = e.clientY; lastMT = e.timeStamp || performance.now();
+  if (S && (mode === 'bloom_pour' || mode === 'extract')) { S.pourOn = true; S.v = 0; }
+  audioUnlock();
+  if (e.cancelable) e.preventDefault();
+}
+function inputMove(e) {
+  if (e.pointerId !== activePid || !S) return;
+  const now = e.timeStamp || performance.now();
+  const dx = e.clientX - lastPX, dy = e.clientY - lastPY;
+  const dtm = Math.max(1, now - lastMT) / 1000;
+  lastPX = e.clientX; lastPY = e.clientY; lastMT = now;
+  if (mode !== 'bloom_pour' && mode !== 'extract') return;
+  S.cx = clamp(S.cx + dx, -S.Rd, S.Rd);
+  S.cy = clamp(S.cy + dy, -S.Rd, S.Rd);
+  const rl = Math.hypot(S.cx, S.cy);
+  if (rl > S.Rd) { S.cx *= S.Rd / rl; S.cy *= S.Rd / rl; }
+  S.r = Math.hypot(S.cx, S.cy);
+  const iv = Math.hypot(dx, dy) / dtm;
+  S.v = S.v + 0.25 * (iv - S.v);                  // EMA α=0.25
+  if (e.cancelable) e.preventDefault();
+}
+function inputUp(e) {
+  if (e.pointerId !== activePid) return;
+  activePid = null;
+  if (S) S.pourOn = false;
+}
+tp.addEventListener('pointerdown', inputDown);
+tp.addEventListener('pointermove', inputMove);
+tp.addEventListener('pointerup', inputUp);
+tp.addEventListener('pointercancel', inputUp);
+// The STOP button lives inside the touchpad: its own tap must NOT start a pour.
+$('stopBtn').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('stopBtn').addEventListener('click', (e) => { e.stopPropagation(); sfxClick(); finishOrder(); });
+
+/* ============================ SIM ============================
+   Per-frame update (DESIGN-MVP.md §4.3). dt in seconds. */
+function newOrderState(spec) {
+  return {
+    mode: 'bloom_pour',
+    grind: spec.g,
+    E: 0, W: 0, T: spec.t - 6,      // slurry starts cooler than the kettle
+    wet: 0, bed: 0, flooding: false,
+    C: 0, G: 0, pourOn: false,
+    v: 0, r: 0, cx: 0, cy: 0, Rd: L.Rd,
+    dwell: 0, chanEvents: 0, chanMarks: [],
+    pourT: 0, goodT: 0,
+    bloomT: 0, blipT: 0,
+    ripples: [], drops: [], bubbles: [],
+    warnKey: null, warnT: 0, shakeT: 0, agitNow: false,
+    t0: performance.now(),
+  };
+}
+function flashWarn(key) {
+  if (!S) return;
+  if (S.warnKey !== key || S.warnT <= 0) { S.warnKey = key; S.warnT = 1.6; sfxWarn(); }
+}
+function simUpdate(dt) {
+  const o = S;
+  // 1. Water & bed
+  const pouring = o.pourOn && o.mode !== 'bloom_wait';
+  if (pouring && o.W < CONFIG.MAX_WATER) o.W += CONFIG.POUR_RATE * dt;
+  o.wet = Math.min(1, o.W / CONFIG.BLOOM_WATER);
+  o.bed += ((pouring ? CONFIG.POUR_RATE : 0) - CONFIG.DRAWDOWN[o.grind]) * dt;
+  if (o.bed < 0) o.bed = 0;
+  o.flooding = o.bed > CONFIG.BED_MAX;
+  if (o.flooding && o.mode === 'extract') flashWarn('floodWarn');
+  // 2. Temperature
+  const tgt = pouring ? CONFIG.POUR_TEMP : CONFIG.AMBIENT;
+  o.T += (tgt - o.T) * (pouring ? 1.5 : 0.25) * dt;
+  if (o.agitNow) o.T -= 0.15 * dt;
+  // velocity decay when the finger rests (no move events)
+  if (o.pourOn && performance.now() - lastMT > 120) o.v *= Math.exp(-8 * dt);
+  // 3. Extraction
+  const tempF = 0.55 + 0.45 * clamp((o.T - 85) / 10, 0, 1);
+  const flowF = pouring ? 1.0 : 0.35;
+  const floodF = o.flooding ? 0.6 : 1.0;
+  o.E = Math.min(30, o.E + CONFIG.EXT_BASE * o.wet * tempF *
+                 CONFIG.GRIND_EXT[o.grind] * flowF * floodF * dt);
+  // droplets + ripples while pouring
+  if (pouring) {
+    if (Math.random() < dt * 22)
+      o.drops.push({ x: o.cx + (Math.random() - 0.5) * 14, y: o.cy + (Math.random() - 0.5) * 14, life: 0.5 });
+    if (Math.random() < dt * 9)
+      o.ripples.push({ x: o.cx, y: o.cy, r: 4, life: 0.8 });
+  }
+  for (let i = o.drops.length - 1; i >= 0; i--) { o.drops[i].life -= dt; if (o.drops[i].life <= 0) o.drops.splice(i, 1); }
+  for (let i = o.ripples.length - 1; i >= 0; i--) {
+    const rp = o.ripples[i]; rp.life -= dt; rp.r += dt * 46;
+    if (rp.life <= 0) o.ripples.splice(i, 1);
+  }
+  // 4-5. Channeling & agitation (extraction phase only)
+  o.agitNow = false;
+  if (o.mode === 'extract' && o.pourOn) {
+    if (o.v < CONFIG.CHAN_V) o.dwell += dt; else o.dwell = 0;
+    if (o.dwell > CONFIG.CHAN_T) {
+      o.C = Math.min(1, o.C + 0.2); o.dwell = 0; o.chanEvents++;
+      o.chanMarks.push({ x: o.cx, y: o.cy });
+      o.shakeT = 0.3; flashWarn('chanWarn'); buzz(30);
+      if (o.chanEvents >= 3) unlockAch('channel_chaos');
+    }
+    o.agitNow = (o.v > CONFIG.AGIT_V || o.r > CONFIG.WALL_R * o.Rd);
+    if (o.agitNow) {
+      o.G = Math.min(1, o.G + 0.3 * dt);
+      o.shakeT = Math.max(o.shakeT, 0.12);
+      flashWarn('roughWarn');
+      if (o.G >= 1) { unlockAch('astringent'); buzz([30, 50, 30]); }
+    }
+    // 6. Technique
+    o.pourT += dt;
+    if (o.v > CONFIG.TECH_VMIN && o.v < CONFIG.TECH_VMAX &&
+        o.r > CONFIG.TECH_RMIN * o.Rd && o.r < CONFIG.TECH_RMAX * o.Rd) o.goodT += dt;
+  }
+  // bloom transitions (module `mode` tracks S.mode so finishOrder()'s guard works)
+  if (o.mode === 'bloom_pour' && o.W >= CONFIG.BLOOM_WATER) {
+    o.mode = 'bloom_wait'; mode = 'bloom_wait';
+    o.bloomT = CONFIG.BLOOM_WAIT; o.pourOn = false;
+    unlockAch('first_bloom'); refreshTpHint();
+  }
+  if (o.mode === 'bloom_wait') {
+    o.bloomT -= dt; o.blipT -= dt;
+    if (o.blipT <= 0) {
+      o.blipT = 0.2 + Math.random() * 0.3; sfxBlip();
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * o.Rd * 0.8;
+      o.bubbles.push({ x: Math.cos(a) * rr, y: Math.sin(a) * rr, r: 2 + Math.random() * 4, life: 0.9 });
+    }
+    for (let i = o.bubbles.length - 1; i >= 0; i--) {
+      const b = o.bubbles[i]; b.life -= dt; b.y -= dt * 12;
+      if (b.life <= 0) o.bubbles.splice(i, 1);
+    }
+    if (o.bloomT <= 0) { o.mode = 'extract'; mode = 'extract'; refreshTpHint(); }
+  }
+  if (o.mode === 'extract' && o.W >= CONFIG.MAX_WATER) finishOrder(); // auto-stop
+  if (o.warnT > 0) o.warnT -= dt;
+  if (o.shakeT > 0) o.shakeT -= dt;
+  audioPour(o.pourOn && (o.mode === 'bloom_pour' || o.mode === 'extract') && !paused && !adPaused, o.r / o.Rd);
+  updateTechBar();
+}
+
+/* ============================ RENDER ============================
+   Canvas 2D, portrait. Zones: info 20% / canvas 55% / touchpad 25% (HTML). */
+const cv = $('game');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, L = { infoH: 0, midH: 0, Rd: 100, dcx: 0, dcy: 0 };
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  L.infoH = H * 0.20; L.midH = H * 0.55;
+  L.Rd = Math.min(W * 0.40, L.midH * 0.40);
+  L.dcx = W / 2; L.dcy = L.infoH + L.midH * 0.54;
+  if (S) S.Rd = L.Rd;
+}
+window.addEventListener('resize', resize);
+
+/* 4-axis radar. axes order: acidity(top) sweetness(right) bitterness(bottom) body(left). */
+function drawRadar(c, cx, cy, R, target, result, labels) {
+  const pts = (vals) => {
+    const p = [];
+    const arr = [vals.a, vals.s, vals.b, vals.body];
+    for (let i = 0; i < 4; i++) {
+      const ang = -Math.PI / 2 + i * Math.PI / 2;
+      const rr = R * clamp(arr[i] / 100, 0, 1);
+      p.push([cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr]);
+    }
+    return p;
+  };
+  const poly = (p, fill, stroke) => {
+    c.beginPath(); p.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]));
+    c.closePath(); c.fillStyle = fill; c.fill();
+    if (stroke) { c.strokeStyle = stroke; c.lineWidth = 2; c.stroke(); }
+  };
+  // grid
+  c.strokeStyle = 'rgba(255,224,138,.18)'; c.lineWidth = 1;
+  [0.33, 0.66, 1].forEach(f => {
+    c.beginPath();
+    for (let i = 0; i <= 4; i++) {
+      const ang = -Math.PI / 2 + i * Math.PI / 2;
+      const x = cx + Math.cos(ang) * R * f, y = cy + Math.sin(ang) * R * f;
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
+    }
+    c.stroke();
+  });
+  for (let i = 0; i < 4; i++) {
+    const ang = -Math.PI / 2 + i * Math.PI / 2;
+    c.beginPath(); c.moveTo(cx, cy);
+    c.lineTo(cx + Math.cos(ang) * R, cy + Math.sin(ang) * R); c.stroke();
+  }
+  if (target) poly(pts(target), 'rgba(255,224,138,.22)', 'rgba(255,224,138,.8)');
+  if (result) poly(pts(result), 'rgba(255,140,60,.55)', '#ff8a3c');
+  if (labels) {
+    c.fillStyle = '#f5e9d6'; c.font = '700 11px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    const names = [labels.a, labels.s, labels.b, labels.body];
+    for (let i = 0; i < 4; i++) {
+      const ang = -Math.PI / 2 + i * Math.PI / 2;
+      c.fillText(names[i], cx + Math.cos(ang) * (R + 22), cy + Math.sin(ang) * (R + 22));
+    }
+  }
+}
+function radarLabels() { return { a: t('acidity'), s: t('sweetness'), b: t('bitterness'), body: t('body') }; }
+
+function bedColor(E) {
+  const k = clamp(E / 28, 0, 1);
+  const r = Math.round(217 + (74 - 217) * k), g = Math.round(179 + (44 - 179) * k), b = Math.round(130 + (23 - 130) * k);
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+function drawDripper(nowS) {
+  const { dcx, dcy, Rd } = L, o = S;
+  ctx.save();
+  if (o.shakeT > 0) ctx.translate((Math.random() - 0.5) * 10 * o.shakeT * 3, (Math.random() - 0.5) * 10 * o.shakeT * 3);
+  // stand + ring
+  ctx.beginPath(); ctx.arc(dcx, dcy, Rd * 1.14, 0, 7); ctx.fillStyle = '#241a10'; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = '#6b4f2e'; ctx.stroke();
+  // paper filter
+  ctx.beginPath(); ctx.arc(dcx, dcy, Rd, 0, 7); ctx.fillStyle = '#e6d9bd'; ctx.fill();
+  // coffee bed (color follows extraction — always paired with the % number in HUD)
+  ctx.beginPath(); ctx.arc(dcx, dcy, Rd * 0.92, 0, 7); ctx.fillStyle = bedColor(o.E); ctx.fill();
+  // bed texture (stable pseudo-random dots)
+  ctx.fillStyle = 'rgba(0,0,0,.14)';
+  for (let i = 0; i < 40; i++) {
+    const a = (i * 2.39996) % (Math.PI * 2), rr = Rd * 0.88 * ((i * 0.61803) % 1);
+    ctx.beginPath(); ctx.arc(dcx + Math.cos(a) * rr, dcy + Math.sin(a) * rr, 2.2, 0, 7); ctx.fill();
+  }
+  // water layer
+  if (o.bed > 2) {
+    ctx.globalAlpha = clamp(0.18 + o.bed / CONFIG.BED_MAX * 0.3, 0, 0.5);
+    ctx.beginPath(); ctx.arc(dcx, dcy, Rd * 0.92, 0, 7); ctx.fillStyle = '#7a5230'; ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // channeling holes
+  o.chanMarks.forEach(m => {
+    ctx.beginPath(); ctx.arc(dcx + m.x, dcy + m.y, 11, 0, 7);
+    ctx.fillStyle = 'rgba(20,10,5,.75)'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,80,40,.7)'; ctx.stroke();
+  });
+  // spiral guide (extraction phase)
+  if (o.mode === 'extract') {
+    ctx.save(); ctx.setLineDash([6, 8]); ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let a = 0; a < Math.PI * 7; a += 0.08) {
+      const rr = Rd * 0.85 * a / (Math.PI * 7);
+      const x = dcx + Math.cos(a) * rr, y = dcy + Math.sin(a) * rr;
+      a === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke(); ctx.restore();
+  }
+  // bloom bubbles
+  o.bubbles.forEach(b => {
+    ctx.globalAlpha = clamp(b.life, 0, 1) * 0.8;
+    ctx.beginPath(); ctx.arc(dcx + b.x, dcy + b.y, b.r, 0, 7);
+    ctx.strokeStyle = '#fff3d6'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.globalAlpha = 1;
+  });
+  // ripples + droplets at pour cursor
+  o.ripples.forEach(rp => {
+    ctx.globalAlpha = clamp(rp.life * 1.4, 0, 1) * 0.7;
+    ctx.beginPath(); ctx.arc(dcx + rp.x, dcy + rp.y, rp.r, 0, 7);
+    ctx.strokeStyle = '#cfe8ff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.globalAlpha = 1;
+  });
+  o.drops.forEach(dr => {
+    ctx.globalAlpha = clamp(dr.life * 2, 0, 1);
+    ctx.beginPath(); ctx.arc(dcx + dr.x, dcy + dr.y, 3, 0, 7);
+    ctx.fillStyle = '#bfe0ff'; ctx.fill(); ctx.globalAlpha = 1;
+  });
+  // pour cursor (offset cursor — the finger is on the touchpad below)
+  if (o.mode === 'extract' || o.mode === 'bloom_pour') {
+    const px = dcx + o.cx, py = dcy + o.cy;
+    ctx.beginPath(); ctx.arc(px, py, 9, 0, 7);
+    ctx.fillStyle = o.pourOn ? '#bfe0ff' : 'rgba(191,224,255,.45)'; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = '#fff'; ctx.stroke();
+  }
+  // steam when hot
+  if (o.T > 88) {
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.10 + 0.10 * (o.T - 88) / 8) + ')';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 3; i++) {
+      const sx = dcx + (i - 1) * Rd * 0.4;
+      ctx.beginPath();
+      for (let y = 0; y <= 44; y += 6)
+        ctx.lineTo(sx + Math.sin(y / 10 + nowS * 2 + i * 2) * 7, dcy - Rd * 1.2 - y);
+      ctx.stroke();
+    }
+  }
+  // red agitation ring (visual signal — vibration is cosmetic-only)
+  if (o.G > 0.03) {
+    ctx.globalAlpha = clamp(o.G, 0, 1) * (0.55 + 0.35 * Math.sin(nowS * 10));
+    ctx.beginPath(); ctx.arc(dcx, dcy, Rd * 1.06, 0, 7);
+    ctx.lineWidth = 6; ctx.strokeStyle = '#ff3b30'; ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+function drawHUD() {
+  const o = S, pad = 16, y0 = 46;
+  ctx.textBaseline = 'alphabetic';
+  // left: extraction number (ALWAYS numeric — anti-frustration rule)
+  ctx.textAlign = 'left'; ctx.fillStyle = '#8a7358'; ctx.font = '700 11px sans-serif';
+  ctx.fillText(t('extraction').toUpperCase(), pad, y0);
+  ctx.fillStyle = '#ffe08a'; ctx.font = '800 40px sans-serif';
+  ctx.fillText(o.E.toFixed(1) + '%', pad, y0 + 42);
+  // sweet-spot bar under the number
+  const bx = pad, bw = W * 0.52, by = y0 + 54;
+  ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(bx, by, bw, 10);
+  const sx = bx + bw * (18 / 30), sw = bw * (4 / 30);
+  ctx.fillStyle = 'rgba(120,220,120,.55)'; ctx.fillRect(sx, by, sw, 10);
+  const mx = bx + bw * clamp(o.E / 30, 0, 1);
+  ctx.fillStyle = '#fff'; ctx.fillRect(mx - 1.5, by - 4, 3, 18);
+  ctx.fillStyle = '#8a7358'; ctx.font = '700 10px sans-serif';
+  ctx.fillText('18–22%', sx - 8, by + 24);
+  // right: mini target radar + live chips
+  const cust = CUSTOMERS[curSpec().c];
+  drawRadar(ctx, W - 62, y0 + 42, 44, cust.target, null, null);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#f5e9d6'; ctx.font = '700 13px sans-serif';
+  const cx0 = W - 122;
+  ctx.fillText('🌡 ' + o.T.toFixed(0) + '°C', cx0, y0 + 14);
+  ctx.fillText('⚖ ' + Math.round(o.W) + 'g', cx0, y0 + 34);
+  const tech = o.pourT > 0 ? Math.round(100 * o.goodT / o.pourT) : 100;
+  ctx.fillStyle = tech >= 80 ? '#8fd18f' : tech >= 50 ? '#ffe08a' : '#ff8a5c';
+  ctx.fillText('🎯 ' + tech + '%', cx0, y0 + 54);
+  if (o.mode === 'bloom_pour') {
+    ctx.textAlign = 'center'; ctx.fillStyle = '#ffe08a'; ctx.font = '800 15px sans-serif';
+    ctx.fillText(Math.round(o.W) + 'g / ' + CONFIG.BLOOM_WATER + 'g', W / 2, L.infoH + L.midH + 24);
+  }
+  if (o.mode === 'bloom_wait') {
+    ctx.textAlign = 'center'; ctx.fillStyle = '#ffe08a'; ctx.font = '800 22px sans-serif';
+    ctx.fillText(t('bloomWait'), W / 2, L.dcy);
+    ctx.font = '800 44px sans-serif';
+    ctx.fillText(Math.ceil(o.bloomT), W / 2, L.dcy + 52);
+  }
+}
+function drawWarn() {
+  if (!S || S.warnT <= 0 || !S.warnKey) return;
+  const msg = t(S.warnKey);
+  ctx.font = '800 15px sans-serif';
+  const wpx = ctx.measureText(msg).width + 36;
+  const x = W / 2 - wpx / 2, y = L.infoH + 8;
+  ctx.globalAlpha = clamp(S.warnT, 0, 1);
+  ctx.fillStyle = 'rgba(160,30,20,.92)'; ctx.fillRect(x, y, wpx, 34);
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+  ctx.fillText(msg, W / 2, y + 23);
+  ctx.globalAlpha = 1;
+}
+function drawMenuBackdrop(nowS) {
+  // calm idle dripper behind the menu overlay
+  const Rd = L.Rd, dcx = L.dcx, dcy = L.dcy;
+  ctx.beginPath(); ctx.arc(dcx, dcy, Rd * 1.14, 0, 7); ctx.fillStyle = 'rgba(36,26,16,.8)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(dcx, dcy, Rd * 0.92, 0, 7); ctx.fillStyle = bedColor(12); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 3;
+  for (let i = 0; i < 3; i++) {
+    const sx = dcx + (i - 1) * Rd * 0.4;
+    ctx.beginPath();
+    for (let y = 0; y <= 44; y += 6)
+      ctx.lineTo(sx + Math.sin(y / 10 + nowS * 1.5 + i * 2) * 7, dcy - Rd * 1.2 - y);
+    ctx.stroke();
+  }
+}
+function render(nowS) {
+  ctx.clearRect(0, 0, W, H);
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#251a10'); bg.addColorStop(1, '#100c07');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  if (!S) { drawMenuBackdrop(nowS); return; }
+  drawDripper(nowS);
+  if (mode === 'bloom_pour' || mode === 'bloom_wait' || mode === 'extract') drawHUD();
+  drawWarn();
+}
+
+/* ============================ SCREENS ============================ */
+let mode = 'menu', curShift = 0, curOrder = 0;
+let S = null, lastResult = null, runUnlocks = [];
+let paused = false;
+let muted = false, sdkForceMute = false, cgAudioMuted = false, adPaused = false;
+const OVERLAYS = ['menuOverlay','shiftOverlay','orderOverlay','resultOverlay','shiftDoneOverlay','achOverlay','helpOverlay'];
+function showOverlay(id) {
+  OVERLAYS.forEach(o => $(o).classList.add('hidden'));
+  if (id) $(id).classList.remove('hidden');
+}
+const curSpec = () => SHIFTS[curShift][curOrder];
+let toastTimer = null;
+function showToast(html) {
+  const el = $('toast');
+  el.innerHTML = html; el.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), 2600);
+}
+function refreshSoundBtn() {
+  $('soundBtn').textContent = (muted || sdkForceMute) ? t('soundOff') : t('soundOn');
+}
+function totalStars() {
+  let n = 0;
+  for (const k in save.stars) n += save.stars[k];
+  return n;
+}
+function shiftStars(si) {
+  let n = 0;
+  for (let i = 0; i < 4; i++) n += save.stars['s' + si + 'o' + i] || 0;
+  return n;
+}
+function updateMenuStats() {
+  $('menuStats').textContent = '★ ' + totalStars() + '/60 · ⏣ ' + save.coins + ' ' + t('coins');
+}
+function showMenu() {
+  mode = 'menu'; S = null;
+  $('touchpad').classList.add('hidden');
+  audioPour(false);
+  updateMenuStats();
+  showOverlay('menuOverlay');
+}
+function showShifts() {
+  mode = 'shifts';
+  const grid = $('shiftGrid'); grid.innerHTML = '';
+  for (let i = 0; i < 5; i++) {
+    const locked = i >= save.unlocked;
+    const card = document.createElement('div');
+    card.className = 'shift-card' + (locked ? ' locked' : '');
+    card.innerHTML = '<div class="s-num">' + t('selectShift').split(' ')[0] + ' ' + (i + 1) + '</div>' +
+      '<div class="s-stars">' + (locked ? '🔒 ' + t('locked') : '★ ' + t('shiftStars', { s: shiftStars(i) })) + '</div>';
+    if (!locked) ((idx) => card.addEventListener('click', () => {
+      sfxClick(); curShift = idx; curOrder = 0; showOrder();
+    }))(i);
+    grid.appendChild(card);
+  }
+  showOverlay('shiftOverlay');
+}
+function showOrder() {
+  const spec = curSpec(), cust = CUSTOMERS[spec.c];
+  mode = 'order';
+  $('oCount').textContent = t('orderOf', { a: curOrder + 1, b: 4 });
+  $('oEmoji').textContent = cust.emoji;
+  $('oName').textContent = cust.name[lang];
+  $('oQuote').textContent = cust.quote[lang];
+  $('oChips').innerHTML =
+    '<span class="chip">⚙️ ' + t('grind') + ': ' + t(spec.g) + '</span>' +
+    '<span class="chip">🌡 ' + spec.t + '°C</span>' +
+    '<span class="chip">⚖ 1:' + Math.round(CONFIG.TARGET_WATER / CONFIG.DOSE) + '</span>';
+  $('oTip').textContent = '💡 ' + cust.tip[lang];
+  const mc = $('radarMini').getContext('2d');
+  if (mc) { mc.clearRect(0, 0, 200, 200); drawRadar(mc, 100, 100, 68, cust.target, null, radarLabels()); }
+  showOverlay('orderOverlay');
+}
+function startBrew() {
+  const spec = curSpec();
+  S = newOrderState(spec);
+  runUnlocks = [];
+  mode = 'bloom_pour';
+  showOverlay(null);
+  $('touchpad').classList.remove('hidden');
+  refreshTpHint(); updateTechBar();
+  CG.gameplayStart();
+}
+function refreshTpHint() {
+  const stopBtn = $('stopBtn');
+  if (mode === 'bloom_pour') { $('tpHint').textContent = t('bloomHint'); stopBtn.style.display = 'none'; }
+  else if (mode === 'bloom_wait') { $('tpHint').textContent = t('bloomWait'); stopBtn.style.display = 'none'; }
+  else if (mode === 'extract') { $('tpHint').textContent = t('extractHint'); stopBtn.style.display = ''; stopBtn.textContent = t('stop'); }
+}
+function updateTechBar() {
+  if (!S) return;
+  const p = S.pourT > 0 ? S.goodT / S.pourT : 1;
+  $('techFill').style.width = Math.round(p * 100) + '%';
+  $('techPct').textContent = t('technique') + ' ' + Math.round(p * 100) + '%';
+}
+function finishOrder() {
+  if (mode !== 'extract' || !S) return;
+  mode = 'result';
+  S.pourOn = false; audioPour(false);
+  $('touchpad').classList.add('hidden');
+  const spec = curSpec(), cust = CUSTOMERS[spec.c];
+  const res = scoreOrder({ E: S.E, W: S.W, grind: S.grind, C: S.C, G: S.G, flooding: S.flooding, cust });
+  res.tech = S.pourT > 0 ? 100 * S.goodT / S.pourT : 0;
+  res.E = S.E; res.W = S.W; res.grind = S.grind;
+  res.cust = cust; res.timeS = (performance.now() - S.t0) / 1000;
+  lastResult = res;
+  if (S.E >= 18 && S.E <= 22) unlockAch('sweet_spot');
+  if (res.tech >= 95 && S.C === 0 && S.pourT > 3) unlockAch('surgeon');
+  if (res.stars === 3) { unlockAch('triple_star'); CG.happytime(); }
+  if (res.timeS < 60 && res.stars >= 2) unlockAch('speed_barista');
+  const key = 's' + curShift + 'o' + curOrder;
+  if (res.stars > (save.stars[key] || 0)) save.stars[key] = res.stars;
+  const coins = 10 + res.stars * 5 + Math.round(res.tech * 0.1);
+  save.coins += coins;
+  if (Math.round(res.tech) > save.bestTech) save.bestTech = Math.round(res.tech);
+  let ps = true;
+  for (let i = 0; i < 4; i++) if ((save.stars['s' + curShift + 'o' + i] || 0) < 3) ps = false;
+  if (ps) unlockAch('perfect_shift');
+  persist();
+  CG.gameplayStop();
+  showResult(res, coins);
+}
+function showResult(res, coins) {
+  $('rStars').textContent = '★'.repeat(res.stars) + '☆'.repeat(3 - res.stars);
+  const bc = $('radarBig').getContext('2d');
+  if (bc) {
+    bc.clearRect(0, 0, 300, 300);
+    drawRadar(bc, 150, 150, 108, res.cust.target,
+      { a: res.flav.acidity, s: res.flav.sweetness, b: res.flav.bitterness, body: res.flav.body },
+      radarLabels());
+  }
+  const rows = [
+    [t('acidity'), res.flav.acidity, res.axis.a],
+    [t('sweetness'), res.flav.sweetness, res.axis.s],
+    [t('bitterness'), res.flav.bitterness, res.axis.b],
+    [t('body'), res.flav.body, res.axis.body],
+  ];
+  $('rAxes').innerHTML = rows.map(r =>
+    '<div class="axrow"><span>' + r[0] + ' ' + Math.round(r[1]) + '</span><span class="axv">' + Math.round(r[2]) + '</span></div>'
+  ).join('') + '<div class="axrow"><span><b>' + t('total') + '</b></span><span class="axv">' + Math.round(res.total) + '</span></div>';
+  $('rCoins').textContent = '+' + coins + ' ' + t('coins');
+  $('rUnlocks').textContent = runUnlocks.map(id => {
+    const a = ACHIEVEMENTS.find(x => x.id === id);
+    return a ? '🏆 ' + a.name[lang] : '';
+  }).filter(Boolean).join(' · ');
+  $('nextBtn').textContent = curOrder < 3 ? t('nextOrder') : t('shiftComplete');
+  showOverlay('resultOverlay');
+  if (res.stars >= 2) sfxChime();
+}
+function shiftDone() {
+  mode = 'shiftDone';
+  if (save.unlocked < Math.min(5, curShift + 2)) { save.unlocked = Math.min(5, curShift + 2); persist(); }
+  $('sdStars').textContent = '★ ' + shiftStars(curShift) + '/12';
+  $('sdStats').textContent = '⏣ ' + save.coins + ' ' + t('coins');
+  showOverlay('shiftDoneOverlay');
+}
+function renderAchGrid() {
+  const grid = $('achGrid'); grid.innerHTML = '';
+  ACHIEVEMENTS.forEach(a => {
+    const un = !!save.ach[a.id];
+    const d = document.createElement('div');
+    d.className = 'ach' + (un ? '' : ' locked');
+    d.innerHTML = '<div class="a-ico">' + (un ? a.ico : '🔒') + '</div>' +
+      '<div class="a-name">' + (un ? a.name[lang] : t('achLocked')) + '</div>' +
+      '<div class="a-desc">' + a.desc[lang] + '</div>';
+    grid.appendChild(d);
+  });
+}
+function showAch() { mode = 'ach'; renderAchGrid(); showOverlay('achOverlay'); }
+function fillHelp() {
+  $('helpLines').innerHTML = ['helpL1','helpL2','helpL3','helpL4'].map(k => '<div>' + t(k) + '</div>').join('');
+}
+function showHelp() { mode = 'help'; fillHelp(); showOverlay('helpOverlay'); }
+
+/* 1080×1350 share card, fully canvas-drawn (portfolio standard). */
+function shareCard() {
+  try {
+    const r = lastResult; if (!r) return;
+    const c = document.createElement('canvas');
+    c.width = 1080; c.height = 1350;
+    const x = c.getContext('2d');
+    if (!x) return;
+    const bg = x.createLinearGradient(0, 0, 0, 1350);
+    bg.addColorStop(0, '#2b1e11'); bg.addColorStop(1, '#120d07');
+    x.fillStyle = bg; x.fillRect(0, 0, 1080, 1350);
+    x.textAlign = 'center'; x.fillStyle = '#ffe08a';
+    x.font = '800 64px sans-serif'; x.fillText('POUR & PRESSURE', 540, 110);
+    x.font = '120px sans-serif'; x.fillText(r.cust.emoji, 540, 250);
+    x.fillStyle = '#f5e9d6'; x.font = '700 44px sans-serif';
+    x.fillText(r.cust.name.en, 540, 320);
+    drawRadar(x, 540, 660, 260, r.cust.target,
+      { a: r.flav.acidity, s: r.flav.sweetness, b: r.flav.bitterness, body: r.flav.body }, null);
+    const names = ['Acidity', 'Sweetness', 'Bitterness', 'Body'];
+    const vals = [r.flav.acidity, r.flav.sweetness, r.flav.bitterness, r.flav.body];
+    x.font = '700 34px sans-serif'; x.fillStyle = '#f5e9d6';
+    names.forEach((n, i) => x.fillText(n + ' ' + Math.round(vals[i]), 200 + i * 227, 985));
+    x.font = '800 110px sans-serif'; x.fillStyle = '#ffe08a';
+    x.fillText('★'.repeat(r.stars) + '☆'.repeat(3 - r.stars), 540, 1120);
+    x.font = '700 40px sans-serif'; x.fillStyle = '#f5e9d6';
+    x.fillText(t('beatMe'), 540, 1210);
+    x.font = '700 30px sans-serif'; x.fillStyle = 'rgba(245,233,214,.55)';
+    x.fillText('pour & pressure · html5', 540, 1290);
+    c.toBlob((blob) => {
+      if (!blob) return;
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'pour-pressure.png';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        showToast('<span class="t-ico">💾</span><span>' + t('cardSaved') + '</span>');
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
+function applyLang() {
+  try { document.documentElement.lang = lang; } catch (e) {}
+  $('menuDesc').textContent = t('tagline');
+  $('brewBtn').textContent = t('startBrewing');
+  $('menuAchLabel').textContent = t('achievements');
+  $('menuHelpLabel').textContent = t('howTo');
+  $('shiftTitle').textContent = t('selectShift');
+  $('shiftBack').textContent = t('back');
+  $('orderBack').textContent = t('back');
+  $('startBrewBtn').textContent = t('startBrew');
+  $('nextBtn').textContent = t('nextOrder');
+  $('retryBtn').textContent = t('retry');
+  $('shareBtn').textContent = '📤 ' + t('shareCard');
+  $('achTitle').textContent = '🏆 ' + t('achievements');
+  $('achBack').textContent = t('back');
+  $('helpTitle').textContent = t('howTo');
+  $('helpBack').textContent = t('back');
+  $('sdTitle').textContent = t('shiftComplete');
+  $('sdContinue').textContent = t('continue');
+  $('sdAd').textContent = t('adNote');
+  $('langBtn').innerHTML = '<span class="' + (lang === 'en' ? 'on' : '') + '">EN</span> | <span class="' + (lang === 'id' ? 'on' : '') + '">ID</span>';
+  refreshSoundBtn();
+  if (mode === 'menu') updateMenuStats();
+  if (mode === 'shifts') showShifts();
+  if (mode === 'ach') renderAchGrid();
+  if (mode === 'help') fillHelp();
+  if (mode === 'order') showOrder();
+  refreshTpHint();
+}
+
+/* ---- UI wiring ---- */
+$('brewBtn').addEventListener('click', () => { sfxClick(); showShifts(); });
+$('menuAchBtn').addEventListener('click', () => { sfxClick(); showAch(); });
+$('menuHelpBtn').addEventListener('click', () => { sfxClick(); showHelp(); });
+$('shiftBack').addEventListener('click', () => { sfxClick(); showMenu(); });
+$('orderBack').addEventListener('click', () => { sfxClick(); showShifts(); });
+$('startBrewBtn').addEventListener('click', () => { sfxClick(); startBrew(); });
+$('nextBtn').addEventListener('click', () => {
+  sfxClick();
+  if (curOrder < 3) { curOrder++; showOrder(); } else shiftDone();
+});
+$('retryBtn').addEventListener('click', () => { sfxClick(); showOrder(); });
+$('shareBtn').addEventListener('click', () => { sfxClick(); shareCard(); });
+$('sdContinue').addEventListener('click', () => { sfxClick(); Ads.midroll(() => showShifts()); });
+$('achBack').addEventListener('click', () => { sfxClick(); showMenu(); });
+$('helpBack').addEventListener('click', () => { sfxClick(); showMenu(); });
+$('langBtn').addEventListener('click', () => { sfxClick(); setLang(lang === 'en' ? 'id' : 'en'); });
+$('soundBtn').addEventListener('click', () => {
+  if (sdkForceMute) { showToast('<span class="t-ico">🔇</span><span>' + t('audioLocked') + '</span>'); return; }
+  muted = !muted; save.muted = muted; persist(); refreshSoundBtn();
+  if (muted) audioPour(false);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { paused = true; if (S) S.pourOn = false; audioPour(false); }
+  else { paused = false; lastMT = performance.now(); }
+});
+
+/* ============================ SDK ============================
+   CrazyGames SDK v3 adapter — same verified pattern as tower-rush.
+   gameplayStart on order start · gameplayStop on results ·
+   happytime on ★★★ · midroll ONLY between shifts (never mid-order).
+   All ad calls go through Ads.midroll so a GameDistribution variant
+   is a one-line swap later. */
+const CG = {
+  ready: false, sdk: null, _ready: null,
+  _call(fn) {
+    if (!this._ready) return;
+    this._ready.then(ok => { try { if (ok && this.sdk) fn(this.sdk); } catch (e) {} });
+  },
+  init() {
+    this._ready = (async () => {
+      let Sdk = null;
+      try { Sdk = window.CrazyGames && window.CrazyGames.SDK; } catch (e) { return false; }
+      if (!Sdk || typeof Sdk.init !== 'function') return false;
+      try { await Sdk.init(); } catch (e) { return false; }
+      let env = null;
+      try { env = Sdk.environment; } catch (e) {}
+      if (env === 'disabled') return false;
+      this.sdk = Sdk; this.ready = true;
+      try {
+        const gm = Sdk.game;
+        if (gm && gm.settings && gm.settings.muteAudio === true) {
+          sdkForceMute = true; muted = true; refreshSoundBtn();
+        }
+        if (gm && typeof gm.addSettingsChangeListener === 'function') {
+          gm.addSettingsChangeListener((ns) => {
+            if (ns && typeof ns.muteAudio === 'boolean') {
+              sdkForceMute = ns.muteAudio;
+              if (ns.muteAudio) muted = true;
+              refreshSoundBtn();
+            }
+          });
+        }
+      } catch (e) {}
+      return true;
+    })();
+    return this._ready;
+  },
+  gameplayStart() { this._call(s => s.game.gameplayStart()); },
+  gameplayStop()  { this._call(s => s.game.gameplayStop()); },
+  happytime()     { this._call(s => s.game.happytime()); },
+  midroll(onDone) {
+    const done = () => { try { onDone && onDone(); } catch (e) {} };
+    let settled = false;
+    const finish = () => {
+      if (settled) return; settled = true;
+      adPaused = false; cgAudioMuted = false; done();
+    };
+    const watchdog = setTimeout(finish, 8000); // never trap the player
+    const run = () => {
+      try {
+        this.sdk.ad.requestAd('midgame', {
+          adStarted:  () => { adPaused = true; cgAudioMuted = true; audioPour(false); },
+          adFinished: () => { clearTimeout(watchdog); finish(); },
+          adError:    () => { clearTimeout(watchdog); finish(); },
+        });
+      } catch (e) { clearTimeout(watchdog); finish(); }
+    };
+    if (!this._ready) { clearTimeout(watchdog); finish(); return; }
+    this._ready.then(ok => { if (ok) run(); else { clearTimeout(watchdog); finish(); } });
+  },
+};
+const Ads = { midroll(onDone) { CG.midroll(onDone); } };
+
+/* ============================ BOOT ============================ */
+let lastT = 0;
+function loop(ts) {
+  requestAnimationFrame(loop);
+  const now = (typeof ts === 'number') ? ts : performance.now();
+  let dt = (now - lastT) / 1000; lastT = now;
+  if (!(dt >= 0)) dt = 0;
+  if (dt > 0.05) dt = 0.05;
+  if (!paused && !adPaused && S && (mode === 'bloom_pour' || mode === 'bloom_wait' || mode === 'extract'))
+    simUpdate(dt);
+  render(now / 1000);
+}
+save = loadSave();
+lang = save.lang === 'id' ? 'id' : 'en';
+muted = !!save.muted;
+resize();
+applyLang();
+CG.init();
+showMenu();
+requestAnimationFrame(loop);
+
+/* Headless test hook (used by tests/test_pour_pressure.js). */
+window.__PP_TEST__ = {
+  CONFIG, CUSTOMERS, SHIFTS, ACHIEVEMENTS, I18N,
+  flavorAt, bodyAt, applyPenalties, scoreAxis, scoreOrder,
+  t, setLang, getLang, unlockAch,
+  achUnlocked: () => Object.keys(save.ach).sort(),
+  saveGet: () => save,
+  CG,
+};
+</script>
+</body>
+</html>
