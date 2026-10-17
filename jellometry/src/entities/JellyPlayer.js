@@ -45,6 +45,7 @@ export class JellyPlayer {
       morphFlat: false,
       morphTall: false
     };
+    this.analogInput = new THREE.Vector2(0, 0);
     this.isGrounded = false;
     this.coyoteTimer = 0;
     this.jumpCooldown = 0;
@@ -389,10 +390,13 @@ export class JellyPlayer {
   }
 
   updateMovement(dt) {
-    const moveX = (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
-    const moveZ = (this.keys.backward ? 1 : 0) - (this.keys.forward ? 1 : 0);
+    const keyX = (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0);
+    const keyZ = (this.keys.backward ? 1 : 0) - (this.keys.forward ? 1 : 0);
 
-    const inputVec = new THREE.Vector2(moveX, moveZ);
+    const inputVec = new THREE.Vector2(
+      keyX + this.analogInput.x,
+      keyZ + this.analogInput.y
+    );
     if (inputVec.lengthSq() > 1) {
       inputVec.normalize();
     }

@@ -41,8 +41,11 @@ export class LevelEditor {
     this.orbitControls.target.set(0, 1.5, -18);
     this.orbitControls.enabled = false;
 
+    const isCoarsePointer =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(pointer: coarse)').matches;
     this.transformControls = new TransformControls(this.camera, dom);
-    this.transformControls.setSize(0.95);
+    this.transformControls.setSize(isCoarsePointer ? 1.35 : 0.95);
     this.transformControls.setTranslationSnap(this.gridSnap);
     this.transformControls.setRotationSnap(THREE.MathUtils.degToRad(15));
     this.transformControls.setScaleSnap(0.1);
@@ -126,8 +129,9 @@ export class LevelEditor {
         e.clientX - this.pointerDownPos.x,
         e.clientY - this.pointerDownPos.y
       );
+      const tapThreshold = e.pointerType === 'touch' ? 14 : 6;
       // Ignore pointerup if the user was orbiting/panning the camera.
-      if (moveDist > 6) return;
+      if (moveDist > tapThreshold) return;
 
       this.updatePointer(e);
 

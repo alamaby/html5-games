@@ -63,13 +63,19 @@ class JellometryGame {
   }
 
   initScene() {
+    this.isCoarsePointer =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)').matches || window.innerWidth <= 900);
+
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: true,
+      antialias: !this.isCoarsePointer,
       powerPreference: 'high-performance'
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, this.isCoarsePointer ? 1.5 : 2)
+    );
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -97,7 +103,8 @@ class JellometryGame {
     this.dirLight = new THREE.DirectionalLight(0xffffff, 1.35);
     this.dirLight.position.set(18, 34, 22);
     this.dirLight.castShadow = true;
-    this.dirLight.shadow.mapSize.set(2048, 2048);
+    const shadowRes = this.isCoarsePointer ? 1024 : 2048;
+    this.dirLight.shadow.mapSize.set(shadowRes, shadowRes);
     this.dirLight.shadow.camera.near = 1;
     this.dirLight.shadow.camera.far = 140;
     const d = 48;
@@ -127,15 +134,26 @@ class JellometryGame {
       presetSelect: document.getElementById('preset-select'),
       jellyColorSelect: document.getElementById('jelly-color-select'),
       btnMute: document.getElementById('btn-mute'),
+      topOptionsDrawer: document.getElementById('top-options-drawer'),
+      btnMobileOptions: document.getElementById('btn-mobile-options'),
       btnToggleMode: document.getElementById('btn-toggle-mode'),
       playControlsBar: document.getElementById('play-controls-bar'),
       touchControls: document.getElementById('touch-controls'),
+      joystickZone: document.getElementById('joystick-zone'),
+      joystickBase: document.getElementById('joystick-base'),
+      joystickKnob: document.getElementById('joystick-knob'),
+      btnTouchFlat: document.getElementById('btn-touch-flat'),
+      btnTouchCube: document.getElementById('btn-touch-cube'),
+      btnTouchTall: document.getElementById('btn-touch-tall'),
+      btnTouchRespawn: document.getElementById('btn-touch-respawn'),
+      btnTouchJump: document.getElementById('btn-touch-jump'),
       morphSlider: document.getElementById('morph-slider'),
       btnMorphFlat: document.getElementById('btn-morph-flat'),
       btnMorphTall: document.getElementById('btn-morph-tall'),
       btnRespawn: document.getElementById('btn-respawn'),
       toastBanner: document.getElementById('toast-banner'),
       editorInspector: document.getElementById('editor-inspector'),
+      btnToggleInspector: document.getElementById('btn-toggle-inspector'),
       editorDock: document.getElementById('editor-dock'),
       catalogButtons: document.getElementById('catalog-buttons'),
       inspectorEmpty: document.getElementById('inspector-empty'),
@@ -191,7 +209,7 @@ class JellometryGame {
         this.editor.setPlacementTool(item.type);
         this.syncCatalogHighlight();
         if (created) {
-          this.showToast(`Added ${item.label} (${created.id}). Drag gizmo or click grid to place more.`);
+          this.showToast(`Added ${item.label} (${created.id}). Drag gizmo or tap grid to place more.`);
         }
       });
       this.dom.catalogButtons.appendChild(btn);
@@ -199,11 +217,15 @@ class JellometryGame {
 
     this.dom.presetSelect.addEventListener('change', (e) => {
       this.loadPresetCourse(e.target.value);
+      this.dom.topOptionsDrawer?.classList.remove('is-open');
+      this.dom.btnMobileOptions?.setAttribute('aria-expanded', 'false');
     });
 
     this.dom.jellyColorSelect.addEventListener('change', (e) => {
       this.player.setPalette(e.target.value);
       this.sound.playUiTick(660);
+      this.dom.topOptionsDrawer?.classList.remove('is-open');
+      this.dom.btnMobileOptions?.setAttribute('aria-expanded', 'false');
     });
 
     this.dom.btnMute.addEventListener('click', () => {
@@ -212,27 +234,61 @@ class JellometryGame {
       this.dom.btnMute.setAttribute('aria-pressed', String(muted));
     });
 
+    this.dom.btnMobileOptions?.addEventListener('click', () => {
+      const isOpen = this.dom.topOptionsDrawer.classList.toggle('is-open');
+      this.dom.btnMobileOptions.setAttribute('aria-expanded', String(isOpen));
+      this.sound.playUiTick(600);
+    });
+
+    this.dom.btnToggleInspector?.addEventListener('click', () => {
+      const minimized = this.dom.editorInspector.classList.toggle('is-minimized');
+      this.dom.btnToggleInspector.textContent = minimized ? 'Expand' : 'Minimize';
+      this.dom.btnToggleInspector.setAttribute('aria-expanded', String(!minimized));
+      this.sound.playUiTick(580);
+    });
+
     this.dom.btnToggleMode.addEventListener('click', () => {
       this.toggleMode();
     });
 
     this.dom.morphSlider.addEventListener('input', (e) => {
-      this.player.setMorphValue( parseFloat(e.target.value), true );
+      this.player.setMorphValue(parseFloat(e.target.value), true);
+      this.syncTouchMorphButtons();
     });
 
     this.dom.btnMorphFlat.addEventListener('click', () => {
       this.player.setMorphValue(Math.max(-1, this.player.morphValue - 0.35), true);
       this.dom.morphSlider.value = String(this.player.morphValue);
+      this.syncTouchMorphButtons();
     });
 
     this.dom.btnMorphTall.addEventListener('click', () => {
       this.player.setMorphValue(Math.min(1, this.player.morphValue + 0.35), true);
       this.dom.morphSlider.value = String(this.player.morphValue);
+      this.syncTouchMorphButtons();
     });
 
     this.dom.btnRespawn.addEventListener('click', () => {
       this.player.respawn(false);
       this.dom.morphSlider.value = '0';
+      this.syncTouchMorphButtons();
+      this.showToast('Respawned at active checkpoint.');
+    });
+
+    // Touch quick-morph and reset buttons.
+    document.querySelectorAll('.touch-morph-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const targetMorph = parseFloat(btn.dataset.morph || '0');
+        this.player.setMorphValue(targetMorph, true);
+        this.dom.morphSlider.value = String(targetMorph);
+        this.syncTouchMorphButtons();
+      });
+    });
+
+    this.dom.btnTouchRespawn?.addEventListener('click', () => {
+      this.player.respawn(false);
+      this.dom.morphSlider.value = '0';
+      this.syncTouchMorphButtons();
       this.showToast('Respawned at active checkpoint.');
     });
 
@@ -459,6 +515,76 @@ class JellometryGame {
       btn.addEventListener('pointerleave', () => setKey(false));
       btn.addEventListener('pointercancel', () => setKey(false));
     });
+
+    this.bindVirtualJoystick();
+  }
+
+  bindVirtualJoystick() {
+    const zone = this.dom.joystickZone;
+    const base = this.dom.joystickBase;
+    const knob = this.dom.joystickKnob;
+    if (!zone || !base || !knob) return;
+
+    this.joystickPointerId = null;
+    const maxRadius = 36;
+
+    const updateStick = (clientX, clientY) => {
+      const rect = base.getBoundingClientRect();
+      const centerX = rect.left + rect.width * 0.5;
+      const centerY = rect.top + rect.height * 0.5;
+
+      let dx = clientX - centerX;
+      let dy = clientY - centerY;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist > maxRadius) {
+        dx = (dx / dist) * maxRadius;
+        dy = (dy / dist) * maxRadius;
+      }
+
+      knob.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+      this.player.analogInput.set(dx / maxRadius, dy / maxRadius);
+    };
+
+    const resetStick = () => {
+      this.joystickPointerId = null;
+      knob.style.transform = 'translate(0px, 0px)';
+      this.player.analogInput.set(0, 0);
+    };
+    this.resetJoystick = resetStick;
+
+    zone.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.joystickPointerId = e.pointerId;
+      zone.setPointerCapture?.(e.pointerId);
+      updateStick(e.clientX, e.clientY);
+    });
+
+    zone.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== this.joystickPointerId) return;
+      e.preventDefault();
+      updateStick(e.clientX, e.clientY);
+    });
+
+    zone.addEventListener('pointerup', (e) => {
+      if (e.pointerId === this.joystickPointerId) {
+        resetStick();
+      }
+    });
+
+    zone.addEventListener('pointercancel', (e) => {
+      if (e.pointerId === this.joystickPointerId) {
+        resetStick();
+      }
+    });
+  }
+
+  syncTouchMorphButtons() {
+    const m = this.player.morphValue;
+    const activeProfile = m < -0.35 ? '-0.9' : m > 0.35 ? '0.9' : '0';
+    document.querySelectorAll('.touch-morph-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.morph === activeProfile);
+    });
   }
 
   toggleMode() {
@@ -488,6 +614,7 @@ class JellometryGame {
       this.player.setSpawnPoint(new THREE.Vector3(sp[0], sp[1], sp[2]), null);
       this.player.respawn(false);
       this.dom.morphSlider.value = '0';
+      this.syncTouchMorphButtons();
 
       // Position OrbitControls around the player's current region for immediate editing.
       const focusZ = Math.min(-8, this.player.rootGroup.position.z - 6);
@@ -506,7 +633,7 @@ class JellometryGame {
       this.dom.editorInspector.hidden = false;
       this.dom.editorDock.hidden = false;
       this.renderInspector(this.editor.selectedObstacle);
-      this.showToast('Editor Mode: Click obstacles to transform or choose a tool below.');
+      this.showToast('Editor Mode: Tap obstacles to transform or choose a tool below.');
     } else {
       // Serialize the exact edited state before starting physics simulation.
       this.editorSnapshot = this.factory.serializeLevel({
@@ -533,6 +660,7 @@ class JellometryGame {
     Object.keys(this.player.keys).forEach((k) => {
       this.player.keys[k] = false;
     });
+    this.resetJoystick?.();
   }
 
   loadPresetCourse(presetId, forceReset = false) {
@@ -582,6 +710,7 @@ class JellometryGame {
     this.player.setSpawnPoint(new THREE.Vector3(sp[0], sp[1], sp[2]), null);
     this.player.respawn(false);
     this.dom.morphSlider.value = '0';
+    this.syncTouchMorphButtons();
   }
 
   handleRaceVictory() {
@@ -608,6 +737,13 @@ class JellometryGame {
       this.dom.inspectorEmpty.hidden = false;
       this.dom.inspectorForm.hidden = true;
       return;
+    }
+
+    // Auto-expand the mobile inspector sheet when an obstacle is actively selected.
+    this.dom.editorInspector.classList.remove('is-minimized');
+    if (this.dom.btnToggleInspector) {
+      this.dom.btnToggleInspector.textContent = 'Minimize';
+      this.dom.btnToggleInspector.setAttribute('aria-expanded', 'true');
     }
 
     this.dom.inspectorEmpty.hidden = true;
@@ -903,8 +1039,19 @@ class JellometryGame {
     const playerPos = this.player.rootGroup.position;
     const speed = this.player.getSpeed();
 
+    // Hor+ compensation keeps the full 7m track width visible on portrait (9:16) smartphone screens.
+    const aspect = this.camera.aspect || 1;
+    const portraitRatio = aspect < 1 ? 1 - aspect : 0;
+    const portraitFovBoost = portraitRatio * 18;
+    const camHeight = 4.4 + portraitRatio * 1.8;
+    const camDistZ = 8.6 + portraitRatio * 5.2;
+
     // Boost FOV dynamically when accelerating or launching off slime pads.
-    const targetFov = THREE.MathUtils.clamp(58 + Math.max(0, speed - 3) * 1.35, 58, 72);
+    const targetFov = THREE.MathUtils.clamp(
+      58 + portraitFovBoost + Math.max(0, speed - 3) * 1.35,
+      58,
+      82
+    );
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-6 * dt));
       this.camera.updateProjectionMatrix();
@@ -912,8 +1059,8 @@ class JellometryGame {
 
     const desiredPos = new THREE.Vector3(
       playerPos.x * 0.75,
-      playerPos.y + 4.4,
-      playerPos.z + 8.6
+      playerPos.y + camHeight,
+      playerPos.z + camDistZ
     );
     const posBlend = 1 - Math.exp(-8.5 * dt);
     this.camera.position.lerp(desiredPos, posBlend);
@@ -944,6 +1091,7 @@ class JellometryGame {
 
     if (this.player.keys.morphFlat || this.player.keys.morphTall) {
       this.dom.morphSlider.value = String(this.player.morphValue.toFixed(2));
+      this.syncTouchMorphButtons();
     }
   }
 

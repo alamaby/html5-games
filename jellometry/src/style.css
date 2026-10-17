@@ -36,7 +36,9 @@ body {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+  touch-action: none;
 }
 
 #game-canvas {
@@ -44,6 +46,7 @@ body {
   width: 100%;
   height: 100%;
   cursor: grab;
+  touch-action: none;
 }
 
 #game-canvas:active {
@@ -156,6 +159,17 @@ textarea:focus-visible {
   flex-wrap: wrap;
 }
 
+.top-options-drawer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mobile-only-btn {
+  display: none;
+}
+
 select,
 input[type='number'],
 input[type='text'],
@@ -238,7 +252,7 @@ select {
 /* Bottom Play Mode Bar */
 .play-controls-bar {
   position: fixed;
-  bottom: 14px;
+  bottom: max(14px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 18;
@@ -314,6 +328,24 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.editor-inspector.is-minimized .inspector-body {
+  display: none;
 }
 
 .panel-title {
@@ -639,78 +671,232 @@ select {
 .touch-controls {
   display: none;
   position: fixed;
-  bottom: 138px;
-  left: 14px;
-  right: 14px;
-  z-index: 17;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: max(14px, env(safe-area-inset-left));
+  right: max(14px, env(safe-area-inset-right));
+  z-index: 18;
   justify-content: space-between;
   align-items: flex-end;
   pointer-events: none;
 }
 
-.touch-pad,
-.touch-actions {
+.joystick-zone {
   pointer-events: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  touch-action: none;
 }
 
-.touch-row {
+.joystick-base {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: rgba(20, 24, 33, 0.78);
+  border: 2px solid var(--border-subtle);
+  box-shadow: var(--shadow-dock);
   display: flex;
-  gap: 6px;
+  align-items: center;
+  justify-content: center;
 }
 
-.touch-btn {
-  min-width: 48px;
-  min-height: 48px;
+.joystick-knob {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-lime);
+  border: 2px solid #f4f6fa;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: transform 0.04s linear;
+}
+
+.joystick-caption {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--text-muted);
   background: rgba(20, 24, 33, 0.85);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.touch-actions {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.touch-morph-row,
+.touch-primary-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.touch-morph-btn {
+  min-width: 54px;
+  min-height: 44px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  background: rgba(20, 24, 33, 0.88);
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
 }
 
+.touch-morph-btn.is-active {
+  background: var(--accent-lime);
+  color: #141821;
+  border-color: var(--accent-lime);
+}
+
+.touch-btn {
+  min-width: 56px;
+  min-height: 52px;
+  background: rgba(20, 24, 33, 0.88);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.touch-respawn {
+  min-width: 64px;
+  min-height: 54px;
+  font-size: 0.78rem;
+}
+
 .touch-jump {
-  min-width: 88px;
-  min-height: 64px;
+  min-width: 96px;
+  min-height: 68px;
+  font-size: 1rem;
   background: var(--accent-coral);
   color: #141821;
+  border-color: var(--accent-coral);
+  box-shadow: var(--shadow-dock);
 }
 
 [hidden] {
   display: none !important;
 }
 
-/* Mobile Responsive Layout (R-03) */
-@media (max-width: 900px) {
-  .top-bar {
-    padding: 8px 10px;
-    gap: 8px;
-  }
-
+/* Tablet / Small Laptop State (R-03) */
+@media (max-width: 1120px) {
   .morph-box {
     display: none;
   }
 
-  .editor-inspector {
-    top: auto;
-    bottom: 94px;
-    left: 12px;
-    right: 12px;
-    width: auto;
-    max-height: 44vh;
+  .telemetry-strip {
+    gap: 8px;
+  }
+}
+
+/* Mobile & Touch Device Layout (R-03) */
+@media (max-width: 900px), (pointer: coarse) {
+  .top-bar {
+    top: max(8px, env(safe-area-inset-top));
+    left: 8px;
+    right: 8px;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .brand-title {
+    font-size: 0.98rem;
+  }
+
+  .mobile-only-btn {
+    display: inline-flex;
+  }
+
+  .top-options-drawer {
+    display: none;
+    width: 100%;
+    order: 4;
+    padding-top: 8px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border-subtle);
+    justify-content: space-between;
+  }
+
+  .top-options-drawer.is-open {
+    display: flex;
+  }
+
+  .top-options-drawer .select-wrap {
+    flex: 1 1 140px;
+  }
+
+  .top-options-drawer select {
+    width: 100%;
+  }
+
+  .play-controls-bar {
+    display: none !important;
   }
 
   .touch-controls {
     display: flex;
   }
 
-  .controls-hint {
+  .editor-inspector {
+    top: auto;
+    bottom: calc(82px + env(safe-area-inset-bottom));
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: 44dvh;
+    padding: 10px 12px;
+  }
+
+  .editor-dock {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: 8px;
+    right: 8px;
+    padding: 6px 8px;
+  }
+
+  .catalog-tile {
+    flex: 0 0 128px;
+    min-height: 48px;
+    padding: 6px 10px;
+  }
+}
+
+/* Compact Portrait Phone State (R-03) */
+@media (max-width: 540px) {
+  .stat-best {
     display: none;
   }
 
-  .morph-step-btn {
+  .stat-box {
+    padding: 3px 8px;
+  }
+
+  .stat-value {
+    font-size: 0.82rem;
+  }
+
+  .btn {
     padding: 6px 10px;
     font-size: 0.78rem;
   }
+
+  .joystick-base {
+    width: 98px;
+    height: 98px;
+  }
+
+  .joystick-knob {
+    width: 42px;
+    height: 42px;
+  }
+
+  .touch-jump {
+    min-width: 84px;
+    min-height: 62px;
+  }
 }
+

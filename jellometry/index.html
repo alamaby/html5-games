@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Jellometry: 3D Jelly Obstacle Race & Track Builder</title>
     <script type="importmap">
       {
@@ -32,7 +35,7 @@
             <span class="stat-label">TIME</span>
             <span id="hud-timer" class="stat-value">00:00.00</span>
           </div>
-          <div class="stat-box">
+          <div class="stat-box stat-best">
             <span class="stat-label">BEST</span>
             <span id="hud-best" class="stat-value">--:--.--</span>
           </div>
@@ -48,27 +51,39 @@
 
         <!-- Track & Mode Controls -->
         <div class="top-actions">
-          <label class="select-wrap" for="preset-select">
-            <span class="sr-only">Select Preset Course</span>
-            <select id="preset-select" aria-label="Course Preset">
-              <option value="beginner_bounce">Course: Beginner Bounce</option>
-              <option value="morph_madness">Course: Morph Madness</option>
-              <option value="custom_saved">Course: Saved Custom Track</option>
-            </select>
-          </label>
+          <div id="top-options-drawer" class="top-options-drawer">
+            <label class="select-wrap" for="preset-select">
+              <span class="sr-only">Select Preset Course</span>
+              <select id="preset-select" aria-label="Course Preset">
+                <option value="beginner_bounce">Course: Beginner Bounce</option>
+                <option value="morph_madness">Course: Morph Madness</option>
+                <option value="custom_saved">Course: Saved Custom Track</option>
+              </select>
+            </label>
 
-          <label class="select-wrap" for="jelly-color-select">
-            <span class="sr-only">Jelly Color</span>
-            <select id="jelly-color-select" aria-label="Jelly Color">
-              <option value="coral">Jelly: Coral Berry</option>
-              <option value="mint">Jelly: Mint Lime</option>
-              <option value="mango">Jelly: Mango Tang</option>
-              <option value="berry">Jelly: Electric Berry</option>
-            </select>
-          </label>
+            <label class="select-wrap" for="jelly-color-select">
+              <span class="sr-only">Jelly Color</span>
+              <select id="jelly-color-select" aria-label="Jelly Color">
+                <option value="coral">Jelly: Coral Berry</option>
+                <option value="mint">Jelly: Mint Lime</option>
+                <option value="mango">Jelly: Mango Tang</option>
+                <option value="berry">Jelly: Electric Berry</option>
+              </select>
+            </label>
 
-          <button id="btn-mute" type="button" class="btn btn-secondary" aria-pressed="false">
-            Audio: ON
+            <button id="btn-mute" type="button" class="btn btn-secondary" aria-pressed="false">
+              Audio: ON
+            </button>
+          </div>
+
+          <button
+            id="btn-mobile-options"
+            type="button"
+            class="btn btn-secondary mobile-only-btn"
+            aria-expanded="false"
+            aria-controls="top-options-drawer"
+          >
+            Options
           </button>
 
           <button id="btn-toggle-mode" type="button" class="btn btn-primary">
@@ -77,7 +92,7 @@
         </div>
       </header>
 
-      <!-- Play Mode Controls & Morph Bar -->
+      <!-- Play Mode Controls & Morph Bar (Desktop & Tablet) -->
       <section id="play-controls-bar" class="play-controls-bar" aria-label="Jelly Morph Controls">
         <div class="morph-control-group">
           <button id="btn-morph-flat" type="button" class="btn btn-secondary morph-step-btn">
@@ -111,28 +126,55 @@
         </p>
       </section>
 
-      <!-- Mobile / Touch D-Pad & Action Buttons -->
-      <div id="touch-controls" class="touch-controls" aria-label="Touch Movement Controls">
-        <div class="touch-pad">
-          <button type="button" class="btn touch-btn" data-key="forward">W</button>
-          <div class="touch-row">
-            <button type="button" class="btn touch-btn" data-key="left">A</button>
-            <button type="button" class="btn touch-btn" data-key="backward">S</button>
-            <button type="button" class="btn touch-btn" data-key="right">D</button>
+      <!-- Mobile / Touch Thumbstick & Ergonomic Action Cluster -->
+      <div id="touch-controls" class="touch-controls" aria-label="Touch Movement and Morph Controls">
+        <div id="joystick-zone" class="joystick-zone" aria-label="Virtual Analog Thumbstick">
+          <div id="joystick-base" class="joystick-base">
+            <div id="joystick-knob" class="joystick-knob"></div>
           </div>
+          <span class="joystick-caption">DRAG TO STEER</span>
         </div>
+
         <div class="touch-actions">
-          <button type="button" class="btn touch-btn touch-jump" data-key="jump">JUMP</button>
+          <div class="touch-morph-row" role="group" aria-label="Quick Morph Presets">
+            <button id="btn-touch-flat" type="button" class="btn touch-morph-btn" data-morph="-0.9">
+              FLAT
+            </button>
+            <button id="btn-touch-cube" type="button" class="btn touch-morph-btn is-active" data-morph="0">
+              CUBE
+            </button>
+            <button id="btn-touch-tall" type="button" class="btn touch-morph-btn" data-morph="0.9">
+              TALL
+            </button>
+          </div>
+          <div class="touch-primary-row">
+            <button id="btn-touch-respawn" type="button" class="btn touch-btn touch-respawn">
+              RESET
+            </button>
+            <button id="btn-touch-jump" type="button" class="btn touch-btn touch-jump" data-key="jump">
+              JUMP
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Checkpoint & Status Notification Banner -->
       <div id="toast-banner" class="toast-banner" role="status" aria-live="polite" hidden></div>
 
-      <!-- EDITOR MODE: Right Property Inspector Sidebar -->
+      <!-- EDITOR MODE: Right Property Inspector Sidebar / Mobile Collapsible Sheet -->
       <aside id="editor-inspector" class="editor-inspector" aria-label="Obstacle Property Inspector" hidden>
         <div class="panel-header">
-          <h2 class="panel-title">Property Inspector</h2>
+          <div class="panel-header-row">
+            <h2 class="panel-title">Property Inspector</h2>
+            <button
+              id="btn-toggle-inspector"
+              type="button"
+              class="btn btn-compact mobile-only-btn"
+              aria-expanded="true"
+            >
+              Minimize
+            </button>
+          </div>
           <div class="gizmo-toolbar" role="group" aria-label="Transform Gizmo Mode">
             <button type="button" class="btn btn-compact is-active" data-gizmo="translate" title="Translate [G]">
               Move [G]
@@ -146,23 +188,24 @@
           </div>
         </div>
 
-        <div class="grid-snap-row">
-          <span class="field-label">Grid Snap</span>
-          <div class="snap-buttons">
-            <button id="btn-snap-1" type="button" class="btn btn-compact is-active">1m Grid</button>
-            <button id="btn-snap-2" type="button" class="btn btn-compact">2m Grid</button>
+        <div id="inspector-body" class="inspector-body">
+          <div class="grid-snap-row">
+            <span class="field-label">Grid Snap</span>
+            <div class="snap-buttons">
+              <button id="btn-snap-1" type="button" class="btn btn-compact is-active">1m Grid</button>
+              <button id="btn-snap-2" type="button" class="btn btn-compact">2m Grid</button>
+            </div>
           </div>
-        </div>
 
-        <!-- Empty State (R-27) -->
-        <div id="inspector-empty" class="inspector-empty">
-          <p class="empty-title">No Obstacle Selected</p>
-          <p class="empty-desc">
-            Click any 3D obstacle on the track to adjust its position, rotation, scale, or behavior. To add a new obstacle, choose a piece from the bottom catalog dock and click on the grid.
-          </p>
-        </div>
+          <!-- Empty State (R-27) -->
+          <div id="inspector-empty" class="inspector-empty">
+            <p class="empty-title">No Obstacle Selected</p>
+            <p class="empty-desc">
+              Tap any 3D obstacle on the track to adjust its position, rotation, scale, or behavior. To add a new obstacle, choose a piece from the bottom catalog dock and tap on the grid.
+            </p>
+          </div>
 
-        <!-- Active Obstacle Form -->
+          <!-- Active Obstacle Form -->
         <form id="inspector-form" class="inspector-form" hidden>
           <div class="inspector-meta">
             <span id="insp-id" class="insp-id">obs_1</span>
@@ -248,8 +291,9 @@
             </button>
           </div>
           <p id="editor-status-line" class="editor-status-line">
-            Orbit: Left-drag. Pan: Right-drag. Zoom: Wheel.
+            Orbit: Left-drag. Pan: Right-drag. Zoom: Wheel / Pinch.
           </p>
+        </div>
         </div>
       </aside>
 

@@ -158,6 +158,7 @@ export class ObstacleFactory {
       elapsed: 0,
       activated: false,
       bouncePulse: 0,
+      currentFade: 1.0,
       initialPosition: group.position.clone(),
       initialQuaternion: group.quaternion.clone(),
       initialScale: group.scale.clone()
@@ -177,6 +178,13 @@ export class ObstacleFactory {
       if (child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          if (mat && mat.userData.baseOpacity === undefined) {
+            mat.userData.baseOpacity = mat.opacity ?? 1.0;
+            mat.userData.baseTransparent = Boolean(mat.transparent);
+          }
+        }
       }
     });
   }
@@ -772,11 +780,58 @@ export class ObstacleFactory {
       }
 
       this.syncBodiesToGroup(obstacle);
+      this.applyObstacleFade(obstacle, 1.0);
       for (const body of obstacle.bodies) {
         body.velocity.set(0, 0, 0);
         body.angularVelocity.set(0, 0, 0);
       }
     }
+  }
+
+  /**
+   * Fades obstacles to translucent once the jelly passes them along the -Z race axis
+   * so tall gates, sweepers, arches, or rear platforms never block the third-person camera.
+   */
+  isObstaclePassedByPlayer(obstacle, player) {
+    if (!player) return false;
+    const worldPos = new THREE.Vector3();
+    if (obstacle.moverGroup) {
+      obstacle.moverGroup.getWorldPosition(worldPos);
+    } else {
+      obstacle.group.getWorldPosition(worldPos);
+    }
+
+    const playerPos = player.rootGroup.position;
+
+    if (obstacle.type === 'track_block' || obstacle.type === 'moving_platform') {
+      const len = (Number(obstacle.params.length) || 6) * obstacle.group.scale.z;
+      const frontEdgeZ = worldPos.z - len * 0.5;
+      const passedPlatform = playerPos.z < frontEdgeZ - 0.25;
+      const occludingOverhead =
+        worldPos.y > playerPos.y + 0.75 && worldPos.z > playerPos.z - 0.5;
+      return passedPlatform || occludingOverhead;
+    }
+
+    return playerPos.z < worldPos.z - 0.15;
+  }
+
+  applyObstacleFade(obstacle, fadeValue) {
+    obstacle.currentFade = fadeValue;
+    const isFaded = fadeValue < 0.98;
+
+    obstacle.group.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const mat of mats) {
+        if (!mat) continue;
+        const baseOpacity = mat.userData.baseOpacity ?? 1.0;
+        const baseTransparent = Boolean(mat.userData.baseTransparent);
+        mat.opacity = baseOpacity * fadeValue;
+        mat.transparent = isFaded ? true : baseTransparent;
+        // Disable depthWrite while faded so the transmissive jelly renders cleanly behind passed gates.
+        mat.depthWrite = fadeValue > 0.85 ? true : false;
+      }
+    });
   }
 
   updatePreStep(dt, playModeActive = true) {
@@ -789,12 +844,29 @@ export class ObstacleFactory {
   }
 
   updateVisuals(dt, player, playModeActive = true) {
+    const safeDt = Math.min(dt, 0.05);
+    const fadeSpeed = 1 - Math.exp(-10 * safeDt);
+
     for (const obstacle of this.obstacles.values()) {
       if (obstacle.visualUpdate) {
         obstacle.visualUpdate(dt);
       }
       if (playModeActive && obstacle.checkTrigger && player) {
         obstacle.checkTrigger(player);
+      }
+
+      const passed = playModeActive && this.isObstaclePassedByPlayer(obstacle, player);
+      const targetFade = passed
+        ? obstacle.type === 'track_block' || obstacle.type === 'moving_platform'
+          ? 0.22
+          : 0.18
+        : 1.0;
+
+      if (Math.abs(obstacle.currentFade - targetFade) > 0.004) {
+        const nextFade = THREE.MathUtils.lerp(obstacle.currentFade, targetFade, fadeSpeed);
+        this.applyObstacleFade(obstacle, nextFade);
+      } else if (obstacle.currentFade !== targetFade) {
+        this.applyObstacleFade(obstacle, targetFade);
       }
     }
   }
