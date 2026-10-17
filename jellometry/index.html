@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jellometry: 3D Jelly Obstacle Race & Track Builder</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas" aria-label="3D Jelly Obstacle Race and Track Builder Viewport"></canvas>
+
+      <!-- Top Instrument HUD Bar -->
+      <header class="top-bar" role="banner">
+        <div class="brand-block">
+          <h1 class="brand-title">JELLOMETRY</h1>
+          <span id="mode-indicator" class="mode-tag">PLAY MODE</span>
+        </div>
+
+        <!-- Play Mode Telemetry -->
+        <div id="play-telemetry" class="telemetry-strip" aria-live="polite">
+          <div class="stat-box">
+            <span class="stat-label">TIME</span>
+            <span id="hud-timer" class="stat-value">00:00.00</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">BEST</span>
+            <span id="hud-best" class="stat-value">--:--.--</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">SPEED</span>
+            <span id="hud-speed" class="stat-value">0.0 m/s</span>
+          </div>
+          <div class="stat-box morph-box">
+            <span class="stat-label">MORPH (<span id="hud-morph-name">BALANCED CUBE</span>)</span>
+            <span id="hud-morph-dims" class="stat-value">1.20W x 1.20H x 1.20D (1.73m³)</span>
+          </div>
+        </div>
+
+        <!-- Track & Mode Controls -->
+        <div class="top-actions">
+          <label class="select-wrap" for="preset-select">
+            <span class="sr-only">Select Preset Course</span>
+            <select id="preset-select" aria-label="Course Preset">
+              <option value="beginner_bounce">Course: Beginner Bounce</option>
+              <option value="morph_madness">Course: Morph Madness</option>
+              <option value="custom_saved">Course: Saved Custom Track</option>
+            </select>
+          </label>
+
+          <label class="select-wrap" for="jelly-color-select">
+            <span class="sr-only">Jelly Color</span>
+            <select id="jelly-color-select" aria-label="Jelly Color">
+              <option value="coral">Jelly: Coral Berry</option>
+              <option value="mint">Jelly: Mint Lime</option>
+              <option value="mango">Jelly: Mango Tang</option>
+              <option value="berry">Jelly: Electric Berry</option>
+            </select>
+          </label>
+
+          <button id="btn-mute" type="button" class="btn btn-secondary" aria-pressed="false">
+            Audio: ON
+          </button>
+
+          <button id="btn-toggle-mode" type="button" class="btn btn-primary">
+            Edit Track [ESC]
+          </button>
+        </div>
+      </header>
+
+      <!-- Play Mode Controls & Morph Bar -->
+      <section id="play-controls-bar" class="play-controls-bar" aria-label="Jelly Morph Controls">
+        <div class="morph-control-group">
+          <button id="btn-morph-flat" type="button" class="btn btn-secondary morph-step-btn">
+            Flatten Wide [Q]
+          </button>
+          <div class="morph-slider-wrap">
+            <label for="morph-slider" class="morph-slider-label">
+              <span>FLAT-WIDE</span>
+              <span>VOLUME = 1.73m³</span>
+              <span>TALL-NARROW</span>
+            </label>
+            <input
+              id="morph-slider"
+              type="range"
+              min="-1"
+              max="1"
+              step="0.02"
+              value="0"
+              aria-label="Jelly Morph Ratio"
+            />
+          </div>
+          <button id="btn-morph-tall" type="button" class="btn btn-secondary morph-step-btn">
+            Squeeze Tall [E]
+          </button>
+          <button id="btn-respawn" type="button" class="btn btn-secondary">
+            Respawn [R]
+          </button>
+        </div>
+        <p class="controls-hint">
+          Controls: <strong>WASD / Arrows</strong> Move, <strong>Space</strong> Jump, <strong>Q / E / Wheel</strong> Morph Jelly Shape, <strong>ESC</strong> Toggle Track Builder
+        </p>
+      </section>
+
+      <!-- Mobile / Touch D-Pad & Action Buttons -->
+      <div id="touch-controls" class="touch-controls" aria-label="Touch Movement Controls">
+        <div class="touch-pad">
+          <button type="button" class="btn touch-btn" data-key="forward">W</button>
+          <div class="touch-row">
+            <button type="button" class="btn touch-btn" data-key="left">A</button>
+            <button type="button" class="btn touch-btn" data-key="backward">S</button>
+            <button type="button" class="btn touch-btn" data-key="right">D</button>
+          </div>
+        </div>
+        <div class="touch-actions">
+          <button type="button" class="btn touch-btn touch-jump" data-key="jump">JUMP</button>
+        </div>
+      </div>
+
+      <!-- Checkpoint & Status Notification Banner -->
+      <div id="toast-banner" class="toast-banner" role="status" aria-live="polite" hidden></div>
+
+      <!-- EDITOR MODE: Right Property Inspector Sidebar -->
+      <aside id="editor-inspector" class="editor-inspector" aria-label="Obstacle Property Inspector" hidden>
+        <div class="panel-header">
+          <h2 class="panel-title">Property Inspector</h2>
+          <div class="gizmo-toolbar" role="group" aria-label="Transform Gizmo Mode">
+            <button type="button" class="btn btn-compact is-active" data-gizmo="translate" title="Translate [G]">
+              Move [G]
+            </button>
+            <button type="button" class="btn btn-compact" data-gizmo="rotate" title="Rotate [R]">
+              Rotate [R]
+            </button>
+            <button type="button" class="btn btn-compact" data-gizmo="scale" title="Scale [S]">
+              Scale [S]
+            </button>
+          </div>
+        </div>
+
+        <div class="grid-snap-row">
+          <span class="field-label">Grid Snap</span>
+          <div class="snap-buttons">
+            <button id="btn-snap-1" type="button" class="btn btn-compact is-active">1m Grid</button>
+            <button id="btn-snap-2" type="button" class="btn btn-compact">2m Grid</button>
+          </div>
+        </div>
+
+        <!-- Empty State (R-27) -->
+        <div id="inspector-empty" class="inspector-empty">
+          <p class="empty-title">No Obstacle Selected</p>
+          <p class="empty-desc">
+            Click any 3D obstacle on the track to adjust its position, rotation, scale, or behavior. To add a new obstacle, choose a piece from the bottom catalog dock and click on the grid.
+          </p>
+        </div>
+
+        <!-- Active Obstacle Form -->
+        <form id="inspector-form" class="inspector-form" hidden>
+          <div class="inspector-meta">
+            <span id="insp-id" class="insp-id">obs_1</span>
+            <span id="insp-type" class="insp-type">track_block</span>
+          </div>
+
+          <fieldset class="field-group">
+            <legend>Transform (X / Y / Z)</legend>
+            <div class="xyz-row">
+              <label>
+                <span>Pos X</span>
+                <input id="insp-pos-x" type="number" step="0.5" />
+              </label>
+              <label>
+                <span>Pos Y</span>
+                <input id="insp-pos-y" type="number" step="0.5" />
+              </label>
+              <label>
+                <span>Pos Z</span>
+                <input id="insp-pos-z" type="number" step="0.5" />
+              </label>
+            </div>
+            <div class="xyz-row">
+              <label>
+                <span>Rot X°</span>
+                <input id="insp-rot-x" type="number" step="15" />
+              </label>
+              <label>
+                <span>Rot Y°</span>
+                <input id="insp-rot-y" type="number" step="15" />
+              </label>
+              <label>
+                <span>Rot Z°</span>
+                <input id="insp-rot-z" type="number" step="15" />
+              </label>
+            </div>
+            <div class="xyz-row">
+              <label>
+                <span>Scale X</span>
+                <input id="insp-scale-x" type="number" step="0.1" min="0.2" max="10" />
+              </label>
+              <label>
+                <span>Scale Y</span>
+                <input id="insp-scale-y" type="number" step="0.1" min="0.2" max="10" />
+              </label>
+              <label>
+                <span>Scale Z</span>
+                <input id="insp-scale-z" type="number" step="0.1" min="0.2" max="10" />
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset id="insp-dynamic-params" class="field-group">
+            <legend>Obstacle Parameters</legend>
+            <div id="insp-params-container" class="params-container"></div>
+          </fieldset>
+
+          <div class="inspector-actions">
+            <button id="btn-duplicate-obs" type="button" class="btn btn-secondary">
+              Duplicate [Ctrl+D]
+            </button>
+            <button id="btn-delete-obs" type="button" class="btn btn-danger">
+              Delete [Del]
+            </button>
+          </div>
+        </form>
+
+        <!-- Persistence & Level JSON Controls -->
+        <div class="persistence-block">
+          <h3 class="sub-heading">Level Persistence</h3>
+          <div class="persistence-grid">
+            <button id="btn-save-local" type="button" class="btn btn-secondary">
+              Save to Browser
+            </button>
+            <button id="btn-export-json" type="button" class="btn btn-secondary">
+              Export Level JSON
+            </button>
+            <button id="btn-import-json" type="button" class="btn btn-secondary">
+              Import Level JSON
+            </button>
+            <button id="btn-clear-track" type="button" class="btn btn-secondary">
+              Reset Current Course
+            </button>
+          </div>
+          <p id="editor-status-line" class="editor-status-line">
+            Orbit: Left-drag. Pan: Right-drag. Zoom: Wheel.
+          </p>
+        </div>
+      </aside>
+
+      <!-- EDITOR MODE: Bottom Obstacle Catalog Toolbar -->
+      <nav id="editor-dock" class="editor-dock" aria-label="Obstacle Catalog Toolbar" hidden>
+        <div id="catalog-buttons" class="catalog-buttons"></div>
+      </nav>
+
+      <!-- Victory Modal -->
+      <div id="victory-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="victory-title" hidden>
+        <div class="modal-card">
+          <h2 id="victory-title" class="modal-title">COURSE COMPLETE</h2>
+          <p id="victory-summary" class="modal-subtitle">
+            You guided the jelly across the finish arch!
+          </p>
+          <div class="victory-stats">
+            <div class="victory-stat">
+              <span class="stat-label">FINISH TIME</span>
+              <span id="victory-time" class="stat-value">00:18.42</span>
+            </div>
+            <div class="victory-stat">
+              <span class="stat-label">COURSE RECORD</span>
+              <span id="victory-best" class="stat-value">00:18.42</span>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button id="btn-victory-replay" type="button" class="btn btn-primary">
+              Race Again
+            </button>
+            <button id="btn-victory-next" type="button" class="btn btn-secondary">
+              Switch Course
+            </button>
+            <button id="btn-victory-edit" type="button" class="btn btn-secondary">
+              Open Track Builder
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- JSON Import / Export Modal -->
+      <div id="json-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="json-modal-title" hidden>
+        <div class="modal-card modal-wide">
+          <h2 id="json-modal-title" class="modal-title">Level JSON Data</h2>
+          <p id="json-modal-desc" class="modal-subtitle">
+            Copy this JSON to share your track, or paste a level JSON payload below to load it.
+          </p>
+          <textarea
+            id="json-textarea"
+            rows="10"
+            spellcheck="false"
+            placeholder='{"version": 1, "name": "Custom Jelly Track", "obstacles": [...]}'
+            aria-label="Level JSON Payload"
+          ></textarea>
+          <p id="json-feedback" class="json-feedback" role="alert" hidden></p>
+          <div class="modal-actions">
+            <button id="btn-json-copy" type="button" class="btn btn-secondary">
+              Copy to Clipboard
+            </button>
+            <button id="btn-json-download" type="button" class="btn btn-secondary">
+              Download .json File
+            </button>
+            <button id="btn-json-apply" type="button" class="btn btn-primary">
+              Load JSON into Track
+            </button>
+            <button id="btn-json-close" type="button" class="btn btn-secondary">
+              Close [ESC]
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
