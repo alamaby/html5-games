@@ -24,6 +24,18 @@ const CFG = {
   SAVE_KEY: 'kh_save_v1',
   BUSH_ROWS: 4, BUSH_COLS: 4, BUSH_GAP: 4.2,
   CLUSTERS_PER_BUSH: 3, CHERRIES_PER_CLUSTER: 6,
+  // --- Fase 2: Olah (wash -> dry -> roast -> sack -> truck) ---
+  WASH_FLOW_TIME: 6,      // detik cherry mengalir di channel
+  WASH_FORK_WAIT: 2.0,    // detik tunggu tap sebelum auto-route benar
+  DEFECT_PRICE: 0.25,     // $ per biji defect (auto-jual per 10)
+  DEFECT_AUTOSELL: 10,
+  DRY_TIME: 20,           // detik penjemuran (visual, otomatis)
+  ROAST_MIN_BEANS: 12, ROAST_MAX_BEANS: 24,
+  SACK_PRICE: 12,         // $ per karung (Arabika)
+  ROAST_MATCH_MULT: 1.25, // bonus roast-match
+  UNDER_PENALTY: 0.8,     // penalti under-roasted
+  SACKS_FOR_TRUCK: 8,     // karung -> truk datang
+  FIRST_CRACK_TEMP: 196,  // °C momen first crack
 };
 
 const COL = {
@@ -35,6 +47,8 @@ const COL = {
   cherryFlower: 0xF5EFD8, cherryGold: 0xFFB800,
   shirt: 0xFF4B4B, skin: 0xE8B88A, pants: 0x3A3A4A, straw: 0xD9B36A,
   jute: 0xC9A86A, water: 0x3FA7C4, hutWood: 0x8A5A3B, hutRoof: 0xA0522D,
+  waterDark: 0x2A7A94, steel: 0xB2B8C2, hazard: 0xFF8E00, ember: 0xFF7A1A,
+  beanRoast: 0x4A2C17, beanDry: 0xD9C08A, defectBin: 0x7A4A2B, truckRed: 0xC0392B, cashGreen: 0x2ECC71,
 };
 
 // helpers (tanpa alokasi)
@@ -54,6 +68,22 @@ const STRINGS = {
     hint_full: 'Basket full!',
     perfect: 'PERFECT!', strip: 'Strip pick', no_ripe: 'No ripe cherries!',
     sold: 'Sold!', quality: 'Quality',
+    hint_pour: 'Basket full! Pour it at the wash channel.',
+    hint_wash: 'Tap a gate to route each cherry!',
+    hint_roast: 'Dry beans ready! Load the drum.',
+    hint_roasting: 'Keep the needle green! STOP in the target zone.',
+    hint_collect: 'Truck left cash! Tap COLLECT.',
+    wash_good: 'GOOD', wash_defect: 'DEFECT',
+    load_drum: 'LOAD DRUM', roast_stop: 'STOP', collect: 'COLLECT',
+    need_beans: 'Need 12+ dry beans',
+    first_crack: 'FIRST CRACK!',
+    roast_match: 'ROAST MATCH! +25%',
+    under_roast: 'Under-roasted',
+    burnt: 'BURNT!',
+    defect_sold: 'Defect sold',
+    contaminated: 'Contaminated!',
+    sacks: 'Sacks',
+    order_light: 'Light', order_medium: 'Medium', order_dark: 'Dark',
   },
   id: {
     pick: 'PETIK', hint_start: 'Jalan ke semak kopi. Tahan PETIK, lepas di ring emas!',
@@ -62,6 +92,22 @@ const STRINGS = {
     hint_full: 'Keranjang penuh!',
     perfect: 'SEMPURNA!', strip: 'Petik campur', no_ripe: 'Tidak ada cherry matang!',
     sold: 'Terjual!', quality: 'Kualitas',
+    hint_pour: 'Keranjang penuh! Tuang ke wash channel.',
+    hint_wash: 'Ketuk pintu air untuk mengarahkan cherry!',
+    hint_roast: 'Biji kering siap! Muat ke drum.',
+    hint_roasting: 'Jaga jarum di hijau! STOP di zona target.',
+    hint_collect: 'Truk meninggalkan uang! Ketuk AMBIL.',
+    wash_good: 'BAGUS', wash_defect: 'CACAT',
+    load_drum: 'MUAT DRUM', roast_stop: 'STOP', collect: 'AMBIL',
+    need_beans: 'Butuh 12+ biji kering',
+    first_crack: 'FIRST CRACK!',
+    roast_match: 'ROAST MATCH! +25%',
+    under_roast: 'Kurang matang',
+    burnt: 'GOSONG!',
+    defect_sold: 'Cacat terjual',
+    contaminated: 'Terkontaminasi!',
+    sacks: 'Karung',
+    order_light: 'Light', order_medium: 'Medium', order_dark: 'Dark',
   },
 };
 let lang = 'en';
@@ -76,7 +122,8 @@ function applyI18n() {
    2. SAVE MANAGER (kh_save_v1)
    ============================================================================ */
 const SaveSys = {
-  data: { v: 1, cash: 0, lang: 'en', stats: { picked: 0, perfect: 0, strips: 0, sold: 0, bestQ: 0 }, lastSave: 0 },
+  data: { v: 1, cash: 0, lang: 'en', stats: { picked: 0, perfect: 0, strips: 0, sold: 0, bestQ: 0 },
+    sacks: 0, sackValue: 0, defect: 0, dryCount: 0, dryQSum: 0, lastSave: 0 },
   load() {
     try {
       const raw = localStorage.getItem(CFG.SAVE_KEY);
@@ -86,6 +133,12 @@ const SaveSys = {
           this.data.cash = +d.cash || 0;
           this.data.lang = (d.lang === 'id') ? 'id' : 'en';
           Object.assign(this.data.stats, d.stats || {});
+          // Fase 2: default aman untuk save lama
+          this.data.sacks = Math.max(0, Math.floor(+d.sacks || 0));
+          this.data.sackValue = Math.max(0, +d.sackValue || 0);
+          this.data.defect = Math.max(0, Math.floor(+d.defect || 0));
+          this.data.dryCount = Math.max(0, Math.floor(+d.dryCount || 0));
+          this.data.dryQSum = Math.max(0, +d.dryQSum || 0);
           this.data.lastSave = +d.lastSave || 0;
         }
       }
@@ -151,6 +204,54 @@ const AudioSys = {
   click()  { this._tone(760, 0.06, 'square', 0.12); },
   error()  { this._tone(170, 0.18, 'sawtooth', 0.16, 0, 120); },
   cash()   { this._tone(660, 0.12, 'triangle', 0.3); this._tone(880, 0.12, 'triangle', 0.3, 0.08); this._tone(1174, 0.2, 'triangle', 0.3, 0.16); },
+  // --- Fase 2 ---
+  splash() {
+    // tuang ke channel: debur air
+    this._noise(0.35, 0.3, 700); this._noise(0.2, 0.18, 1400, 0.1);
+    this._tone(rand(300, 420), 0.15, 'sine', 0.12, 0.05, 180);
+  },
+  crackle() {
+    // FIRST CRACK signature: rentetan pop tajam ~2.5 dtk
+    for (let i = 0; i < 14; i++) {
+      const when = Math.pow(Math.random(), 1.4) * 2.4;
+      this._noise(0.05, rand(0.15, 0.3), rand(2200, 4200), when);
+      this._tone(rand(900, 1600), 0.04, 'square', 0.08, when);
+    }
+    this._tone(220, 0.5, 'sine', 0.2, 0, 110);
+  },
+  cashBig() {
+    // arpeggio koin lebih panjang (collect truk)
+    const seq = [523, 659, 784, 1046, 1318];
+    for (let i = 0; i < seq.length; i++) this._tone(seq[i], 0.16, 'triangle', 0.3, i * 0.09);
+  },
+  gate() { this._noise(0.08, 0.22, 900); this._tone(240, 0.1, 'square', 0.14, 0, 140); },
+  loadDrum() { this._tone(140, 0.3, 'sawtooth', 0.18, 0, 90); this._noise(0.25, 0.15, 500, 0.05); },
+  // drum hum: osilator kontinu, pitch mengikuti panas
+  hum: null,
+  humStart() {
+    if (!this.ctx || this.muted || this.hum) return;
+    try {
+      const c = this.ctx;
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 70;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 320;
+      const g = c.createGain(); g.gain.value = 0.05;
+      o.connect(f); f.connect(g); g.connect(this.master);
+      o.start();
+      this.hum = { o: o, g: g };
+    } catch (e) { this.hum = null; }
+  },
+  humUpdate(tempC) {
+    if (!this.hum || !this.ctx || this.muted) return;
+    this.hum.o.frequency.setTargetAtTime(55 + tempC * 0.55, this.ctx.currentTime, 0.1);
+  },
+  humStop() {
+    if (!this.hum) return;
+    try {
+      const h = this.hum; this.hum = null;
+      h.g.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.15);
+      h.o.stop(this.ctx.currentTime + 0.6);
+    } catch (e) { this.hum = null; }
+  },
 };
 
 /* ============================================================================
@@ -271,6 +372,9 @@ const World = {
     this.buildReadyMarkers(S);
     this.buildGrass(S);
     this.buildHut(S);
+    this.buildWashStation(S);   // Fase 2
+    this.buildDryer(S);         // Fase 2
+    this.buildDrum(S);          // Fase 2
   },
 
   buildBushes(S) {
@@ -459,6 +563,97 @@ const World = {
     CFG.HUT_POS = new Vector3(hutX - 0.4, 0, hutZ + 3.6);
     this.hutPad = pad; this.hutPos = CFG.HUT_POS.clone();
   },
+
+  /* ---- Fase 2: wash channel + dryer + roast drum (visual) ---- */
+  buildWashStation(S) {
+    // Channel: pour (9.5, 9.1) -> fork (3.0, 9.1) -> GOOD dock (1.0, 9.1).
+    // Cabang DEFECT ke (3.0, 11.3). Air y=0.62.
+    const px = 9.5, gx = 0.5, fx = 3.0, z = 9.1, len = px - gx, cx = (px + gx) / 2;
+    const troughMat = stdMat(0x8A5A3B);
+    const base = new Mesh(new BoxGeometry(len, 0.3, 1.2), troughMat);
+    base.position.set(cx, 0.35, z); base.receiveShadow = true;
+    const water = new Mesh(new PlaneGeometry(len, 0.9),
+      new MeshStandardMaterial({ color: COL.water, transparent: true, opacity: 0.78, roughness: 0.25 }));
+    water.rotation.x = -Math.PI / 2; water.position.set(cx, 0.62, z);
+    S.add(base); S.add(water);
+    this.washWater = water;
+    // foam: garis-garis putih yang mengalir (1 draw call)
+    const foamIM = new InstancedMesh(new PlaneGeometry(0.5, 0.12),
+      new MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.5 }), 10);
+    foamIM.frustumCulled = false;
+    this.washFoam = foamIM; this.washFoamT = 0;
+    S.add(foamIM);
+    // cabang DEFECT (pendek, ke +z)
+    const dLen = 2.2, dBase = new Mesh(new BoxGeometry(1.2, 0.3, dLen), troughMat);
+    dBase.position.set(fx, 0.35, z + dLen / 2); dBase.receiveShadow = true;
+    const dWater = new Mesh(new PlaneGeometry(0.9, dLen), water.material);
+    dWater.rotation.x = -Math.PI / 2; dWater.position.set(fx, 0.62, z + dLen / 2);
+    S.add(dBase); S.add(dWater);
+    // pintu air: 2 paddle di fork (diputar saat routing)
+    const gateMat = stdMat(COL.hazard);
+    const mkGate = (gx, gz, ry) => {
+      const p = new Mesh(new BoxGeometry(0.9, 0.5, 0.12), gateMat);
+      p.position.set(gx, 0.85, gz); p.rotation.y = ry; p.castShadow = true;
+      S.add(p); return p;
+    };
+    this.gateGood = mkGate(fx - 0.2, z - 0.75, 0.5);
+    this.gateDefect = mkGate(fx + 0.35, z + 0.75, -0.5);
+    // dermaga GOOD: platform kayu di ujung channel
+    const dock = new Mesh(new BoxGeometry(1.6, 0.25, 1.6), stdMat(0x8A5A3B));
+    dock.position.set(1.0, 0.35, z); dock.receiveShadow = true; dock.castShadow = true;
+    S.add(dock);
+    // bin DEFECT
+    const bin = new Mesh(new CylinderGeometry(0.55, 0.45, 0.9, 10), stdMat(COL.defectBin));
+    bin.position.set(fx, 0.45, z + dLen + 0.4); bin.castShadow = true;
+    S.add(bin);
+    // ring highlight di fork (cherry yang menunggu routing)
+    const ring = new Mesh(new RingGeometry(0.35, 0.5, 20),
+      new MeshBasicMaterial({ color: 0xFFD34D, transparent: true, opacity: 0.9, side: DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.position.set(fx, 0.7, z); ring.visible = false;
+    S.add(ring);
+    this.forkRing = ring;
+  },
+
+  buildDryer(S) {
+    // 2 rak bambu; biji dijemur di atasnya (otomatis, bukan taktil)
+    const rackMat = stdMat(0xC9A86A);
+    const mkRack = (x, z) => {
+      const r = new Mesh(new BoxGeometry(2.2, 0.22, 1.4), rackMat);
+      r.position.set(x, 0.5, z); r.castShadow = true; r.receiveShadow = true;
+      S.add(r);
+    };
+    mkRack(-1.2, 8.0); mkRack(-1.2, 10.2);
+    this.dryerRacks = [new Vector3(-1.2, 0.62, 8.0), new Vector3(-1.2, 0.62, 10.2)];
+  },
+
+  buildDrum(S) {
+    // drum roaster: tabung baja horizontal + api + hopper
+    const dx = -4.2, dz = 9.1;
+    const drum = new Mesh(new CylinderGeometry(0.85, 0.85, 1.7, 14), stdMat(COL.steel));
+    drum.rotation.z = Math.PI / 2; drum.position.set(dx, 1.35, dz); drum.castShadow = true;
+    S.add(drum);
+    this.roastDrum = drum;
+    // hazard stripe di badan drum (cincin)
+    const stripe = new Mesh(new TorusGeometry(0.86, 0.07, 6, 16), stdMat(COL.hazard));
+    stripe.rotation.y = Math.PI / 2; stripe.position.set(dx, 1.35, dz);
+    S.add(stripe);
+    // dudukan
+    const stand = new Mesh(new BoxGeometry(0.5, 1.0, 1.9), stdMat(0x5A5A5A));
+    stand.position.set(dx, 0.5, dz); stand.castShadow = true;
+    S.add(stand);
+    // api di bawah (cone emissive; intensitas ikut panas)
+    const fire = new Mesh(new ConeGeometry(0.5, 0.7, 8),
+      new MeshBasicMaterial({ color: COL.ember, transparent: true, opacity: 0.0 }));
+    fire.position.set(dx, 0.45, dz);
+    S.add(fire);
+    this.roastFire = fire;
+    // hopper di atas (biji kering masuk sini)
+    const hop = new Mesh(new BoxGeometry(0.9, 0.5, 0.9), stdMat(COL.steel));
+    hop.position.set(dx, 2.45, dz); hop.castShadow = true;
+    S.add(hop);
+    this.roastDrumPos = new Vector3(dx, 1.35, dz);
+    this.drumHopperPos = new Vector3(dx, 2.7, dz);
+  },
 };
 
 /* ============================================================================
@@ -529,7 +724,8 @@ const Flyers = {
     this.im.instanceMatrix.setUsage(DynamicDrawUsage);
     this.im.frustumCulled = false;
     for (let i = 0; i < this.MAX; i++) {
-      this.items.push({ t: 1, dur: 0.5, p0: new Vector3(), p1: new Vector3(), p2: new Vector3(), toHut: false, ripe: true });
+      // dest: 'basket' | 'wash' | 'dryer'; data: boolean/number tergantung dest
+      this.items.push({ t: 1, dur: 0.5, p0: new Vector3(), p1: new Vector3(), p2: new Vector3(), dest: 'basket', data: true });
       _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
       _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
       this.im.setMatrixAt(i, _dummy.matrix);
@@ -538,14 +734,16 @@ const Flyers = {
     this.im.instanceColor.needsUpdate = true;
     S.add(this.im);
   },
-  spawn(from, to, toHut, ripe) {
+  spawn(from, to, dest, data) {
     for (let i = 0; i < this.MAX; i++) {
       const f = this.items[i];
       if (f.t < 1) continue;
-      f.t = 0; f.dur = rand(0.4, 0.55); f.toHut = toHut;
+      f.t = 0; f.dur = rand(0.4, 0.55); f.dest = dest || 'basket'; f.data = data;
       f.p0.copy(from); f.p2.copy(to);
       f.p1.copy(from).lerp(to, 0.5); f.p1.y += 1.6;      // titik kontrol arc
-      this.im.setColorAt(i, _color.set(ripe ? COL.cherryRipe : COL.cherryGreen));
+      const cc = (f.dest === 'dryer') ? COL.beanDry
+        : (f.data === false ? COL.cherryGreen : COL.cherryRipe);
+      this.im.setColorAt(i, _color.set(cc));
       this.im.instanceColor.needsUpdate = true;
       return true;
     }
@@ -569,7 +767,9 @@ const Flyers = {
       if (f.t >= 1) {
         _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
         _dummy.updateMatrix(); this.im.setMatrixAt(i, _dummy.matrix);
-        if (f.toHut) HutSys.onCherryArrived(); else BasketSys.onCherryArrived();
+        if (f.dest === 'wash') WashSys.onPourArrived(f.data);
+        else if (f.dest === 'dryer') DrySys.onBeanArrived(f.data);
+        else BasketSys.onCherryArrived();
       }
     }
     if (dirty) this.im.instanceMatrix.needsUpdate = true;
@@ -716,7 +916,7 @@ const Player = {
    10. BASKET SYSTEM — kapasitas, quality batch
    ============================================================================ */
 const BasketSys = {
-  count: 0, quality: 100,
+  count: 0, quality: 100, good: 0, defect: 0,   // good=ripe, defect=hijau+over (untuk wash)
   onCherryArrived() {
     if (this.count >= CFG.BASKET_CAP) return;
     this.count++;
@@ -725,7 +925,7 @@ const BasketSys = {
     Hud.dirty = true;
   },
   get full() { return this.count >= CFG.BASKET_CAP; },
-  reset() { this.count = 0; this.quality = 100; Player.basketCherries.count = 0; Hud.dirty = true; },
+  reset() { this.count = 0; this.quality = 100; this.good = 0; this.defect = 0; Player.basketCherries.count = 0; Hud.dirty = true; },
   qualityMult() { return 0.5 + (this.quality / 100); },   // 0.5x .. 1.5x
 };
 
@@ -802,6 +1002,36 @@ const InputSys = {
     };
     btn.addEventListener('pointerup', rel);
     btn.addEventListener('pointercancel', rel);
+
+    // --- Fase 2: tombol wash / roast / collect ---
+    const onTap = (id, fn) => {
+      document.getElementById(id).addEventListener('click', e => {
+        e.preventDefault(); AudioSys.init(); fn();
+      });
+    };
+    onTap('btn-wash-good', () => WashSys.route(true));
+    onTap('btn-wash-defect', () => WashSys.route(false));
+    onTap('btn-load', () => { AudioSys.click(); RoastSys.tryLoad(); });
+    onTap('btn-roast-stop', () => RoastSys.stop());
+    onTap('btn-collect', () => SackSys.collect());
+    // fuel slider: drag vertikal
+    const fslider = document.getElementById('fuel-slider');
+    fslider.addEventListener('pointerdown', e => {
+      e.preventDefault(); AudioSys.init();
+      try { fslider.setPointerCapture(e.pointerId); } catch (err) {}
+      RoastSys.setFuel(e);
+      const pid = e.pointerId;
+      const mv = ev => { if (ev.pointerId === pid) RoastSys.setFuel(ev); };
+      const up2 = ev => {
+        if (ev.pointerId !== pid) return;
+        fslider.removeEventListener('pointermove', mv);
+        fslider.removeEventListener('pointerup', up2);
+        fslider.removeEventListener('pointercancel', up2);
+      };
+      fslider.addEventListener('pointermove', mv);
+      fslider.addEventListener('pointerup', up2);
+      fslider.addEventListener('pointercancel', up2);
+    });
 
     document.getElementById('btn-lang').addEventListener('click', () => {
       AudioSys.init(); AudioSys.click();
@@ -888,7 +1118,7 @@ const PickSys = {
       if (wasRipe) ripe++; else if (ch.state === 2) green++; else over++;
       World._setState(ch, 0, now + rand(8, 14)); // gone -> regrow (cukup lama agar harus pindah bush)
       _v1.copy(ch.pos);
-      Flyers.spawn(_v1, bw, false, wasRipe);
+      Flyers.spawn(_v1, bw, 'basket', wasRipe);
       Particles.burst(ch.pos, wasRipe ? COL.cherryRipe : COL.cherryGreen, 3, 2.2);
     }
     if (ripe + green + over === 0) {
@@ -899,6 +1129,7 @@ const PickSys = {
       return;
     }
     SaveSys.data.stats.picked += ripe + green + over;
+    BasketSys.good += ripe; BasketSys.defect += green + over;   // komposisi batch untuk wash
     if (clean) {
       SaveSys.data.stats.perfect++;
       Floaters.spawn(cl.anchor.x, cl.anchor.y + 0.8, cl.anchor.z, t('perfect'), 'gold');
@@ -966,60 +1197,50 @@ const PickSys = {
 };
 
 /* ============================================================================
-   13. HUT — jual cherry (Fase 1: outlet sederhana; diganti wash+roast di Fase 2)
+   13. HUT — stasiun tuang (Fase 2: drop-off ke wash channel; bukan jual lagi)
    ============================================================================ */
 const HutSys = {
-  sellAcc: 0, soldValue: 0, soldCount: 0, inflight: 0, saleActive: false,
+  pourAcc: 0, pourInflight: 0, pouring: false,
   markerEl: null,
   init() { this.markerEl = document.getElementById('hut-marker'); },
-  onCherryArrived() {
-    this.inflight--;
-    const v = CFG.CHERRY_PRICE * BasketSys.qualityMult();
-    this.soldValue += v; this.soldCount++;
-    SaveSys.data.cash += v;
-    Hud.dirty = true;
-  },
   update(dt, now) {
     // pad berpijar
     const s = 1 + Math.sin(now * 4) * 0.07;
     World.hutPad.scale.set(s, s, 1);
     World.hutPad.material.opacity = 0.6 + Math.sin(now * 4) * 0.2;
-    // marker "ke sini" saat keranjang penuh
-    const show = BasketSys.full;
+    // marker "ke sini" saat keranjang penuh & wash bebas
+    const show = BasketSys.full && !WashSys.busy();
     this.markerEl.style.display = show ? 'block' : 'none';
     if (show) {
       _v1.copy(World.hutPos); _v1.y = 3.4; _v1.project(Engine.camera);
       this.markerEl.style.left = ((_v1.x * 0.5 + 0.5) * window.innerWidth) + 'px';
       this.markerEl.style.top = ((-_v1.y * 0.5 + 0.5) * window.innerHeight) + 'px';
     }
-    // jual: berdiri di pad -> cherry terbang ke hut satu per satu
+    // tuang: berdiri di pad -> cherry terbang ke channel satu per satu
     _v1.copy(Player.pos); _v1.y = 0;
     const near = _v1.distanceTo(World.hutPos) < CFG.HUT_RADIUS;
-    if (near && BasketSys.count > 0) {
-      this.saleActive = true;
-      this.sellAcc += dt;
-      while (this.sellAcc >= 0.09 && BasketSys.count > 0) {
-        this.sellAcc -= 0.09;
-        BasketSys.count--;
-        Player.basketCherries.count = BasketSys.count;
+    if (near && BasketSys.count > 0 && !WashSys.busy()) {
+      if (!this.pouring) { this.pouring = true; WashSys.beginPour(); AudioSys.splash(); }
+      this.pourAcc += dt;
+      while (this.pourAcc >= 0.06 && BasketSys.count > 0 && WashSys.pourLen > 0) {
+        this.pourAcc -= 0.06;
+        const sinker = WashSys.pourQueue[WashSys.pourLen - 1];  // peek dulu
         Player.basketWorld(_v3);
-        _v4.copy(World.hutPos); _v4.y = 1.2;
-        if (Flyers.spawn(_v3, _v4, true, true)) this.inflight++;
-        else { BasketSys.count++; Player.basketCherries.count = BasketSys.count; break; }
-        Hud.dirty = true;
+        _v4.copy(WashSys.POUR); _v4.y = 1.0;
+        if (Flyers.spawn(_v3, _v4, 'wash', sinker)) {
+          WashSys.pourLen--;
+          this.pourInflight++;
+          BasketSys.count--;
+          Player.basketCherries.count = BasketSys.count;
+          Hud.dirty = true;
+        } else break;
       }
     } else {
-      this.sellAcc = 0;
-    }
-    if (this.saleActive && BasketSys.count === 0 && this.inflight === 0) {
-      this.saleActive = false;
-      const v = this.soldValue, n = this.soldCount;
-      this.soldValue = 0; this.soldCount = 0;
-      SaveSys.data.stats.sold += n;
-      Floaters.spawn(World.hutPos.x, 2.6, World.hutPos.z, '+$' + v.toFixed(2) + ' ' + t('sold'), 'cash');
-      AudioSys.cash();
-      BasketSys.reset();
-      SaveSys.save();
+      this.pourAcc = 0;
+      if (this.pouring && BasketSys.count === 0 && this.pourInflight === 0) {
+        this.pouring = false;
+        WashSys.endPour();
+      }
     }
   },
 };
@@ -1031,7 +1252,7 @@ const Hud = {
   dirty: true, frames: 0, fpsT: 0,
   el: {},
   init() {
-    ['hud-cash', 'hud-basket', 'hud-quality', 'hud-fps', 'hud-calls'].forEach(id => {
+    ['hud-cash', 'hud-basket', 'hud-quality', 'hud-sacks', 'hud-fps', 'hud-calls'].forEach(id => {
       this.el[id] = document.getElementById(id);
     });
   },
@@ -1041,6 +1262,7 @@ const Hud = {
     this.el['hud-cash'].textContent = '$' + SaveSys.data.cash.toFixed(2);
     this.el['hud-basket'].textContent = BasketSys.count + '/' + CFG.BASKET_CAP;
     this.el['hud-quality'].textContent = BasketSys.quality;
+    this.el['hud-sacks'].textContent = SaveSys.data.sacks;
   },
   fpsTick(dt) {
     this.frames++; this.fpsT += dt;
@@ -1053,7 +1275,14 @@ const Hud = {
 };
 function refreshHint(force) {
   const el = document.getElementById('hint');
-  const key = BasketSys.full ? 'hint_hut' : (PickSys.target ? 'hint_pick' : 'hint_start');
+  let key;
+  if (SackSys.collectValue > 0) key = 'hint_collect';
+  else if (RoastSys.active) key = 'hint_roasting';
+  else if (WashSys.busy()) key = 'hint_wash';
+  else if (DrySys.count >= CFG.ROAST_MIN_BEANS) key = 'hint_roast';
+  else if (BasketSys.full) key = 'hint_pour';
+  else if (PickSys.target) key = 'hint_pick';
+  else key = 'hint_start';
   if (force || el.dataset.k !== key) { el.dataset.k = key; el.textContent = t(key); }
 }
 
@@ -1079,6 +1308,10 @@ const Game = {
     Particles.update(dt);
     Floaters.update(dt);
     HutSys.update(dt, tSec);
+    WashSys.update(dt, tSec);
+    DrySys.update(dt);
+    RoastSys.update(dt, tSec);
+    SackSys.update(dt, tSec);
 
     Engine.renderer.render(Engine.scene, Engine.camera);
     Hud.fpsTick(dt);
@@ -1110,6 +1343,10 @@ function boot() {
   Player.init(Engine.scene);
   PickSys.init(Engine.scene);
   HutSys.init();
+  WashSys.init(Engine.scene);
+  DrySys.init(Engine.scene);
+  RoastSys.init();
+  SackSys.init(Engine.scene);
   Hud.init();
   InputSys.init();
   applyI18n();
@@ -1127,18 +1364,655 @@ function boot() {
 }
 
 // DOM sudah siap (script di akhir body, baik dev maupun inline)
-boot();
+// boot() dipanggil di AKHIR file agar semua sistem (termasuk Fase 2)
+// sudah terdefinisi (hindari TDZ).
 
 /* ============================================================================
-   FASE 2 — WASH CHANNEL (density sorting: sinker vs floater + pintu air)
-   -> Sistem baru: WashSys; cherry dari keranjang dituang ke channel,
-      tap sluice gates untuk routing ke dermaga GOOD/DEFECT.
+   16. WASH CHANNEL — density sorting (§4.3): sinker vs floater + pintu air
+   Alur: tuang keranjang -> cherry mengalir ~6 dtk -> antre di fork ->
+   tap GOOD/DEFECT (auto-route benar bila dibiarkan 2 dtk) ->
+   GOOD -> dryer, DEFECT -> auto-jual murah.
    ============================================================================ */
+const WashSys = {
+  POUR: null, FORK: null, GOOD_DOCK: null, DEFECT_DOCK: null, WATER_Y: 0.62,
+  pouring: false, flowing: false,
+  pourQueue: null, pourLen: 0,
+  batchQuality: 100,
+  items: [], im: null,
+  waitList: null, waitCount: 0,   // antrean index item di fork (FIFO)
+  uiEl: null, foamT: 0,
+  goodRouted: 0, defectRouted: 0,
+
+  init(S) {
+    this.POUR = new Vector3(9.5, 0, 9.1);
+    this.FORK = new Vector3(3.0, 0, 9.1);
+    this.GOOD_DOCK = new Vector3(1.0, 0, 9.1);
+    this.DEFECT_DOCK = new Vector3(3.0, 0, 11.7);
+    this.pourQueue = new Array(40);
+    this.waitList = new Array(40);
+    this.im = new InstancedMesh(new SphereGeometry(0.09, 6, 5),
+      new MeshStandardMaterial({ roughness: 0.5, flatShading: true }), 40);
+    this.im.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    for (let i = 0; i < 40; i++) {
+      this.items.push({ active: false, t: 0, sinker: true, mode: 0, forkT: 0,
+        routeT: 0, good: true, qpos: 0,
+        fx: 0, fy: 0, fz: 0, tx: 0, ty: 0, tz: 0 });
+      _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+      _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+      this.im.setColorAt(i, _color.set(COL.cherryRipe));
+    }
+    this.im.instanceColor.needsUpdate = true;
+    S.add(this.im);
+    this.uiEl = document.getElementById('wash-ui');
+    World.gateGood.userData.baseRy = World.gateGood.rotation.y;
+    World.gateDefect.userData.baseRy = World.gateDefect.rotation.y;
+    World.gateGood.userData.swing = 0; World.gateDefect.userData.swing = 0;
+  },
+
+  busy() { return this.pouring || this.flowing; },
+
+  beginPour() {
+    // pindahkan komposisi batch dari keranjang ke antrean tuang, diacak.
+    // (good+defect = yang dipetik; bisa > count karena overflow -> potong)
+    const g = Math.min(BasketSys.good, 40), d = Math.min(BasketSys.defect, 40);
+    let n = 0;
+    for (let i = 0; i < g && n < 40; i++) this.pourQueue[n++] = true;
+    for (let i = 0; i < d && n < 40; i++) this.pourQueue[n++] = false;
+    for (let i = n - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const tmp = this.pourQueue[i]; this.pourQueue[i] = this.pourQueue[j]; this.pourQueue[j] = tmp;
+    }
+    this.pourLen = Math.min(BasketSys.count, n);
+    this.batchQuality = BasketSys.quality;
+    this.pouring = true;
+    this.goodRouted = 0; this.defectRouted = 0;
+  },
+
+  onPourArrived(sinker) {
+    HutSys.pourInflight--;
+    for (let i = 0; i < 40; i++) {
+      const it = this.items[i];
+      if (it.active) continue;
+      it.active = true; it.t = 0; it.sinker = !!sinker; it.mode = 0; it.qpos = 0;
+      this.im.setColorAt(i, _color.set(it.sinker ? COL.cherryRipe : COL.cherryGreen));
+      break;
+    }
+    this.im.instanceColor.needsUpdate = true;
+  },
+
+  endPour() {
+    BasketSys.reset();
+    this.pouring = false;
+    this.flowing = true;
+    this.uiEl.style.display = 'flex';
+    refreshHint(true);
+    SaveSys.save();
+  },
+
+  route(toGood) {
+    if (this.waitCount <= 0) return;
+    const i = this.waitList[0];
+    for (let k = 0; k < this.waitCount - 1; k++) {
+      this.waitList[k] = this.waitList[k + 1];
+      this.items[this.waitList[k]].qpos = k;
+    }
+    this.waitCount--;
+    const it = this.items[i];
+    it.mode = 2; it.routeT = 0; it.good = toGood;
+    const d = toGood ? this.GOOD_DOCK : this.DEFECT_DOCK;
+    it.fx = this.FORK.x; it.fy = this.WATER_Y + 0.15; it.fz = this.FORK.z;
+    it.tx = d.x; it.ty = 0.9; it.tz = d.z;
+    const gate = toGood ? World.gateGood : World.gateDefect;
+    gate.userData.swing = 1;
+    AudioSys.gate();
+  },
+
+  finishRoute(i) {
+    const it = this.items[i];
+    it.active = false;
+    _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+    _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+    this.im.setMatrixAt(i, _dummy.matrix);
+    this.im.instanceMatrix.needsUpdate = true;
+    if (it.good) {
+      this.goodRouted++;
+      _v1.set(it.tx, it.ty, it.tz);
+      _v2.copy(World.dryerRacks[0]); _v2.y = 1.2;
+      const q = it.sinker ? this.batchQuality : Math.max(0, this.batchQuality - 10);
+      if (!it.sinker) {
+        Floaters.spawn(it.tx, 1.6, it.tz, t('contaminated'), 'bad');
+        AudioSys.error();
+      } else {
+        Particles.burst(_v1, COL.water, 4, 1.5);
+      }
+      if (!Flyers.spawn(_v1, _v2, 'dryer', q)) DrySys.onBeanArrived(q);
+    } else {
+      this.defectRouted++;
+      SaveSys.data.defect++;
+      if (!it.sinker) {
+        // floater -> DEFECT: benar
+      } else {
+        Floaters.spawn(it.tx, 1.6, it.tz, '-$', 'bad');
+      }
+      if (SaveSys.data.defect >= CFG.DEFECT_AUTOSELL) this.sellDefect();
+      Hud.dirty = true;
+    }
+  },
+
+  sellDefect() {
+    const n = SaveSys.data.defect;
+    if (n <= 0) return;
+    const v = n * CFG.DEFECT_PRICE;
+    SaveSys.data.defect = 0;
+    SaveSys.data.cash += v;
+    Floaters.spawn(this.DEFECT_DOCK.x, 1.8, this.DEFECT_DOCK.z,
+      '+$' + v.toFixed(2) + ' ' + t('defect_sold'), 'cash');
+    AudioSys.cash();
+    Hud.dirty = true; SaveSys.save();
+  },
+
+  update(dt, now) {
+    // foam selalu mengalir (ambient)
+    this.foamT += dt;
+    const len = 6.5, cx = 6.25;
+    for (let i = 0; i < 10; i++) {
+      const x = cx + len / 2 - ((this.foamT * 1.1 + i * 0.73) % (len + 1));
+      _dummy.position.set(x, 0.64, 9.1 + ((i * 0.37) % 0.5) - 0.25);
+      _dummy.rotation.set(-Math.PI / 2, 0, 0);
+      _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+      World.washFoam.setMatrixAt(i, _dummy.matrix);
+    }
+    World.washFoam.instanceMatrix.needsUpdate = true;
+    // ayunan pintu air
+    for (const gate of [World.gateGood, World.gateDefect]) {
+      const u = gate.userData;
+      if (u.swing > 0) {
+        u.swing = Math.max(0, u.swing - dt * 2.2);
+        gate.rotation.y = u.baseRy + Math.sin(u.swing * Math.PI) * 0.7;
+      }
+    }
+    if (!this.flowing) { World.forkRing.visible = false; return; }
+
+    let dirty = false, activeCount = 0;
+    for (let i = 0; i < 40; i++) {
+      const it = this.items[i];
+      if (!it.active) continue;
+      activeCount++;
+      if (it.mode === 0) {
+        it.t += dt / CFG.WASH_FLOW_TIME;
+        if (it.t >= 1) {
+          it.mode = 1; it.t = 1; it.forkT = 0;
+          it.qpos = this.waitCount;
+          this.waitList[this.waitCount++] = i;
+        }
+      } else if (it.mode === 1) {
+        if (it.qpos === 0) {
+          it.forkT += dt;
+          if (it.forkT >= CFG.WASH_FORK_WAIT) this.route(it.sinker); // auto benar
+        }
+      } else {
+        it.routeT += dt / 0.5;
+        if (it.routeT >= 1) this.finishRoute(i);
+      }
+      this.writeMatrix(i, it, now);
+      dirty = true;
+    }
+    if (dirty) this.im.instanceMatrix.needsUpdate = true;
+    World.forkRing.visible = this.waitCount > 0;
+    if (this.waitCount > 0) {
+      const s = 1 + Math.sin(now * 8) * 0.12;
+      World.forkRing.scale.set(s, s, 1);
+    }
+    if (activeCount === 0) {
+      this.flowing = false;
+      this.uiEl.style.display = 'none';
+      World.forkRing.visible = false;
+      refreshHint(true);
+    }
+  },
+
+  writeMatrix(i, it, now) {
+    if (!it.active) {
+      _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+    } else if (it.mode === 2) {
+      const t = Math.min(it.routeT, 1), u = t * t * (3 - 2 * t);
+      _dummy.position.set(
+        it.fx + (it.tx - it.fx) * u,
+        it.fy + (it.ty - it.fy) * u + Math.sin(u * Math.PI) * 0.8,
+        it.fz + (it.tz - it.fz) * u);
+      _dummy.scale.set(1, 1, 1);
+    } else {
+      let x, y, s = 1;
+      if (it.mode === 1 && it.qpos === 0) {
+        x = this.FORK.x; y = this.WATER_Y + 0.12;
+        s = 1 + Math.sin(now * 8) * 0.15;
+      } else {
+        const t = it.mode === 1 ? Math.max(0.55, 0.94 - 0.055 * it.qpos) : Math.min(it.t, 1);
+        x = this.POUR.x + (this.FORK.x - this.POUR.x) * t;
+        y = it.sinker ? this.WATER_Y - 0.16
+          : this.WATER_Y + 0.03 + Math.sin(now * 5 + i * 1.3) * 0.04;
+      }
+      _dummy.position.set(x, y, 9.1);
+      _dummy.scale.set(s, s, s);
+    }
+    _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+    this.im.setMatrixAt(i, _dummy.matrix);
+  },
+};
 
 /* ============================================================================
-   FASE 2 — ROAST DRUM (heat control + momen FIRST CRACK + order light/med/dark)
-   -> Sistem baru: RoastSys; SFX signature: crackle pops.
+   17. DRYER — penjemuran otomatis (§4.5, bukan taktil)
+   Biji GOOD dari wash -> rak bambu (timer visual, warna hijau->coklat) ->
+   hopper (siap roast). Otomatis penuh.
    ============================================================================ */
+const DrySys = {
+  im: null, slots: [],
+  count: 0, qSum: 0,          // hopper: biji kering siap roast
+  dryCol: null,
+  init(S) {
+    this.dryCol = new Color(COL.beanDry);
+    // hopper persist (stockpile, bukan in-progress)
+    this.count = Math.max(0, Math.floor(SaveSys.data.dryCount || 0));
+    this.qSum = Math.max(0, SaveSys.data.dryQSum || 0);
+    this.im = new InstancedMesh(new SphereGeometry(0.07, 6, 5),
+      new MeshStandardMaterial({ roughness: 0.6, flatShading: true }), 56);
+    this.im.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.im.frustumCulled = false;
+    let s = 0;
+    for (const rack of World.dryerRacks) {
+      for (let gx = 0; gx < 7; gx++) for (let gz = 0; gz < 4; gz++) {
+        this.slots.push({
+          active: false, t: 0, quality: 100,
+          x: rack.x - 0.9 + gx * 0.3, y: rack.y + 0.12, z: rack.z - 0.5 + gz * 0.33,
+        });
+        _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+        _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        this.im.setMatrixAt(s, _dummy.matrix);
+        this.im.setColorAt(s, _color.set(COL.beanDry));
+        s++;
+      }
+    }
+    this.im.instanceColor.needsUpdate = true;
+    S.add(this.im);
+  },
+  onBeanArrived(quality) {
+    for (let i = 0; i < 56; i++) {
+      const sl = this.slots[i];
+      if (sl.active) continue;
+      sl.active = true; sl.t = 0; sl.quality = quality;
+      _dummy.position.set(sl.x, sl.y, sl.z); _dummy.scale.set(1, 1, 1);
+      _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+      this.im.setColorAt(i, _color.set(COL.cherryGreen));
+      this.im.instanceMatrix.needsUpdate = true;
+      this.im.instanceColor.needsUpdate = true;
+      return;
+    }
+    this.count++; this.qSum += quality;   // rak penuh -> langsung hopper
+    this.saveHopper();
+    refreshHint(true);
+  },
+  saveHopper() {
+    SaveSys.data.dryCount = this.count;
+    SaveSys.data.dryQSum = this.qSum;
+  },
+  update(dt) {
+    let mDirty = false, cDirty = false;
+    for (let i = 0; i < 56; i++) {
+      const sl = this.slots[i];
+      if (!sl.active) continue;
+      sl.t += dt;
+      if (sl.t >= CFG.DRY_TIME) {
+        sl.active = false;
+        this.count++; this.qSum += sl.quality;
+        this.saveHopper();
+        _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+        _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        this.im.setMatrixAt(i, _dummy.matrix);
+        mDirty = true;
+        if (this.count === CFG.ROAST_MIN_BEANS) refreshHint(true);
+      } else {
+        _color.set(COL.cherryGreen).lerp(this.dryCol, sl.t / CFG.DRY_TIME);
+        this.im.setColorAt(i, _color);
+        cDirty = true;
+      }
+    }
+    if (mDirty) this.im.instanceMatrix.needsUpdate = true;
+    if (cDirty) this.im.instanceColor.needsUpdate = true;
+  },
+};
+
+/* (RoastSys §18 didefinisikan tepat di bawah, sebelum SackSys.
+   Urutan definisi tidak penting; yang penting semua terdefinisi sebelum boot().) */
+
+/* ============================================================================
+   18. ROAST DRUM — heat control + FIRST CRACK + order (§4.4)
+   Drag fuel untuk jaga jarum di zona hijau. ~196°C = FIRST CRACK (signature).
+   STOP di zona target order -> roast-match +25%. Merah kelamaan = gosong.
+   ============================================================================ */
+const RoastSys = {
+  active: false,
+  beans: 0, quality: 100, order: 1,
+  temp: 25, fuel: 55, progress: 0, scorch: 0, cracked: false,
+  bands: [[45, 60], [60, 78], [78, 95]],
+  orderKeys: ['order_light', 'order_medium', 'order_dark'],
+  uiEl: null, tempEl: null, needleEl: null, fillEl: null,
+  orderEl: null, beansEl: null, sliderEl: null, knobEl: null, loadBtn: null,
+  crackT: 0, shakeT: 0,
+
+  init() {
+    const g = id => document.getElementById(id);
+    this.uiEl = g('roast-ui'); this.tempEl = g('roast-temp');
+    this.needleEl = g('roast-needle'); this.fillEl = g('roast-fill');
+    this.orderEl = g('roast-order'); this.beansEl = g('roast-beans');
+    this.sliderEl = g('fuel-slider'); this.knobEl = g('fuel-knob');
+    this.loadBtn = g('btn-load');
+  },
+
+  setFuel(e) {
+    const r = this.sliderEl.getBoundingClientRect();
+    const k = 1 - (e.clientY - r.top) / r.height;
+    this.fuel = clamp(k, 0, 1) * 100;
+  },
+
+  tryLoad() {
+    if (this.active || DrySys.count < CFG.ROAST_MIN_BEANS) return;
+    const n = Math.min(DrySys.count, CFG.ROAST_MAX_BEANS);
+    const q = DrySys.qSum / DrySys.count;
+    DrySys.count -= n; DrySys.qSum -= q * n;
+    if (DrySys.count <= 0) { DrySys.count = 0; DrySys.qSum = 0; }
+    DrySys.saveHopper();
+    this.start(n, q);
+  },
+
+  start(n, q) {
+    this.active = true;
+    this.beans = n; this.quality = q;
+    this.order = (Math.random() * 3) | 0;
+    this.temp = 25; this.fuel = 55; this.progress = 0; this.scorch = 0;
+    this.cracked = false; this.crackT = 0; this.shakeT = 0;
+    this.uiEl.style.display = 'block';
+    this.loadBtn.style.display = 'none';
+    this.orderEl.textContent = t(this.orderKeys[this.order]).toUpperCase();
+    const b = this.bands[this.order];
+    const band = document.getElementById('roast-band');
+    band.style.left = b[0] + '%'; band.style.width = (b[1] - b[0]) + '%';
+    this.updateUI();
+    AudioSys.loadDrum(); AudioSys.humStart();
+    refreshHint(true);
+  },
+
+  stop() {
+    if (!this.active) return;
+    const b = this.bands[this.order], p = this.progress;
+    const qm = 0.5 + this.quality / 100;
+    if (p >= b[0] && p <= b[1]) {
+      const v = CFG.SACK_PRICE * qm * CFG.ROAST_MATCH_MULT;
+      SackSys.addSack(v, true);
+      Floaters.spawn(World.roastDrumPos.x, 3.0, World.roastDrumPos.z, t('roast_match'), 'gold');
+      AudioSys.ding();
+    } else {
+      const v = CFG.SACK_PRICE * qm * CFG.UNDER_PENALTY;
+      SackSys.addSack(v, false);
+      Floaters.spawn(World.roastDrumPos.x, 3.0, World.roastDrumPos.z, t('under_roast'), '');
+      AudioSys.pluck();
+    }
+    SaveSys.data.stats.roasted = (SaveSys.data.stats.roasted || 0) + 1;
+    this.endRoast();
+  },
+
+  failBurnt() {
+    Floaters.spawn(World.roastDrumPos.x, 3.0, World.roastDrumPos.z, t('burnt'), 'bad');
+    AudioSys.error();
+    _v1.copy(World.roastDrumPos); _v1.y += 1.2;
+    Particles.burst(_v1, 0x2A2A2A, 16, 3);
+    this.endRoast();
+  },
+
+  endRoast() {
+    this.active = false;
+    this.uiEl.style.display = 'none';
+    document.getElementById('firstcrack-banner').style.display = 'none';
+    AudioSys.humStop();
+    SaveSys.save();
+    refreshHint(true);
+  },
+
+  update(dt, now) {
+    this.loadBtn.style.display =
+      (!this.active && DrySys.count >= CFG.ROAST_MIN_BEANS && SackSys.collectValue <= 0) ? 'block' : 'none';
+    if (!this.active) return;
+    // --- fisika panas: temp mengejar equilibrium fuel ---
+    const eq = 20 + this.fuel * 2.2;
+    this.temp += (eq - this.temp) * Math.min(1, dt * 0.35);
+    // --- FIRST CRACK ---
+    if (!this.cracked && this.temp >= CFG.FIRST_CRACK_TEMP) {
+      this.cracked = true; this.crackT = 2.5; this.shakeT = 0.7;
+      document.getElementById('firstcrack-banner').style.display = 'flex';
+      AudioSys.crackle();
+      _v1.copy(World.roastDrumPos); _v1.y += 1.0;
+      Particles.burst(_v1, COL.beanRoast, 14, 3.5);
+      SaveSys.data.stats.cracks = (SaveSys.data.stats.cracks || 0) + 1;
+    }
+    if (this.crackT > 0) {
+      this.crackT -= dt;
+      if (this.crackT <= 0) document.getElementById('firstcrack-banner').style.display = 'none';
+    }
+    // --- progress roast (jalan saat 150-225°C) ---
+    if (this.temp >= 150 && this.temp <= 225) {
+      this.progress += dt * 2.0 * (0.6 + 0.4 * (this.temp - 150) / 75);
+    }
+    // --- scorch (zona merah) ---
+    if (this.temp > 225) {
+      this.scorch += dt * (this.temp - 225) / 30;
+      if (this.scorch >= 1) { this.failBurnt(); return; }
+    } else {
+      this.scorch = Math.max(0, this.scorch - dt * 0.3);
+    }
+    if (this.progress >= 97) { this.failBurnt(); return; }
+    // --- visual drum ---
+    World.roastDrum.rotation.x += dt * (0.6 + this.temp / 120);
+    const heatK = clamp((this.temp - 60) / 160, 0, 1);
+    World.roastFire.material.opacity = 0.22 + heatK * 0.68;
+    const fs = 0.8 + heatK * 0.7 + Math.sin(now * 13) * 0.08;
+    World.roastFire.scale.set(fs, fs * (1 + heatK * 0.5), fs);
+    if (this.shakeT > 0) {
+      this.shakeT -= dt;
+      World.roastDrum.position.x = World.roastDrumPos.x + Math.sin(now * 40) * 0.06 * this.shakeT;
+    } else {
+      World.roastDrum.position.x = World.roastDrumPos.x;
+    }
+    if (this.temp > 150 && Math.random() < dt * 6) {
+      _v1.copy(World.roastDrumPos); _v1.y += 1.1;
+      Particles.burst(_v1, 0xDDDDDD, 2, 1.1);
+    }
+    AudioSys.humUpdate(this.temp);
+    this.updateUI();
+  },
+
+  updateUI() {
+    this.tempEl.textContent = Math.round(this.temp) + '°C';
+    const pct = clamp((this.temp - 20) / 230, 0, 1) * 100;
+    this.needleEl.style.left = pct + '%';
+    this.fillEl.style.width = clamp(this.progress, 0, 100) + '%';
+    const rk = clamp(this.progress / 100, 0, 1);
+    const r = Math.round(205 - rk * 150), gg = Math.round(155 - rk * 118), b = Math.round(105 - rk * 80);
+    this.fillEl.style.background = 'rgb(' + r + ',' + gg + ',' + b + ')';
+    this.beansEl.textContent = this.beans + ' · Q' + Math.round(this.quality);
+    this.knobEl.style.bottom = 'calc(' + this.fuel.toFixed(1) + '% - 14px)';
+  },
+};
+
+/* ============================================================================
+   19. SACKSYS — karung goni + truk + collect cash (§4.6)
+   Roast batch -> 1 karung (visual menumpuk). >=8 karung -> truk datang,
+   muat, pergi -> bundle cash -> TAP untuk collect.
+   ============================================================================ */
+const SackSys = {
+  im: null, pilePos: [],
+  truck: null, truckState: 'idle', truckT: 0,
+  loading: null,          // {idx, t} karung yang sedang dimuat
+  collectValue: 0,
+  collectBtn: null, collectVal: null,
+
+  init(S) {
+    const bx = -6.5, bz = 9.1;
+    const layers = [5, 4, 3];
+    for (let l = 0; l < 3; l++) {
+      for (let i = 0; i < layers[l] && this.pilePos.length < 12; i++) {
+        this.pilePos.push({
+          x: bx - (layers[l] - 1) * 0.45 + i * 0.9,
+          y: 0.32 + l * 0.58, z: bz,
+        });
+      }
+    }
+    this.im = new InstancedMesh(new SphereGeometry(0.42, 8, 6),
+      new MeshStandardMaterial({ color: COL.jute, roughness: 0.85, flatShading: true }), 12);
+    this.im.frustumCulled = false;
+    this.im.castShadow = true;
+    for (let i = 0; i < 12; i++) {
+      _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+      _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    S.add(this.im);
+    this.refresh();
+    this.buildTruck(S);
+    this.collectBtn = document.getElementById('btn-collect');
+    this.collectVal = document.getElementById('collect-val');
+  },
+
+  refresh() {
+    const n = Math.min(SaveSys.data.sacks, 12);
+    for (let i = 0; i < 12; i++) {
+      if (i < n) {
+        const p = this.pilePos[i];
+        _dummy.position.set(p.x, p.y, p.z);
+        _dummy.scale.set(1, 0.72, 1);
+        _dummy.rotation.set(0, i * 0.7, 0);
+      } else {
+        _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+        _dummy.rotation.set(0, 0, 0);
+      }
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i, _dummy.matrix);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  },
+
+  addSack(value, matched) {
+    SaveSys.data.sacks++;
+    SaveSys.data.sackValue += value;
+    SaveSys.data.stats.sacksMade = (SaveSys.data.stats.sacksMade || 0) + 1;
+    this.refresh();
+    Hud.dirty = true; SaveSys.save();
+    if (SaveSys.data.sacks >= CFG.SACKS_FOR_TRUCK && this.truckState === 'idle') {
+      this.sendTruck();
+    }
+    refreshHint(true);
+  },
+
+  buildTruck(S) {
+    const g = new Group();
+    const cab = new Mesh(new BoxGeometry(1.6, 1.4, 1.8), stdMat(COL.truckRed));
+    cab.position.set(0, 1.15, 0); cab.castShadow = true;
+    const bed = new Mesh(new BoxGeometry(3.4, 1.0, 1.9), stdMat(0x8A5A3B));
+    bed.position.set(-2.5, 0.95, 0); bed.castShadow = true;
+    g.add(cab); g.add(bed);
+    const wg = new CylinderGeometry(0.35, 0.35, 0.3, 10);
+    const wm = stdMat(0x2B2B2B);
+    for (const [wx, wz] of [[0.5, 0.95], [0.5, -0.95], [-1.7, 0.95], [-1.7, -0.95], [-3.4, 0.95], [-3.4, -0.95]]) {
+      const w = new Mesh(wg, wm);
+      w.rotation.x = Math.PI / 2; w.position.set(wx, 0.35, wz);
+      g.add(w);
+    }
+    g.visible = false;
+    g.position.set(18, 0, 12.5);
+    S.add(g);
+    this.truck = g;
+  },
+
+  sendTruck() {
+    this.truckState = 'arriving'; this.truckT = 0;
+    this.truck.visible = true;
+    this.truck.position.set(18, 0, 12.5);
+    AudioSys.loadDrum();
+  },
+
+  truckBed(out) {
+    return out.set(this.truck.position.x - 2.5, 1.7, this.truck.position.z);
+  },
+
+  collect() {
+    if (this.collectValue <= 0) return;
+    const v = this.collectValue;
+    this.collectValue = 0;
+    SaveSys.data.cash += v;
+    SaveSys.data.stats.earned = (SaveSys.data.stats.earned || 0) + v;
+    _v1.set(-6.5, 2.5, 12.5);
+    Floaters.spawn(_v1.x, _v1.y, _v1.z, '+$' + v.toFixed(2), 'cash');
+    AudioSys.cashBig();
+    Hud.dirty = true; SaveSys.save(); refreshHint(true);
+  },
+
+  update(dt, now) {
+    const show = this.collectValue > 0;
+    this.collectBtn.style.display = show ? 'block' : 'none';
+    if (show) this.collectVal.textContent = '$' + this.collectValue.toFixed(2);
+    if (this.truckState === 'idle') return;
+    const tr = this.truck;
+    if (this.truckState === 'arriving') {
+      this.truckT += dt;
+      const k = Math.min(1, this.truckT / 4);
+      tr.position.x = lerp(18, -6.5, k * k * (3 - 2 * k));
+      tr.position.y = Math.abs(Math.sin(this.truckT * 9)) * 0.05;
+      if (k >= 1) { this.truckState = 'loading'; tr.position.y = 0; }
+    } else if (this.truckState === 'loading') {
+      if (this.loading) {
+        const L = this.loading;
+        L.t += dt / 0.45;
+        const t = Math.min(L.t, 1), u = t * t * (3 - 2 * t);
+        const p = this.pilePos[L.idx];
+        this.truckBed(_v1);
+        _dummy.position.set(
+          p.x + (_v1.x - p.x) * u,
+          p.y + (_v1.y - p.y) * u + Math.sin(u * Math.PI) * 1.6,
+          p.z + (_v1.z - p.z) * u);
+        _dummy.scale.set(1, 0.72, 1); _dummy.rotation.set(0, L.idx * 0.7, 0);
+        _dummy.updateMatrix();
+        this.im.setMatrixAt(L.idx, _dummy.matrix);
+        this.im.instanceMatrix.needsUpdate = true;
+        if (L.t >= 1) {
+          SaveSys.data.sacks--;
+          this.loading = null;
+          this.refresh();
+          Hud.dirty = true;
+        }
+      } else if (SaveSys.data.sacks > 0) {
+        this.loading = { idx: Math.min(SaveSys.data.sacks, 12) - 1, t: 0 };
+        AudioSys.pop();
+      } else {
+        this.truckState = 'departing'; this.truckT = 0;
+      }
+    } else if (this.truckState === 'departing') {
+      this.truckT += dt;
+      const k = Math.min(1, this.truckT / 4);
+      tr.position.x = lerp(-6.5, -18, k * k * (3 - 2 * k));
+      tr.position.y = Math.abs(Math.sin(this.truckT * 9)) * 0.05;
+      if (k >= 1) {
+        this.truckState = 'idle';
+        tr.visible = false;
+        this.collectValue = SaveSys.data.sackValue;
+        SaveSys.data.sackValue = 0;
+        SaveSys.save();
+        refreshHint(true);
+      }
+    }
+    void now;
+  },
+};
 
 /* ============================================================================
    FASE 3 — WORKERS (picker), UPGRADES, ZONES 2-3, OFFLINE EARNINGS
@@ -1149,3 +2023,6 @@ boot();
    FASE 4 — SDK CRAZYGAMES v3, ACHIEVEMENTS, SHARE CARD, QA PORTAL
    -> SdkSys wrapper + mock; achievements; share 1080x1350.
    ============================================================================ */
+
+// Entry point (di akhir agar semua sistem terdefinisi).
+boot();

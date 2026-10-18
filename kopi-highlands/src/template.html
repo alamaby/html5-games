@@ -16,6 +16,7 @@
     <div class="pill" id="pill-cash">&#x1F4B0; <span id="hud-cash">$0.00</span></div>
     <div class="pill" id="pill-basket">&#x1F9FA; <span id="hud-basket">0/40</span></div>
     <div class="pill" id="pill-quality">&#x2B50; <span id="hud-quality">100</span></div>
+    <div class="pill" id="pill-sacks">&#x1F333; <span id="hud-sacks">0</span></div>
     <div class="spacer"></div>
     <div class="pill small"><span id="hud-fps">--</span> fps &middot; <span id="hud-calls">--</span> calls</div>
     <button class="pill btn" id="btn-lang">ID</button>
@@ -30,6 +31,30 @@
   <div id="floaters"></div>
   <div id="hut-marker">&#x2B07;</div>
   <button id="btn-pick"><span data-i18n="pick">PICK</span></button>
+  <!-- Fase 2: wash gates -->
+  <div id="wash-ui">
+    <button id="btn-wash-good" class="wash-btn good"><span data-i18n="wash_good">GOOD</span></button>
+    <button id="btn-wash-defect" class="wash-btn defect"><span data-i18n="wash_defect">DEFECT</span></button>
+  </div>
+  <button id="btn-load"><span data-i18n="load_drum">LOAD DRUM</span></button>
+  <!-- Fase 2: roast panel -->
+  <div id="roast-ui">
+    <div id="roast-top"><span id="roast-temp">25°C</span><span id="roast-order">MEDIUM</span></div>
+    <div id="roast-gauge">
+      <div id="gauge-cold"></div><div id="gauge-green"></div><div id="gauge-red"></div>
+      <div id="crack-tick"></div><div id="roast-needle"></div>
+    </div>
+    <div id="roast-mid">
+      <div id="fuel-slider"><div id="fuel-knob"></div></div>
+      <div id="roast-right">
+        <div id="roast-progress"><div id="roast-band"></div><div id="roast-fill"></div></div>
+        <div id="roast-beans">0 · Q100</div>
+        <button id="btn-roast-stop"><span data-i18n="roast_stop">STOP</span></button>
+      </div>
+    </div>
+  </div>
+  <div id="firstcrack-banner"><span data-i18n="first_crack">FIRST CRACK!</span></div>
+  <button id="btn-collect"><span data-i18n="collect">COLLECT</span> <span id="collect-val">$0</span></button>
 </div>
 <!--INLINE:MODULE-->
 </body>
