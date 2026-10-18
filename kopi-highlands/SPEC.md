@@ -61,8 +61,14 @@ kopi-highlands/
 ```
 
 - Trik inline: `three.module.min.js` + kode game dalam satu
-  `<script type="module">` (`export` three tetap valid, binding in-scope).
-  **Verifikasi di awal Fase 1**; fallback UMD `0.149.0` siap.
+  `<script type="module">`. **Koreksi penting (bug 2026-10-18):**
+  `export{... Jl as WebGLRenderer ...}` di three TIDAK membuat binding lokal
+  `WebGLRenderer` di dalam module — `export{A as B}` hanya alias ekspor.
+  Karena itu `build_inline.py` mem-parse blok export dan memancarkan
+  `const WebGLRenderer=Jl;` (416 binding) SETELAH source three dan SEBELUM
+  kode game; tanpanya module mati dengan
+  `ReferenceError: WebGLRenderer is not defined`. Verifikasi binding harus
+  via evaluasi nyata (node), bukan klaim statis. Fallback UMD `0.149.0` siap.
 - Budget: ~640 KB (three) + ~200–250 KB (game+css) ≈ **< 1 MB**.
 - Save key: `kh_save_v1`. Tanpa Vite/TS/Zustand/Tailwind/npm.
 

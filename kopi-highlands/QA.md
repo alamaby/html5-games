@@ -53,3 +53,14 @@
 - Dev: `cd kopi-highlands && python3 -m http.server 8000` → buka `http://localhost:8000/src/index.dev.html`
 - Ship: `python3 build_inline.py` → `dist/index.html` (buka langsung, tanpa server)
 - Vendor ulang: `./fetch_vendor.sh`
+
+## Bug kritis 2026-10-18 — ReferenceError: WebGLRenderer is not defined (FIXED)
+- **Gejala (laporan user + live browser):** halaman hanya render HUD statis di atas background tan; tidak ada scene 3D; klik tidak berefek; fps "--".
+- **Akar masalah:** `three.module.min.js` mendeklarasikan class dengan nama minified lokal (`Jl`) dan hanya mengekspos nama publik sebagai **alias export** (`export{... Jl as WebGLRenderer ...}`). `export{A as B}` TIDAK membuat binding lokal `B` di dalam module — jadi `new WebGLRenderer()` di kode game melempar ReferenceError dan seluruh module mati sebelum renderer dibuat. Klaim verifikasi sebelumnya ("binding three in-scope") SALAH — penalaran statis yang keliru tentang export alias.
+- **Fix (build_inline.py):** fungsi `three_alias_consts()` mem-parse blok `export{...}`, dan untuk setiap `X as Y` (X≠Y) memancarkan `const Y=X;` — 416 binding — disisipkan SETELAH source three (dan blok export-nya) dan SEBELUM IIFE kode game.
+- **Verifikasi fix (bukan klaim):**
+  1. `node` impor `three.module.min.js` sebagai module: 416/416 nama publik ada di namespace, tipe benar (WebGLRenderer/Scene/PerspectiveCamera = function).
+  2. Simulasi struktur module hasil build (three source + alias consts) di node: `typeof WebGLRenderer/Scene/InstancedMesh` = function — skenario gagal yang persis kini lolos.
+  3. `node --check` pada module hasil ekstrak: lolos.
+  4. Live-browser re-check https://alamaby.github.io/html5-games/kopi-highlands/ setelah push fix (lihat bawah).
+- **Pelajaran:** klaim "verified" untuk trik inline tidak boleh hanya statis — butuh evaluasi binding yang sesungguhnya (seperti tes node di atas) atau browser sungguhan.

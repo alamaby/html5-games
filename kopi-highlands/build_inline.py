@@ -18,6 +18,32 @@ def read(p):
     return p.read_text(encoding="utf-8")
 
 
+def three_alias_consts(three_src):
+    """three.module.min.js exposes public names ONLY as export aliases
+    (e.g. `Jl as WebGLRenderer`). `export{A as B}` does NOT create a local
+    binding `B` inside the module, so bare `new WebGLRenderer()` in the game
+    code would throw ReferenceError. Fix: emit `const B=A;` for each alias.
+    Entries without `as` already have a local binding -> skipped.
+    """
+    import re
+    consts = []
+    seen = set()
+    for block in re.findall(r"export\{([^}]*)\}", three_src):
+        for entry in block.split(","):
+            entry = entry.strip()
+            m = re.match(r"^([A-Za-z_$][\w$]*) as ([A-Za-z_$][\w$]*)$", entry)
+            if not m:
+                continue
+            local, public = m.group(1), m.group(2)
+            if local == public or public in seen:
+                continue
+            seen.add(public)
+            consts.append(f"const {public}={local};")
+    if not consts:
+        sys.exit("no export aliases parsed from three source")
+    return "\n".join(consts)
+
+
 def main():
     three = read(ROOT / "vendor" / "three.module.min.js")
     game = read(ROOT / "src" / "game.js")
@@ -31,6 +57,12 @@ def main():
         sys.exit("placeholder leak in sources")
 
     module = three + "\n;(function(){\n'use strict';\n" + game + "\n})();\n"
+    # Bind three's public names locally (see three_alias_consts).
+    # Placed AFTER three source (and its export block), BEFORE game code.
+    aliases = three_alias_consts(three)
+    module = three + "\n" + aliases + "\n;(function(){\n'use strict';\n" + game + "\n})();\n"
+    n_alias = aliases.count("const ")
+    print(f"three alias bindings: {n_alias}")
     html = tpl.replace("<!--INLINE:CSS-->", "<style>\n" + css + "\n</style>")
     html = html.replace("<!--INLINE:MODULE-->", "<script type=\"module\">\n" + module + "\n</script>")
     if "<!--INLINE:" in html:
