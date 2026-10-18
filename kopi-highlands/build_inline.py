@@ -5,7 +5,8 @@ Inlines vendor/three.module.min.js + src/game.js into ONE <script type="module">
 three's top-level `export{...}` stays valid in the module; its exported bindings
 are in scope for the game code, which is wrapped in an IIFE so three's minified
 single-letter internals can never collide with game identifiers.
-Usage:  python3 build_inline.py   -> writes dist/index.html
+Usage:  python3 build_inline.py   -> writes dist/index.html AND index.html
+(the repo-rooted index.html is the GitHub Pages published artifact).
 """
 import pathlib
 import sys
@@ -42,6 +43,11 @@ def main():
     print(f"wrote {out} ({kb:.0f} KB)")
     if out.stat().st_size >= 1024 * 1024:
         print("WARNING: deliverable >= 1 MB")
+
+    # Publish artifact for GitHub Pages (repo-rooted, committed).
+    pub = ROOT / "index.html"
+    pub.write_text(html, encoding="utf-8")
+    print(f"wrote {pub} ({kb:.0f} KB) [published]")
 
 
 if __name__ == "__main__":
