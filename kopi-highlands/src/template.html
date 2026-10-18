@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Kopi Highlands</title>
+<!--INLINE:CSS-->
+</head>
+<body>
+<div id="game"></div>
+<div id="ui">
+  <div id="touch-layer"></div>
+  <div id="title-tag">KOPI HIGHLANDS</div>
+  <div id="hud-top">
+    <div class="pill" id="pill-cash">&#x1F4B0; <span id="hud-cash">$0.00</span></div>
+    <div class="pill" id="pill-basket">&#x1F9FA; <span id="hud-basket">0/40</span></div>
+    <div class="pill" id="pill-quality">&#x2B50; <span id="hud-quality">100</span></div>
+    <div class="spacer"></div>
+    <div class="pill small"><span id="hud-fps">--</span> fps &middot; <span id="hud-calls">--</span> calls</div>
+    <button class="pill btn" id="btn-lang">ID</button>
+  </div>
+  <div id="hint" data-i18n="hint_start"></div>
+  <div id="joy-base"><div id="joy-knob"></div></div>
+  <svg id="pick-ring" viewBox="0 0 120 120" aria-hidden="true">
+    <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="4"/>
+    <circle id="ring-gold" cx="60" cy="60" r="31" fill="none" stroke="#FFD34D" stroke-width="7" stroke-dasharray="10 7"/>
+    <circle id="ring-shrink" cx="60" cy="60" r="52" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  </svg>
+  <div id="floaters"></div>
+  <div id="hut-marker">&#x2B07;</div>
+  <button id="btn-pick"><span data-i18n="pick">PICK</span></button>
+</div>
+<!--INLINE:MODULE-->
+</body>
+</html>

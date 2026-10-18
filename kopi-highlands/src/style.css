@@ -1,0 +1,113 @@
+/* Kopi Highlands — UI overlay (hand CSS, no frameworks) */
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 100%; height: 100%; overflow: hidden; position: fixed;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #f2c078; overscroll-behavior: none;
+}
+#game, #game canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+#ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#touch-layer { position: absolute; inset: 0; pointer-events: auto; z-index: 1; }
+
+/* ---------- HUD top ---------- */
+#hud-top {
+  position: absolute; top: max(8px, env(safe-area-inset-top)); left: 8px; right: 8px;
+  display: flex; gap: 6px; align-items: center; z-index: 4; pointer-events: none;
+}
+.pill {
+  background: rgba(43, 26, 12, 0.72); color: #ffe9c4;
+  border: 2px solid rgba(255, 211, 77, 0.55); border-radius: 999px;
+  padding: 6px 12px; font-size: 14px; font-weight: 700; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25); backdrop-filter: blur(2px);
+}
+.pill.small { font-size: 11px; font-weight: 600; opacity: 0.9; }
+#hud-top .spacer { flex: 1; }
+button.pill.btn {
+  pointer-events: auto; cursor: pointer;
+  background: radial-gradient(circle at 30% 25%, #ffd34d, #e8930c);
+  color: #4a2c10; border-color: #fff2c9;
+}
+button.pill.btn:active { transform: scale(0.93); }
+#title-tag {
+  position: absolute; top: max(8px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  z-index: 4; font-weight: 800; font-size: 15px; letter-spacing: 1px; color: #fff7e6;
+  text-shadow: 0 2px 6px rgba(90, 40, 0, 0.55); pointer-events: none;
+}
+
+/* ---------- hint ---------- */
+#hint {
+  position: absolute; bottom: 132px; left: 50%; transform: translateX(-50%);
+  z-index: 4; max-width: 86%; text-align: center;
+  background: rgba(43, 26, 12, 0.66); color: #ffe9c4;
+  border-radius: 12px; padding: 8px 14px; font-size: 13px; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25); transition: opacity 0.25s;
+}
+
+/* ---------- joystick ---------- */
+#joy-base {
+  position: absolute; width: 120px; height: 120px; border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.45); background: rgba(60, 35, 15, 0.25);
+  display: none; z-index: 2; pointer-events: none; transform: translate(-50%, -50%);
+}
+#joy-knob {
+  position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe9a8, #e8930c 70%);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.35); transform: translate(-50%, -50%);
+}
+
+/* ---------- PICK button ---------- */
+#btn-pick {
+  position: absolute; z-index: 5; pointer-events: auto;
+  right: 18px; bottom: calc(26px + env(safe-area-inset-bottom));
+  width: 104px; height: 104px; border-radius: 50%; border: 3px solid #fff2c9;
+  font-size: 20px; font-weight: 800; color: #4a2c10; letter-spacing: 1px;
+  background: radial-gradient(circle at 32% 28%, #ffe9a8 0%, #ffd34d 38%, #e8930c 78%, #c96f06 100%);
+  box-shadow: 0 6px 18px rgba(120, 60, 0, 0.45), inset 0 2px 4px rgba(255,255,255,0.6);
+  cursor: pointer; touch-action: none;
+}
+#btn-pick:active, #btn-pick.charging {
+  transform: scale(0.92);
+  box-shadow: 0 2px 8px rgba(120, 60, 0, 0.5), inset 0 2px 6px rgba(255,255,255,0.4);
+}
+#btn-pick.ready { animation: pickPulse 1s ease-in-out infinite; }
+#btn-pick.disabled { filter: grayscale(0.8) brightness(0.75); animation: none; }
+@keyframes pickPulse {
+  0%, 100% { box-shadow: 0 6px 18px rgba(120,60,0,0.45), 0 0 0 0 rgba(255,211,77,0.7); }
+  50% { box-shadow: 0 6px 18px rgba(120,60,0,0.45), 0 0 0 14px rgba(255,211,77,0); }
+}
+
+/* ---------- pick timing ring ---------- */
+#pick-ring {
+  position: absolute; z-index: 3; pointer-events: none; display: none;
+  width: 120px; height: 120px; transform: translate(-50%, -50%);
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4));
+}
+#ring-shrink.in-gold { stroke: #ffd34d !important; }
+
+/* ---------- floating texts ---------- */
+#floaters { position: absolute; inset: 0; z-index: 3; overflow: hidden; }
+.floater {
+  position: absolute; transform: translate(-50%, -50%);
+  font-weight: 800; font-size: 20px; color: #fff; white-space: nowrap;
+  text-shadow: 0 2px 6px rgba(90, 40, 0, 0.7); pointer-events: none;
+}
+.floater.gold { color: #ffd34d; font-size: 24px; }
+.floater.cash { color: #7dff9e; font-size: 22px; }
+.floater.bad { color: #ff9d8a; font-size: 16px; }
+
+/* ---------- hut marker ---------- */
+#hut-marker {
+  position: absolute; z-index: 3; display: none; pointer-events: none;
+  font-size: 34px; transform: translate(-50%, -100%);
+  animation: bob 0.8s ease-in-out infinite;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+}
+@keyframes bob { 0%, 100% { margin-top: 0; } 50% { margin-top: -12px; } }
+
+@media (max-width: 380px) {
+  .pill { font-size: 12px; padding: 5px 10px; }
+  #btn-pick { width: 92px; height: 92px; font-size: 18px; }
+  #hint { font-size: 12px; bottom: 120px; }
+}
