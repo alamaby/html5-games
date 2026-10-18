@@ -842,6 +842,7 @@ const World = {
     S.add(hillIM);
 
     this.buildBushes(S);
+    this.buildReadyMarkers(S);
     this.buildGrass(S);
     this.buildHut(S);
   },
@@ -947,6 +948,50 @@ const World = {
       else if (ch.state === 2) this._setState(ch, 3, now + rand(18, 34)); // green -> ripe -> over
       else if (ch.state === 3) this._setState(ch, 4, 0);                // ripe -> over
     }
+  },
+
+  buildReadyMarkers(S) {
+    // indikator bush yang SIAP dipetik: cherry merah melayang di atas bush.
+    // 1 draw call (InstancedMesh); terlihat hanya bila ada cherry matang (state 3).
+    const n = this.bushes.length;
+    this.readyIM = new InstancedMesh(new SphereGeometry(0.16, 8, 6),
+      new MeshBasicMaterial({ color: COL.cherryRipe }), n);
+    this.readyIM.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.readyIM.frustumCulled = false;
+    for (let i = 0; i < n; i++) {
+      _dummy.position.set(0, -10, 0); _dummy.scale.set(0.0001, 0.0001, 0.0001);
+      _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+      this.readyIM.setMatrixAt(i, _dummy.matrix);
+    }
+    S.add(this.readyIM);
+  },
+
+  updateReadyMarkers(now) {
+    // dipanggil tiap frame dari Game.frame; murah (16 bush x 18 cherry cek state).
+    const n = this.bushes.length;
+    for (let bi = 0; bi < n; bi++) {
+      const b = this.bushes[bi];
+      let ripe = false;
+      for (const cl of b.clusters) {
+        for (const ii of cl.cherryIdx) {
+          if (this.cherries[ii].state === 3) { ripe = true; break; }
+        }
+        if (ripe) break;
+      }
+      if (ripe) {
+        const bob = Math.sin(now * 2.6 + bi * 1.7);
+        const s = 1 + 0.18 * bob;
+        _dummy.position.set(b.pos.x, 2.45 + bob * 0.14, b.pos.z);
+        _dummy.scale.set(s, s, s);
+      } else {
+        _dummy.position.set(b.pos.x, -10, b.pos.z);
+        _dummy.scale.set(0.0001, 0.0001, 0.0001);
+      }
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.updateMatrix();
+      this.readyIM.setMatrixAt(bi, _dummy.matrix);
+    }
+    this.readyIM.instanceMatrix.needsUpdate = true;
   },
 
   buildGrass(S) {
@@ -1176,7 +1221,7 @@ const Player = {
     const rim = new Mesh(new TorusGeometry(0.34, 0.045, 6, 12), stdMat(0xA8824F));
     rim.rotation.x = Math.PI / 2; rim.position.y = 0.31;
     basket.add(cup); basket.add(bottom); basket.add(rim);
-    basket.position.set(0, 1.0, 0.42);
+    basket.position.set(0, 1.0, -0.42);   // di punggung (belakang arah hadap)
     // isi keranjang: 40 cherry mini (4 lapis x 10), visibility = jumlah
     const bc = new InstancedMesh(new SphereGeometry(0.07, 6, 5),
       new MeshStandardMaterial({ color: COL.cherryRipe, roughness: 0.55, flatShading: true }), CFG.BASKET_CAP);
@@ -1201,7 +1246,7 @@ const Player = {
   },
   basketWorld(out) {
     // posisi mulut keranjang (target arc magnetik)
-    _v4.set(0, 1.35, 0.42);
+    _v4.set(0, 1.35, -0.42);
     return this.group.localToWorld(out.copy(_v4));
   },
   update(dt) {
@@ -1601,6 +1646,7 @@ const Game = {
     Player.update(dt);
     Engine.follow(dt, Player.pos.x, Player.pos.z);
     World.updateCherries(tSec);
+    World.updateReadyMarkers(tSec);
     PickSys.update(dt, tSec);
     Flyers.update(dt);
     Particles.update(dt);

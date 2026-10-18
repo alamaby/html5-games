@@ -64,3 +64,19 @@
   3. `node --check` pada module hasil ekstrak: lolos.
   4. Live-browser re-check https://alamaby.github.io/html5-games/kopi-highlands/ setelah push fix (lihat bawah).
 - **Pelajaran:** klaim "verified" untuk trik inline tidak boleh hanya statis — butuh evaluasi binding yang sesungguhnya (seperti tes node di atas) atau browser sungguhan.
+- **Verifikasi live-browser (2026-10-18, setelah push 29dbcb0):** RENDERS YES —
+  scene 3D tampil (terasering hijau, semak kopi + cherry merah, petani topi jerami,
+  gold selection ring, shadows, rumah), HUD "20 fps · 28 calls" (angka real),
+  klik memindahkan karakter, tahan PICK → keranjang 0/40→6/40, Quality 100→97,
+  pesan "Strip pick" muncul. Tanpa console error. Catatan: load pertama masih
+  menampilkan build lama (cache); reload setelah deploy window menampilkan build fix.
+
+## Fix 2026-10-18 — feedback playtest user (basket + indikator bush)
+1. **Keranjang di depan → pindah ke punggung.** Komentar kode sudah bilang
+   "di punggung" tapi `basket.position` memakai local +Z = arah hadap (depan).
+   Fix: `basket.position.set(0, 1.0, -0.42)` + `basketWorld` (target arc
+   magnetik) ikut ke `(0, 1.35, -0.42)`.
+2. **Bush siap panen tidak jelas.** Tambah indikator: 1 InstancedMesh
+   (16 instance, 1 draw call) berupa cherry merah melayang (bob + pulse)
+   di atas bush yang punya ≥1 cherry matang (state 3). Update tiap frame
+   via `World.updateReadyMarkers()` — murah (16×18 cek state).
