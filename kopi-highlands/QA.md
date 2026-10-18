@@ -95,3 +95,14 @@
 - **Verifikasi:** simulasi headless 288 cherry / 600 dtk game-time — semua 5 transisi
   fire seimbang (~3230× tiap tipe), steady state ripe ≈50%, over ≈27%. Tidak ada
   starvation. (Cherry tidak di-persist di save, jadi tidak perlu migrasi.)
+
+## Tuning 2026-10-18 — pacing regrow diperlambat (feedback user)
+- **Keluhan:** satu bush cukup untuk penuh 1 keranjang (40) — tidak perlu jelajah.
+- **Sebab:** cherry yang dipetik jadi hijau lagi hanya dalam ~5 dtk
+  (gone 1–2 dtk + flower ~3 dtk), jadi strip-pick satu bush tidak pernah habis.
+- **Fix:** gone setelah dipetik 8–14 dtk, flower 6–10 dtk, green 12–20 dtk,
+  ripe 35–60 dtk (window petik lega), over 25–40 dtk.
+- **Verifikasi (simulasi):** 1 bush yang di-strip penuh baru bisa dipetik lagi
+  ~20 dtk, ripe lagi ~38 dtk → harus mutar ke bush lain. Steady state 288 cherry:
+  ripe ~60%, semua transisi seimbang (tidak starvation). Angka final tetap
+  butuh validasi feel di HP user.

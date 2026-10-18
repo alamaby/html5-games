@@ -326,10 +326,10 @@ const World = {
           this.cherries.push(cherry);
           // state awal campuran agar langsung bisa dipetik
           const roll = Math.random();
-          if (roll < 0.55) this._setState(cherry, 3, now + rand(18, 34));       // ripe -> over
-          else if (roll < 0.85) this._setState(cherry, 2, now + rand(4, 10));   // green -> ripe
-          else if (roll < 0.93) this._setState(cherry, 4, now + rand(8, 16));  // over -> drop
-          else this._setState(cherry, 1, now + rand(1, 4));                     // flower -> green
+          if (roll < 0.55) this._setState(cherry, 3, now + rand(30, 50));       // ripe -> over
+          else if (roll < 0.85) this._setState(cherry, 2, now + rand(10, 18));   // green -> ripe
+          else if (roll < 0.93) this._setState(cherry, 4, now + rand(15, 25));  // over -> drop
+          else this._setState(cherry, 1, now + rand(2, 6));                     // flower -> green
           idxs.push(cherry.idx);
           ci++;
         }
@@ -369,11 +369,11 @@ const World = {
         continue;
       }
       this.pending.splice(i, 1);
-      if (ch.state === 0) this._setState(ch, 1, now + 2.5);            // gone -> flower
-      else if (ch.state === 1) this._setState(ch, 2, now + rand(4, 8)); // flower -> green
-      else if (ch.state === 2) this._setState(ch, 3, now + rand(18, 34)); // green -> ripe -> over
-      else if (ch.state === 3) this._setState(ch, 4, now + rand(10, 20)); // ripe -> over -> drop
-      else if (ch.state === 4) this._setState(ch, 0, now + rand(1, 2));   // over -> gone -> regrow
+      if (ch.state === 0) this._setState(ch, 1, now + rand(6, 10));          // gone -> flower
+      else if (ch.state === 1) this._setState(ch, 2, now + rand(12, 20)); // flower -> green
+      else if (ch.state === 2) this._setState(ch, 3, now + rand(35, 60)); // green -> ripe -> over
+      else if (ch.state === 3) this._setState(ch, 4, now + rand(25, 40)); // ripe -> over -> drop
+      else if (ch.state === 4) this._setState(ch, 0, now + rand(8, 15));  // over -> gone -> regrow
     }
   },
 
@@ -886,7 +886,7 @@ const PickSys = {
       if (clean && ch.state !== 3) continue;      // clean pick: hanya merah
       const wasRipe = (ch.state === 3);
       if (wasRipe) ripe++; else if (ch.state === 2) green++; else over++;
-      World._setState(ch, 0, now + rand(1.0, 2.0)); // gone -> regrow
+      World._setState(ch, 0, now + rand(8, 14)); // gone -> regrow (cukup lama agar harus pindah bush)
       _v1.copy(ch.pos);
       Flyers.spawn(_v1, bw, false, wasRipe);
       Particles.burst(ch.pos, wasRipe ? COL.cherryRipe : COL.cherryGreen, 3, 2.2);
