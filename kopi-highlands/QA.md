@@ -80,3 +80,18 @@
    (16 instance, 1 draw call) berupa cherry merah melayang (bob + pulse)
    di atas bush yang punya ≥1 cherry matang (state 3). Update tiap frame
    via `World.updateReadyMarkers()` — murah (16×18 cek state).
+
+## Bug 2026-10-18 — cherry overripe tidak pernah rontok (siklus mati) (FIXED)
+- **Gejala:** indikator bush siap panen (fix sebelumnya) tidak pernah muncul di live browser.
+- **Akar masalah:** state machine cherry 0→1→2→3→4 tidak punya transisi keluar dari
+  state 4 (overripe) — `updateCherries` tidak punya cabang `state === 4`, dan
+  `_setState(ch, 4, 0)` memakai `at=0` sehingga tidak pernah masuk antrean pending.
+  Akibatnya ±40–60 detik setelah load, SEMUA cherry jadi overripe permanen:
+  tidak ada cherry matang baru → indikator (ripe-only) tidak pernah tampil, dan
+  mekanik selective-pick mati diam-diam (clean pick mustahil).
+- **Fix:** `3→4` dijadwalkan `now+rand(10,20)` (overripe menggantung 10–20 dtk,
+  masih bisa dipetik dengan penalti), tambah `4→0` (`now+rand(1,2)`) agar rontok
+  dan masuk siklus regrow; initial overripe juga dijadwalkan `now+rand(8,16)`.
+- **Verifikasi:** simulasi headless 288 cherry / 600 dtk game-time — semua 5 transisi
+  fire seimbang (~3230× tiap tipe), steady state ripe ≈50%, over ≈27%. Tidak ada
+  starvation. (Cherry tidak di-persist di save, jadi tidak perlu migrasi.)

@@ -328,7 +328,7 @@ const World = {
           const roll = Math.random();
           if (roll < 0.55) this._setState(cherry, 3, now + rand(18, 34));       // ripe -> over
           else if (roll < 0.85) this._setState(cherry, 2, now + rand(4, 10));   // green -> ripe
-          else if (roll < 0.93) this._setState(cherry, 4, 0);                   // over
+          else if (roll < 0.93) this._setState(cherry, 4, now + rand(8, 16));  // over -> drop
           else this._setState(cherry, 1, now + rand(1, 4));                     // flower -> green
           idxs.push(cherry.idx);
           ci++;
@@ -372,7 +372,8 @@ const World = {
       if (ch.state === 0) this._setState(ch, 1, now + 2.5);            // gone -> flower
       else if (ch.state === 1) this._setState(ch, 2, now + rand(4, 8)); // flower -> green
       else if (ch.state === 2) this._setState(ch, 3, now + rand(18, 34)); // green -> ripe -> over
-      else if (ch.state === 3) this._setState(ch, 4, 0);                // ripe -> over
+      else if (ch.state === 3) this._setState(ch, 4, now + rand(10, 20)); // ripe -> over -> drop
+      else if (ch.state === 4) this._setState(ch, 0, now + rand(1, 2));   // over -> gone -> regrow
     }
   },
 
