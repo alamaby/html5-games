@@ -202,3 +202,11 @@
   ASLI (diekstrak verbatim) — kode lama FAIL (0 flyer, count 40, pouring=true
   selamanya = persis state screenshot user), kode baru PASS (40 flyer,
   count→0, endPour terpanggil). `node --check` OK.
+
+## Fix 2026-10-19 — keyboard mapping camera-relative
+- **Laporan playtest:** tombol panah/WASD terasa miring 90° di desktop.
+- **Sebab:** `pollKeys()` memakai sumbu dunia mentah, sedangkan joystick
+  memakai transform camera-relative (`camRight`/`camFwd`).
+- **Fix:** `pollKeys()` sekarang memakai rumus yang sama persis seperti joystick
+  (Up = arah pandang kamera). Diverifikasi headless dengan kamera sintetis:
+  Up→camFwd, Right→camRight, Down→−camFwd. Tidak berdampak ke HP (joystick).

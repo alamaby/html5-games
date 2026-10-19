@@ -1764,12 +1764,17 @@ const InputSys = {
   pollKeys() {
     if (this.joyId !== null) return;   // joystick menang
     const k = this.keys;
-    let x = 0, z = 0;
-    if (k.KeyA || k.ArrowLeft) x -= 1;
-    if (k.KeyD || k.ArrowRight) x += 1;
-    if (k.KeyW || k.ArrowUp) z -= 1;
-    if (k.KeyS || k.ArrowDown) z += 1;
-    this.mx = x; this.mz = z;
+    let jx = 0, jy = 0;
+    if (k.KeyA || k.ArrowLeft) jx -= 1;
+    if (k.KeyD || k.ArrowRight) jx += 1;
+    if (k.KeyW || k.ArrowUp) jy -= 1;
+    if (k.KeyS || k.ArrowDown) jy += 1;
+    if (jx === 0 && jy === 0) { this.mx = 0; this.mz = 0; return; }
+    // mapping relatif kamera, SAMA seperti joystick: atas = arah pandang kamera.
+    // (Dulu pakai sumbu dunia mentah -> di desktop terasa miring 90°.)
+    Engine.camera.getWorldDirection(_v2); _v2.y = 0; _v2.normalize();
+    this.mx = clamp(-_v2.z * jx + _v2.x * -jy, -1, 1);   // camRight.x*jx + camFwd.x*-jy
+    this.mz = clamp(_v2.x * jx + _v2.z * -jy, -1, 1);    // camRight.z*jx + camFwd.z*-jy
   },
 };
 
