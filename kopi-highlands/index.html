@@ -1940,7 +1940,10 @@ const HutSys = {
     // tuang: berdiri di pad -> cherry terbang ke channel satu per satu
     _v1.copy(Player.pos); _v1.y = 0;
     const near = _v1.distanceTo(World.hutPos) < CFG.HUT_RADIUS;
-    if (near && BasketSys.count > 0 && !WashSys.busy()) {
+    // Lanjutkan pour yang sedang berjalan (this.pouring); cegah batch baru saat wash sibuk.
+    // Tanpa `|| this.pouring`, beginPour() membuat busy()=true di frame pertama
+    // sehingga loop tuang tidak pernah jalan lagi -> deadlock (keranjang 40/40 selamanya).
+    if (near && BasketSys.count > 0 && (!WashSys.busy() || this.pouring)) {
       if (!this.pouring) { this.pouring = true; WashSys.beginPour(); AudioSys.splash(); }
       this.pourAcc += dt;
       while (this.pourAcc >= 0.06 && BasketSys.count > 0 && WashSys.pourLen > 0) {

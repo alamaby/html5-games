@@ -185,3 +185,20 @@
 3. **Audio**: crackle/hum/splash hanya dicek tidak-crash (AudioContext null di
    node); kualitas SFX butuh dengar langsung.
 4. **FPS aktual** di HP mid-range dengan ~50 draw calls.
+
+## Bug kritis 2026-10-19 — deadlock tuang wash (FIXED, laporan user + screenshot)
+- **Gejala:** berdiri di pad gubuk dengan keranjang 40/40 → hint "Tap a gate to
+  route each cherry!" muncul, tapi channel kosong, keranjang tidak pernah
+  berkurang, tombol gate tidak muncul. Stuck permanen (reload tidak membantu
+  karena bug deterministik).
+- **Akar masalah:** `HutSys.update` memakai syarat
+  `near && count>0 && !WashSys.busy()`. Di frame pertama `beginPour()` membuat
+  `WashSys.pouring=true` → `busy()=true` → frame berikutnya selalu masuk cabang
+  `else`, loop spawn flyer cherry TIDAK PERNAH jalan lagi. `count` tetap 40,
+  `endPour()` (syarat `count===0`) tidak pernah dipanggil. Deadlock total.
+- **Fix (1 baris):** syarat jadi `(!WashSys.busy() || this.pouring)` — pour yang
+  sedang berjalan boleh lanjut; batch baru tetap dicegah saat wash sibuk.
+- **Verifikasi:** regression test `test-wash-pour.mjs` me-replay HutSys.update
+  ASLI (diekstrak verbatim) — kode lama FAIL (0 flyer, count 40, pouring=true
+  selamanya = persis state screenshot user), kode baru PASS (40 flyer,
+  count→0, endPour terpanggil). `node --check` OK.
