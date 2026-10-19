@@ -2,7 +2,7 @@
   "name": "jellometry",
   "private": true,
   "version": "1.0.0",
-  "description": "3D Jelly Obstacle Race & Track Builder built with Vite, Three.js, and Cannon-es",
+  "description": "3D Jelly Obstacle Race built with Vite, Three.js, and Cannon-es",
   "type": "module",
   "scripts": {
     "dev": "vite",

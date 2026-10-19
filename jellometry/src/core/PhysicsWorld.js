@@ -18,10 +18,14 @@ export class PhysicsWorld {
 
     this.setupContactMaterials();
     this.preStepCallbacks = new Set();
+    // Obstacle animation is driven by the pre-step callback. It must advance by
+    // the real frame delta, not a hardcoded 1/60, or sweepers and platforms run
+    // at double speed on 120 Hz phones.
+    this.lastStepDt = 1 / 60;
 
     this.world.addEventListener('preStep', () => {
       for (const cb of this.preStepCallbacks) {
-        cb(1 / 60);
+        cb(this.lastStepDt);
       }
     });
   }
@@ -73,6 +77,7 @@ export class PhysicsWorld {
 
   step(dt) {
     const clampedDt = Math.min(dt, 0.1);
+    this.lastStepDt = clampedDt;
     this.world.step(1 / 60, clampedDt, 4);
   }
 

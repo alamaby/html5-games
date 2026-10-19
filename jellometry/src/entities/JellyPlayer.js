@@ -49,6 +49,10 @@ export class JellyPlayer {
     this.isGrounded = false;
     this.coyoteTimer = 0;
     this.jumpCooldown = 0;
+    // A tap that lands between two fixed physics steps would otherwise be
+    // swallowed, so touch input latches here and stays valid for a short window.
+    this.jumpQueued = false;
+    this.jumpQueuedTimer = 0;
     this.lastVelY = 0;
     this.groundPlatformBody = null;
 
@@ -272,6 +276,15 @@ export class JellyPlayer {
     this.activeCheckpointId = checkpointId;
   }
 
+  /**
+   * Latch a jump for the next physics step. Touch handlers fire far more often
+   * than the 60 Hz simulation, so a raw tap can be missed entirely.
+   */
+  queueJump() {
+    this.jumpQueued = true;
+    this.jumpQueuedTimer = 0.15;
+  }
+
   respawn(playSplashSound = false) {
     if (playSplashSound) {
       this.sound?.playSplash();
@@ -381,6 +394,11 @@ export class JellyPlayer {
 
     this.jumpCooldown = Math.max(0, this.jumpCooldown - safeDt);
 
+    if (this.jumpQueuedTimer > 0) {
+      this.jumpQueuedTimer -= safeDt;
+      if (this.jumpQueuedTimer <= 0) this.jumpQueued = false;
+    }
+
     if (playModeActive) {
       this.updateMovement(safeDt);
     }
@@ -419,7 +437,10 @@ export class JellyPlayer {
     this.body.velocity.x += (targetVx - this.body.velocity.x) * blend;
     this.body.velocity.z += (targetVz - this.body.velocity.z) * blend;
 
-    if (this.keys.jump && this.coyoteTimer > 0 && this.jumpCooldown <= 0) {
+    const wantsJump = this.keys.jump || this.jumpQueued;
+    if (wantsJump && this.coyoteTimer > 0 && this.jumpCooldown <= 0) {
+      this.jumpQueued = false;
+      this.jumpQueuedTimer = 0;
       this.body.velocity.y = 12.6;
       this.coyoteTimer = 0;
       this.jumpCooldown = 0.22;

@@ -276,12 +276,33 @@ export class ObstacleFactory {
     const barHeight = Math.max(0.4, Number(params.barHeight) || 0.9);
     const color = params.color || '#ff4d6d';
 
-    // Central hub pedestal.
-    const hubGeom = new THREE.CylinderGeometry(0.55, 0.68, barHeight + 0.7, 20);
-    const hubMat = new THREE.MeshStandardMaterial({ color: 0x1e2432, roughness: 0.3 });
-    const hubMesh = new THREE.Mesh(hubGeom, hubMat);
-    hubMesh.position.y = (barHeight + 0.7) * 0.5;
-    obstacle.group.add(hubMesh);
+    // Central hub. A duck-under bar sits at ~1.05 m, where the fat pedestal
+    // used by standing bars would be a knee-height block the player visibly
+    // walks through. Low bars get a base plate plus a thin spindle instead.
+    const isDuckBar = barHeight <= 1.4;
+    if (isDuckBar) {
+      const plateGeom = new THREE.CylinderGeometry(0.7, 0.78, 0.12, 20);
+      const plateMat = new THREE.MeshStandardMaterial({ color: 0x1e2432, roughness: 0.3 });
+      const plateMesh = new THREE.Mesh(plateGeom, plateMat);
+      plateMesh.position.y = 0.06;
+      obstacle.group.add(plateMesh);
+
+      const spindleGeom = new THREE.CylinderGeometry(0.1, 0.1, barHeight, 14);
+      const spindleMesh = new THREE.Mesh(spindleGeom, plateMat);
+      spindleMesh.position.y = barHeight * 0.5;
+      obstacle.group.add(spindleMesh);
+
+      const collarGeom = new THREE.CylinderGeometry(0.22, 0.22, 0.18, 16);
+      const collarMesh = new THREE.Mesh(collarGeom, plateMat);
+      collarMesh.position.y = barHeight;
+      obstacle.group.add(collarMesh);
+    } else {
+      const hubGeom = new THREE.CylinderGeometry(0.55, 0.68, barHeight + 0.7, 20);
+      const hubMat = new THREE.MeshStandardMaterial({ color: 0x1e2432, roughness: 0.3 });
+      const hubMesh = new THREE.Mesh(hubGeom, hubMat);
+      hubMesh.position.y = (barHeight + 0.7) * 0.5;
+      obstacle.group.add(hubMesh);
+    }
 
     // Rotating pivot holding the knockback cylinder bar.
     const rotorGroup = new THREE.Group();

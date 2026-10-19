@@ -3,25 +3,45 @@ import { SoundManager } from './audio/SoundManager.js';
 import { ProceduralTextures } from './core/ProceduralTextures.js';
 import { PhysicsWorld } from './core/PhysicsWorld.js';
 import { ParticleSystem } from './core/ParticleSystem.js';
-import { JellyPlayer } from './entities/JellyPlayer.js';
-import { ObstacleFactory, OBSTACLE_CATALOG } from './entities/ObstacleFactory.js';
-import { PRESET_LEVELS } from './entities/PresetLevels.js';
-import { LevelEditor } from './editor/LevelEditor.js';
+import { JellyPlayer, JELLY_PALETTES } from './entities/JellyPlayer.js';
+import { ObstacleFactory } from './entities/ObstacleFactory.js';
+import { LEVELS } from './entities/PresetLevels.js';
 
-const STORAGE_CUSTOM_LEVEL_KEY = 'jellometry_custom_level_v1';
 const STORAGE_BEST_TIMES_KEY = 'jellometry_best_times_v1';
+const STORAGE_PROGRESS_KEY = 'jellometry_progress_v1';
+
+// DOM writes are the cheapest thing to cut on a phone: the hundredths column
+// reads fine at 16 Hz and the frame budget stays free.
+const HUD_REFRESH_INTERVAL = 1 / 16;
+const FALL_LIMIT_Y = -10;
+
+// Adaptive quality guard.
+const PERF_SAMPLE_SIZE = 45;
+const PERF_BUDGET_MS = 22;
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 class JellometryGame {
   constructor() {
     this.canvas = document.getElementById('game-canvas');
-    this.mode = 'PLAY_MODE'; // 'PLAY_MODE' | 'EDITOR_MODE'
-    this.currentPresetId = 'beginner_bounce';
-    this.editorSnapshot = null;
+    this.app = document.getElementById('app');
 
     this.raceTime = 0;
     this.raceCompleted = false;
     this.bestTimes = this.loadBestTimes();
+    this.progress = this.loadProgress();
+    this.levelIndex = this.resolveStartingLevelIndex();
+
     this.toastTimeout = null;
+    this.introTimeout = null;
+    this.hudAccumulator = 0;
+    this.hudCache = {};
+    this.resizeFrame = null;
+    this.modalReturnFocus = null;
+
+    this.frameSamples = [];
+    this.frameAccum = 0;
+    this.qualityDegraded = false;
 
     this.sound = new SoundManager();
     this.physicsWorld = new PhysicsWorld();
@@ -32,67 +52,50 @@ class JellometryGame {
 
     this.factory = new ObstacleFactory(this.scene, this.physicsWorld, this.sound, this.particles);
     this.factory.onCheckpointActivated = () => {
-      this.showToast('Checkpoint activated! Respawn point updated.');
+      this.showToast('Checkpoint reached. Respawn point updated.');
     };
-    this.factory.onFinishReached = () => {
-      this.handleRaceVictory();
-    };
-
-    this.editor = new LevelEditor({
-      scene: this.scene,
-      camera: this.camera,
-      renderer: this.renderer,
-      factory: this.factory,
-      sound: this.sound,
-      onSelectChange: (obs) => this.renderInspector(obs),
-      onStatusMessage: (msg) => this.setEditorStatus(msg)
-    });
+    this.factory.onFinishReached = () => this.handleRaceVictory();
 
     // Advance kinematic obstacles inside the physics preStep so velocity transfer is accurate.
-    this.physicsWorld.onPreStep((dt) => {
-      this.factory.updatePreStep(dt, this.mode === 'PLAY_MODE');
-    });
+    this.physicsWorld.onPreStep((dt) => this.factory.updatePreStep(dt, true));
 
     this.initUI();
     this.bindGameplayControls();
-    this.loadPresetCourse(this.currentPresetId);
+    this.loadLevel(this.levelIndex, { announce: false, focusModal: false });
 
     this.clock = new THREE.Clock();
     this.animate = this.animate.bind(this);
     requestAnimationFrame(this.animate);
   }
 
+  /* ---------------------------------------------------------------- *
+   * Scene & viewport
+   * ---------------------------------------------------------------- */
+
   initScene() {
-    this.isCoarsePointer =
+    const coarse =
       typeof window !== 'undefined' &&
-      (window.matchMedia?.('(pointer: coarse)').matches || window.innerWidth <= 900);
+      (window.matchMedia?.('(pointer: coarse)').matches ||
+        window.matchMedia?.('(hover: none)').matches);
+    this.isCoarsePointer = Boolean(coarse);
 
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
       antialias: !this.isCoarsePointer,
       powerPreference: 'high-performance'
     });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio, this.isCoarsePointer ? 1.5 : 2)
-    );
+    this.renderer.setPixelRatio(this.targetPixelRatio());
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
 
     this.scene = new THREE.Scene();
-    const envTex = ProceduralTextures.getStudioEnvironment();
-    this.scene.environment = envTex;
+    this.scene.environment = ProceduralTextures.getStudioEnvironment();
     this.scene.background = new THREE.Color('#dbeafe');
     this.scene.fog = new THREE.FogExp2('#dbeafe', 0.0065);
 
-    this.camera = new THREE.PerspectiveCamera(
-      58,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      260
-    );
+    this.camera = new THREE.PerspectiveCamera(58, 1, 0.1, 260);
     this.camera.position.set(0, 6.2, 8.8);
     this.cameraLookTarget = new THREE.Vector3(0, 1.8, -6);
 
@@ -115,311 +118,347 @@ class JellometryGame {
     this.dirLight.shadow.bias = -0.0005;
     this.scene.add(this.dirLight);
 
-    window.addEventListener('resize', () => {
-      this.camera.aspect = window.innerWidth / window.innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.initViewportHandling();
+  }
+
+  targetPixelRatio() {
+    const cap = this.isCoarsePointer ? 1.6 : 2;
+    const native = window.devicePixelRatio || 1;
+    const cap2 = this.qualityDegraded ? Math.min(cap, 1.15) : cap;
+    return Math.min(native, cap2);
+  }
+
+  /**
+   * The canvas must be sized from its own layout box, never from
+   * `window.innerHeight`. On iOS the browser toolbar collapsing makes
+   * innerHeight disagree with the visual viewport, and the renderer then writes
+   * an inline style that beats the `100dvh` layout and overflows the page.
+   */
+  initViewportHandling() {
+    this.applyViewportSize();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.viewportObserver = new ResizeObserver(() => this.scheduleViewportResize());
+      this.viewportObserver.observe(this.app);
+    }
+    window.addEventListener('resize', () => this.scheduleViewportResize());
+    window.addEventListener('orientationchange', () => {
+      // iOS reports the old metrics for a frame or two after rotation.
+      window.setTimeout(() => this.scheduleViewportResize(), 140);
+      window.setTimeout(() => this.scheduleViewportResize(), 420);
+    });
+    window.visualViewport?.addEventListener('resize', () => this.scheduleViewportResize());
+  }
+
+  scheduleViewportResize() {
+    if (this.resizeFrame !== null) return;
+    this.resizeFrame = requestAnimationFrame(() => {
+      this.resizeFrame = null;
+      this.applyViewportSize();
     });
   }
 
+  applyViewportSize() {
+    const width = Math.max(1, Math.round(this.canvas.clientWidth));
+    const height = Math.max(1, Math.round(this.canvas.clientHeight));
+    if (width === this.viewportWidth && height === this.viewportHeight) return;
+    this.viewportWidth = width;
+    this.viewportHeight = height;
+
+    // updateStyle = false: CSS owns the element box, so no inline size is written
+    // and the ResizeObserver cannot feed back into itself.
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * UI
+   * ---------------------------------------------------------------- */
+
   initUI() {
+    const $ = (id) => document.getElementById(id);
+
     this.dom = {
-      modeIndicator: document.getElementById('mode-indicator'),
-      playTelemetry: document.getElementById('play-telemetry'),
-      hudTimer: document.getElementById('hud-timer'),
-      hudBest: document.getElementById('hud-best'),
-      hudSpeed: document.getElementById('hud-speed'),
-      hudMorphName: document.getElementById('hud-morph-name'),
-      hudMorphDims: document.getElementById('hud-morph-dims'),
-      presetSelect: document.getElementById('preset-select'),
-      jellyColorSelect: document.getElementById('jelly-color-select'),
-      btnMute: document.getElementById('btn-mute'),
-      topOptionsDrawer: document.getElementById('top-options-drawer'),
-      btnMobileOptions: document.getElementById('btn-mobile-options'),
-      btnToggleMode: document.getElementById('btn-toggle-mode'),
-      playControlsBar: document.getElementById('play-controls-bar'),
-      touchControls: document.getElementById('touch-controls'),
-      joystickZone: document.getElementById('joystick-zone'),
-      joystickBase: document.getElementById('joystick-base'),
-      joystickKnob: document.getElementById('joystick-knob'),
-      btnTouchFlat: document.getElementById('btn-touch-flat'),
-      btnTouchCube: document.getElementById('btn-touch-cube'),
-      btnTouchTall: document.getElementById('btn-touch-tall'),
-      btnTouchRespawn: document.getElementById('btn-touch-respawn'),
-      btnTouchJump: document.getElementById('btn-touch-jump'),
-      morphSlider: document.getElementById('morph-slider'),
-      btnMorphFlat: document.getElementById('btn-morph-flat'),
-      btnMorphTall: document.getElementById('btn-morph-tall'),
-      btnRespawn: document.getElementById('btn-respawn'),
-      toastBanner: document.getElementById('toast-banner'),
-      editorInspector: document.getElementById('editor-inspector'),
-      btnToggleInspector: document.getElementById('btn-toggle-inspector'),
-      editorDock: document.getElementById('editor-dock'),
-      catalogButtons: document.getElementById('catalog-buttons'),
-      inspectorEmpty: document.getElementById('inspector-empty'),
-      inspectorForm: document.getElementById('inspector-form'),
-      inspId: document.getElementById('insp-id'),
-      inspType: document.getElementById('insp-type'),
-      inspPosX: document.getElementById('insp-pos-x'),
-      inspPosY: document.getElementById('insp-pos-y'),
-      inspPosZ: document.getElementById('insp-pos-z'),
-      inspRotX: document.getElementById('insp-rot-x'),
-      inspRotY: document.getElementById('insp-rot-y'),
-      inspRotZ: document.getElementById('insp-rot-z'),
-      inspScaleX: document.getElementById('insp-scale-x'),
-      inspScaleY: document.getElementById('insp-scale-y'),
-      inspScaleZ: document.getElementById('insp-scale-z'),
-      inspParamsContainer: document.getElementById('insp-params-container'),
-      btnDuplicateObs: document.getElementById('btn-duplicate-obs'),
-      btnDeleteObs: document.getElementById('btn-delete-obs'),
-      btnSnap1: document.getElementById('btn-snap-1'),
-      btnSnap2: document.getElementById('btn-snap-2'),
-      btnSaveLocal: document.getElementById('btn-save-local'),
-      btnExportJson: document.getElementById('btn-export-json'),
-      btnImportJson: document.getElementById('btn-import-json'),
-      btnClearTrack: document.getElementById('btn-clear-track'),
-      editorStatusLine: document.getElementById('editor-status-line'),
-      victoryModal: document.getElementById('victory-modal'),
-      victoryTime: document.getElementById('victory-time'),
-      victoryBest: document.getElementById('victory-best'),
-      btnVictoryReplay: document.getElementById('btn-victory-replay'),
-      btnVictoryNext: document.getElementById('btn-victory-next'),
-      btnVictoryEdit: document.getElementById('btn-victory-edit'),
-      jsonModal: document.getElementById('json-modal'),
-      jsonTextarea: document.getElementById('json-textarea'),
-      jsonFeedback: document.getElementById('json-feedback'),
-      btnJsonCopy: document.getElementById('btn-json-copy'),
-      btnJsonDownload: document.getElementById('btn-json-download'),
-      btnJsonApply: document.getElementById('btn-json-apply'),
-      btnJsonClose: document.getElementById('btn-json-close')
+      hudTimer: $('hud-timer'),
+      hudBest: $('hud-best'),
+      hudSpeed: $('hud-speed'),
+      hudMorphName: $('hud-morph-name'),
+      hudMorphDims: $('hud-morph-dims'),
+      hudLevelIndex: $('hud-level-index'),
+      hudLevelName: $('hud-level-name'),
+      levelIntro: $('level-intro'),
+      levelIntroIndex: $('level-intro-index'),
+      levelIntroName: $('level-intro-name'),
+      levelIntroDiff: $('level-intro-diff'),
+      levelIntroObjective: $('level-intro-objective'),
+      levelIntroRecord: $('level-intro-record'),
+      toast: $('toast-banner'),
+      btnMute: $('btn-mute'),
+      muteGlyph: $('mute-glyph'),
+      btnJellyColor: $('btn-jelly-color'),
+      colorSwatch: $('jelly-color-swatch'),
+      btnLevels: $('btn-levels'),
+      levelModal: $('level-modal'),
+      levelGrid: $('level-grid'),
+      levelModalProgress: $('level-modal-progress'),
+      btnLevelClose: $('btn-level-close'),
+      victoryModal: $('victory-modal'),
+      victoryEyebrow: $('victory-eyebrow'),
+      victoryTitle: $('victory-title'),
+      victorySummary: $('victory-summary'),
+      victoryRecord: $('victory-record'),
+      victoryTime: $('victory-time'),
+      victoryBest: $('victory-best'),
+      btnVictoryNext: $('btn-victory-next'),
+      btnVictoryReplay: $('btn-victory-replay'),
+      btnVictoryLevels: $('btn-victory-levels'),
+      morphSlider: $('morph-slider'),
+      btnMorphFlat: $('btn-morph-flat'),
+      btnMorphTall: $('btn-morph-tall'),
+      btnRespawn: $('btn-respawn'),
+      btnTouchRespawn: $('btn-touch-respawn'),
+      btnTouchJump: $('btn-touch-jump'),
+      morphButtons: Array.from(document.querySelectorAll('.touch-morph-btn')),
+      joystickZone: $('joystick-zone'),
+      joystickBase: $('joystick-base'),
+      joystickKnob: $('joystick-knob')
     };
 
-    // Populate obstacle catalog buttons in the bottom editor dock.
-    OBSTACLE_CATALOG.forEach((item) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'catalog-tile';
-      btn.dataset.obstacleType = item.type;
-      btn.innerHTML = `
-        <span class="catalog-tile-title">+ ${item.label}</span>
-        <span class="catalog-tile-desc">${item.shortDesc}</span>
+    this.bindLevelSelectUI();
+    this.bindMobileActionUI();
+    this.syncColorUI();
+    this.syncMuteUI();
+  }
+
+  /* --- level select modal ------------------------------------------ */
+
+  bindLevelSelectUI() {
+    this.dom.btnLevels.addEventListener('click', () => this.openLevelModal());
+    this.dom.btnLevelClose.addEventListener('click', () => this.closeLevelModal());
+    this.dom.levelModal.addEventListener('pointerdown', (event) => {
+      if (event.target === this.dom.levelModal) this.closeLevelModal();
+    });
+
+    // Arrow keys move between cards; the grid is a single logical list.
+    this.dom.levelGrid.addEventListener('keydown', (event) => {
+      if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      const cards = Array.from(this.dom.levelGrid.querySelectorAll('.level-card:not(:disabled)'));
+      const current = cards.indexOf(document.activeElement);
+      if (current === -1) return;
+      const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1;
+      const next = clamp(current + step, 0, cards.length - 1);
+      cards[next]?.focus();
+      event.preventDefault();
+    });
+
+    this.dom.btnVictoryNext.addEventListener('click', () => {
+      const next = this.levelIndex + 1;
+      this.hideVictoryModal();
+      if (next < LEVELS.length) this.loadLevel(next);
+    });
+    this.dom.btnVictoryReplay.addEventListener('click', () => {
+      this.hideVictoryModal();
+      this.loadLevel(this.levelIndex, { announce: false });
+    });
+    this.dom.btnVictoryLevels.addEventListener('click', () => {
+      this.hideVictoryModal();
+      this.openLevelModal();
+    });
+  }
+
+  openLevelModal() {
+    this.modalReturnFocus = document.activeElement;
+    this.renderLevelGrid();
+    this.dom.levelModal.hidden = false;
+    this.dom.levelGrid.querySelector('.level-card.is-current:not(:disabled)')?.focus();
+  }
+
+  closeLevelModal() {
+    this.dom.levelModal.hidden = true;
+    this.modalReturnFocus?.focus?.();
+    this.modalReturnFocus = null;
+  }
+
+  renderLevelGrid() {
+    const grid = this.dom.levelGrid;
+    grid.innerHTML = '';
+
+    const unlockedCount = this.unlockedCount();
+    this.dom.levelModalProgress.textContent = this.unlockAll
+      ? `${LEVELS.length} of ${LEVELS.length} unlocked (unlockAll override)`
+      : `${unlockedCount} of ${LEVELS.length} unlocked`;
+
+    LEVELS.forEach((level, index) => {
+      const unlocked = index < unlockedCount;
+      const best = this.bestTimes[level.id];
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'level-card';
+      card.dataset.levelIndex = String(index);
+      if (index === this.levelIndex) card.classList.add('is-current');
+      if (!unlocked) {
+        card.classList.add('is-locked');
+        card.disabled = true;
+      }
+
+      const stars = '\u2605'.repeat(level.difficulty) + '\u2606'.repeat(5 - level.difficulty);
+      const bestText = unlocked
+        ? best
+          ? `BEST ${this.formatTime(best)}`
+          : 'BEST --:--.--'
+        : 'LOCKED';
+
+      card.innerHTML = `
+        <span class="level-card-top">
+          <span class="level-card-index">${String(index + 1).padStart(2, '0')}</span>
+          <span class="level-card-stars" aria-hidden="true">${stars}</span>
+        </span>
+        <span class="level-card-name">${unlocked ? level.name : 'Locked'}</span>
+        <span class="level-card-objective">${
+          unlocked ? level.objective : `Clear course ${String(index).padStart(2, '0')} to unlock.`
+        }</span>
+        <span class="level-card-best">${bestText}</span>
       `;
-      btn.addEventListener('click', () => {
-        const created = this.editor.spawnObstacleAtTarget(item.type);
-        this.editor.setPlacementTool(item.type);
-        this.syncCatalogHighlight();
-        if (created) {
-          this.showToast(`Added ${item.label} (${created.id}). Drag gizmo or tap grid to place more.`);
-        }
+      card.setAttribute(
+        'aria-label',
+        unlocked
+          ? `Course ${index + 1}, ${level.name}, difficulty ${level.difficulty} of 5. ${bestText}.`
+          : `Course ${index + 1} locked`
+      );
+
+      card.addEventListener('click', () => {
+        this.closeLevelModal();
+        this.loadLevel(index);
       });
-      this.dom.catalogButtons.appendChild(btn);
+      grid.appendChild(card);
     });
+  }
 
-    this.dom.presetSelect.addEventListener('change', (e) => {
-      this.loadPresetCourse(e.target.value);
-      this.dom.topOptionsDrawer?.classList.remove('is-open');
-      this.dom.btnMobileOptions?.setAttribute('aria-expanded', 'false');
-    });
+  /* --- mobile action cluster & colour/audio toggles ---------------- */
 
-    this.dom.jellyColorSelect.addEventListener('change', (e) => {
-      this.player.setPalette(e.target.value);
-      this.sound.playUiTick(660);
-      this.dom.topOptionsDrawer?.classList.remove('is-open');
-      this.dom.btnMobileOptions?.setAttribute('aria-expanded', 'false');
-    });
-
+  bindMobileActionUI() {
     this.dom.btnMute.addEventListener('click', () => {
-      const muted = this.sound.toggleMute();
-      this.dom.btnMute.textContent = muted ? 'Audio: OFF' : 'Audio: ON';
-      this.dom.btnMute.setAttribute('aria-pressed', String(muted));
+      const nextMuted = !this.sound.isMuted;
+      if (typeof this.sound.setMuted === 'function') this.sound.setMuted(nextMuted);
+      else this.sound.muted = nextMuted;
+      this.syncMuteUI();
     });
 
-    this.dom.btnMobileOptions?.addEventListener('click', () => {
-      const isOpen = this.dom.topOptionsDrawer.classList.toggle('is-open');
-      this.dom.btnMobileOptions.setAttribute('aria-expanded', String(isOpen));
-      this.sound.playUiTick(600);
+    this.dom.btnJellyColor.addEventListener('click', () => {
+      const next = (this.player.paletteIndex + 1) % JELLY_PALETTES.length;
+      this.player.setPalette(next);
+      this.syncColorUI();
+      this.sound.playUiTick?.(660);
     });
 
-    this.dom.btnToggleInspector?.addEventListener('click', () => {
-      const minimized = this.dom.editorInspector.classList.toggle('is-minimized');
-      this.dom.btnToggleInspector.textContent = minimized ? 'Expand' : 'Minimize';
-      this.dom.btnToggleInspector.setAttribute('aria-expanded', String(!minimized));
-      this.sound.playUiTick(580);
-    });
-
-    this.dom.btnToggleMode.addEventListener('click', () => {
-      this.toggleMode();
-    });
-
-    this.dom.morphSlider.addEventListener('input', (e) => {
-      this.player.setMorphValue(parseFloat(e.target.value), true);
-      this.syncTouchMorphButtons();
-    });
-
-    this.dom.btnMorphFlat.addEventListener('click', () => {
-      this.player.setMorphValue(Math.max(-1, this.player.morphValue - 0.35), true);
-      this.dom.morphSlider.value = String(this.player.morphValue);
-      this.syncTouchMorphButtons();
-    });
-
-    this.dom.btnMorphTall.addEventListener('click', () => {
-      this.player.setMorphValue(Math.min(1, this.player.morphValue + 0.35), true);
-      this.dom.morphSlider.value = String(this.player.morphValue);
-      this.syncTouchMorphButtons();
-    });
-
-    this.dom.btnRespawn.addEventListener('click', () => {
-      this.player.respawn(false);
-      this.dom.morphSlider.value = '0';
-      this.syncTouchMorphButtons();
-      this.showToast('Respawned at active checkpoint.');
-    });
-
-    // Touch quick-morph and reset buttons.
-    document.querySelectorAll('.touch-morph-btn').forEach((btn) => {
+    this.dom.morphButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
-        const targetMorph = parseFloat(btn.dataset.morph || '0');
-        this.player.setMorphValue(targetMorph, true);
-        this.dom.morphSlider.value = String(targetMorph);
+        this.player.setMorphValue(Number(btn.dataset.morph));
+        this.dom.morphSlider.value = String(Number(btn.dataset.morph).toFixed(2));
         this.syncTouchMorphButtons();
       });
     });
 
-    this.dom.btnTouchRespawn?.addEventListener('click', () => {
-      this.player.respawn(false);
-      this.dom.morphSlider.value = '0';
-      this.syncTouchMorphButtons();
-      this.showToast('Respawned at active checkpoint.');
-    });
-
-    // Gizmo mode buttons in Property Inspector.
-    document.querySelectorAll('[data-gizmo]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        this.editor.setTransformMode(btn.dataset.gizmo);
-        this.syncGizmoButtons();
+    if (this.dom.btnMorphFlat) {
+      this.dom.btnMorphFlat.addEventListener('click', () => {
+        this.player.adjustMorph(-0.34);
+        this.dom.morphSlider.value = String(this.player.morphValue.toFixed(2));
+        this.syncTouchMorphButtons();
       });
+    }
+    if (this.dom.btnMorphTall) {
+      this.dom.btnMorphTall.addEventListener('click', () => {
+        this.player.adjustMorph(0.34);
+        this.dom.morphSlider.value = String(this.player.morphValue.toFixed(2));
+        this.syncTouchMorphButtons();
+      });
+    }
+
+    this.dom.morphSlider.addEventListener('input', () => {
+      this.player.setMorphValue(Number(this.dom.morphSlider.value), false);
+      this.syncTouchMorphButtons();
     });
 
-    this.dom.btnSnap1.addEventListener('click', () => {
-      this.editor.setGridSnap(1);
-      this.dom.btnSnap1.classList.add('is-active');
-      this.dom.btnSnap2.classList.remove('is-active');
-    });
+    const respawn = () => this.resetPlayerToCheckpoint('Respawned at the last checkpoint.');
+    this.dom.btnRespawn?.addEventListener('click', respawn);
+    this.dom.btnTouchRespawn?.addEventListener('click', respawn);
 
-    this.dom.btnSnap2.addEventListener('click', () => {
-      this.editor.setGridSnap(2);
-      this.dom.btnSnap2.classList.add('is-active');
-      this.dom.btnSnap1.classList.remove('is-active');
-    });
-
-    // Transform numeric inputs.
-    const transformInputs = [
-      this.dom.inspPosX,
-      this.dom.inspPosY,
-      this.dom.inspPosZ,
-      this.dom.inspRotX,
-      this.dom.inspRotY,
-      this.dom.inspRotZ,
-      this.dom.inspScaleX,
-      this.dom.inspScaleY,
-      this.dom.inspScaleZ
-    ];
-    transformInputs.forEach((input) => {
-      input.addEventListener('change', () => this.applyInspectorTransform());
-    });
-
-    this.dom.btnDuplicateObs.addEventListener('click', () => this.editor.duplicateSelected());
-    this.dom.btnDeleteObs.addEventListener('click', () => this.editor.deleteSelected());
-
-    // Persistence buttons.
-    this.dom.btnSaveLocal.addEventListener('click', () => this.saveToLocalStorage());
-    this.dom.btnExportJson.addEventListener('click', () => this.openJsonModal('export'));
-    this.dom.btnImportJson.addEventListener('click', () => this.openJsonModal('import'));
-    this.dom.btnClearTrack.addEventListener('click', () => {
-      this.loadPresetCourse(this.currentPresetId, true);
-      this.showToast('Reset course to original preset layout.');
-    });
-
-    // Victory modal buttons.
-    this.dom.btnVictoryReplay.addEventListener('click', () => {
-      this.dom.victoryModal.hidden = true;
-      this.restartRace();
-    });
-
-    this.dom.btnVictoryNext.addEventListener('click', () => {
-      this.dom.victoryModal.hidden = true;
-      const nextId =
-        this.currentPresetId === 'beginner_bounce' ? 'morph_madness' : 'beginner_bounce';
-      this.dom.presetSelect.value = nextId;
-      this.loadPresetCourse(nextId);
-    });
-
-    this.dom.btnVictoryEdit.addEventListener('click', () => {
-      this.dom.victoryModal.hidden = true;
-      if (this.mode !== 'EDITOR_MODE') {
-        this.setMode('EDITOR_MODE');
-      }
-    });
-
-    // JSON modal buttons.
-    this.dom.btnJsonCopy.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(this.dom.jsonTextarea.value);
-        this.setJsonFeedback('Copied level JSON to clipboard.', false);
-      } catch {
-        this.dom.jsonTextarea.select();
-        this.setJsonFeedback('Selected JSON text. Press Ctrl+C to copy.', false);
-      }
-    });
-
-    this.dom.btnJsonDownload.addEventListener('click', () => {
-      const payload = this.dom.jsonTextarea.value.trim();
-      if (!payload) {
-        this.setJsonFeedback('JSON textarea is empty.', true);
-        return;
-      }
-      const blob = new Blob([payload], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `jellometry-${this.currentPresetId || 'track'}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      this.setJsonFeedback('Downloaded .json level file.', false);
-    });
-
-    this.dom.btnJsonApply.addEventListener('click', () => {
-      this.applyImportedJson(this.dom.jsonTextarea.value);
-    });
-
-    this.dom.btnJsonClose.addEventListener('click', () => {
-      this.dom.jsonModal.hidden = true;
-    });
+    // A latched tap survives the gap between touch events and the fixed physics
+    // step, which is what makes JUMP reliable on a phone.
+    const jump = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.player.queueJump();
+    };
+    this.dom.btnTouchJump?.addEventListener('pointerdown', jump);
   }
 
+  syncColorUI() {
+    const palette = this.player.getPalette();
+    if (this.dom.colorSwatch) this.dom.colorSwatch.style.background = palette.hex;
+    if (this.dom.btnJellyColor) {
+      this.dom.btnJellyColor.title = `Jelly colour: ${palette.name}`;
+      this.dom.btnJellyColor.setAttribute('aria-label', `Cycle jelly colour, current: ${palette.name}`);
+    }
+  }
+
+  syncMuteUI() {
+    const muted = Boolean(this.sound.isMuted ?? this.sound.muted);
+    if (this.dom.muteGlyph) this.dom.muteGlyph.textContent = muted ? '\u{1F507}' : '\u{1F50A}';
+    if (this.dom.btnMute) {
+      this.dom.btnMute.setAttribute('aria-pressed', String(muted));
+      this.dom.btnMute.setAttribute('aria-label', muted ? 'Unmute audio' : 'Mute audio');
+    }
+  }
+
+  syncTouchMorphButtons() {
+    const value = this.player.morphValue;
+    const active = this.dom.morphButtons.find((btn) => Math.abs(value - Number(btn.dataset.morph)) < 0.16);
+    this.dom.morphButtons.forEach((btn) => btn.classList.toggle('is-active', btn === active));
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Input
+   * ---------------------------------------------------------------- */
+
   bindGameplayControls() {
-    window.addEventListener('keydown', (e) => {
+    window.addEventListener('keydown', (event) => {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-      if (e.key === 'Escape') {
-        if (!this.dom.jsonModal.hidden) {
-          this.dom.jsonModal.hidden = true;
+      if (event.key === 'Escape') {
+        if (!this.dom.levelModal.hidden) {
+          this.closeLevelModal();
           return;
         }
         if (!this.dom.victoryModal.hidden) {
-          this.dom.victoryModal.hidden = true;
-          return;
+          this.hideVictoryModal();
         }
-        if (this.mode === 'PLAY_MODE') {
-          this.toggleMode();
-          return;
-        }
+        return;
       }
 
-      if (this.mode !== 'PLAY_MODE') return;
+      if (event.code === 'KeyL') {
+        if (this.dom.levelModal.hidden) this.openLevelModal();
+        else this.closeLevelModal();
+        return;
+      }
+      if (event.code === 'KeyM') {
+        this.dom.btnMute.click();
+        return;
+      }
 
-      switch (e.code) {
+      // Freeze the jelly while a dialog owns the screen.
+      if (!this.dom.levelModal.hidden || !this.dom.victoryModal.hidden) {
+        if (event.code === 'Enter' && !this.dom.victoryModal.hidden) {
+          this.dom.btnVictoryNext.hidden
+            ? this.dom.btnVictoryReplay.click()
+            : this.dom.btnVictoryNext.click();
+        }
+        return;
+      }
+
+      switch (event.code) {
         case 'KeyW':
         case 'ArrowUp':
           this.player.keys.forward = true;
@@ -437,7 +476,7 @@ class JellometryGame {
           this.player.keys.right = true;
           break;
         case 'Space':
-          e.preventDefault();
+          event.preventDefault();
           this.player.keys.jump = true;
           break;
         case 'KeyQ':
@@ -447,16 +486,15 @@ class JellometryGame {
           this.player.keys.morphTall = true;
           break;
         case 'KeyR':
-          this.player.respawn(false);
-          this.dom.morphSlider.value = '0';
+          this.resetPlayerToCheckpoint('Respawned at the last checkpoint.');
           break;
         default:
           break;
       }
     });
 
-    window.addEventListener('keyup', (e) => {
-      switch (e.code) {
+    window.addEventListener('keyup', (event) => {
+      switch (event.code) {
         case 'KeyW':
         case 'ArrowUp':
           this.player.keys.forward = false;
@@ -487,529 +525,220 @@ class JellometryGame {
       }
     });
 
-    // Mouse wheel in PLAY_MODE smoothly morphs the jelly dimensions.
+    // Mouse wheel smoothly morphs the jelly.
     this.canvas.addEventListener(
       'wheel',
-      (e) => {
-        if (this.mode !== 'PLAY_MODE') return;
-        e.preventDefault();
-        const dir = e.deltaY > 0 ? -0.14 : 0.14;
-        this.player.adjustMorph(dir);
+      (event) => {
+        event.preventDefault();
+        this.player.adjustMorph(event.deltaY > 0 ? -0.14 : 0.14);
         this.dom.morphSlider.value = String(this.player.morphValue.toFixed(2));
+        this.syncTouchMorphButtons();
       },
       { passive: false }
     );
 
-    // Touch controls for mobile devices.
-    document.querySelectorAll('.touch-btn').forEach((btn) => {
-      const key = btn.dataset.key;
-      if (!key) return;
-      const setKey = (val) => {
-        this.player.keys[key] = val;
-      };
-      btn.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        setKey(true);
-      });
-      btn.addEventListener('pointerup', () => setKey(false));
-      btn.addEventListener('pointerleave', () => setKey(false));
-      btn.addEventListener('pointercancel', () => setKey(false));
-    });
-
     this.bindVirtualJoystick();
   }
 
+  /**
+   * Thumbstick mapping derived from the live DOM box rather than a hardcoded
+   * radius, with a floating recentre so the ring meets the thumb wherever it
+   * lands. A fixed radius that disagreed with the CSS base size used to make
+   * the knob punch through its own ring.
+   */
   bindVirtualJoystick() {
-    const zone = this.dom.joystickZone;
-    const base = this.dom.joystickBase;
-    const knob = this.dom.joystickKnob;
+    const { joystickZone: zone, joystickBase: base, joystickKnob: knob } = this.dom;
     if (!zone || !base || !knob) return;
 
     this.joystickPointerId = null;
-    const maxRadius = 36;
+    this.joystickHome = null;
 
-    const updateStick = (clientX, clientY) => {
-      const rect = base.getBoundingClientRect();
-      const centerX = rect.left + rect.width * 0.5;
-      const centerY = rect.top + rect.height * 0.5;
-
-      let dx = clientX - centerX;
-      let dy = clientY - centerY;
-      const dist = Math.hypot(dx, dy);
-
-      if (dist > maxRadius) {
-        dx = (dx / dist) * maxRadius;
-        dy = (dy / dist) * maxRadius;
-      }
-
-      knob.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
-      this.player.analogInput.set(dx / maxRadius, dy / maxRadius);
+    const readGeometry = () => {
+      const baseRect = base.getBoundingClientRect();
+      const knobRect = knob.getBoundingClientRect();
+      return {
+        radius: Math.max(16, baseRect.width * 0.5 - knobRect.width * 0.5 - 2),
+        centerX: baseRect.left + baseRect.width * 0.5,
+        centerY: baseRect.top + baseRect.height * 0.5,
+        baseRadius: baseRect.width * 0.5
+      };
     };
 
-    const resetStick = () => {
+    const release = () => {
+      if (this.joystickPointerId === null && !this.joystickHome) return;
       this.joystickPointerId = null;
-      knob.style.transform = 'translate(0px, 0px)';
+      this.joystickHome = null;
+      base.style.transform = '';
+      base.classList.remove('is-floating');
+      knob.style.transform = 'translate3d(0, 0, 0)';
       this.player.analogInput.set(0, 0);
     };
-    this.resetJoystick = resetStick;
 
-    zone.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      this.joystickPointerId = e.pointerId;
-      zone.setPointerCapture?.(e.pointerId);
-      updateStick(e.clientX, e.clientY);
-    });
-
-    zone.addEventListener('pointermove', (e) => {
-      if (e.pointerId !== this.joystickPointerId) return;
-      e.preventDefault();
-      updateStick(e.clientX, e.clientY);
-    });
-
-    zone.addEventListener('pointerup', (e) => {
-      if (e.pointerId === this.joystickPointerId) {
-        resetStick();
+    const track = (clientX, clientY) => {
+      const home = this.joystickHome;
+      if (!home) return;
+      let dx = clientX - home.x;
+      let dy = clientY - home.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > home.radius) {
+        const scale = home.radius / (distance || 1);
+        dx *= scale;
+        dy *= scale;
       }
-    });
+      knob.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+      this.player.analogInput.set(dx / home.radius, -dy / home.radius);
+    };
 
-    zone.addEventListener('pointercancel', (e) => {
-      if (e.pointerId === this.joystickPointerId) {
-        resetStick();
-      }
-    });
-  }
+    zone.addEventListener('pointerdown', (event) => {
+      if (this.joystickPointerId !== null) return;
+      event.preventDefault();
 
-  syncTouchMorphButtons() {
-    const m = this.player.morphValue;
-    const activeProfile = m < -0.35 ? '-0.9' : m > 0.35 ? '0.9' : '0';
-    document.querySelectorAll('.touch-morph-btn').forEach((btn) => {
-      btn.classList.toggle('is-active', btn.dataset.morph === activeProfile);
-    });
-  }
+      const geometry = readGeometry();
+      const offsetX = event.clientX - geometry.centerX;
+      const offsetY = event.clientY - geometry.centerY;
+      const drifted = Math.hypot(offsetX, offsetY) > geometry.baseRadius * 0.72;
 
-  toggleMode() {
-    this.setMode(this.mode === 'PLAY_MODE' ? 'EDITOR_MODE' : 'PLAY_MODE');
-  }
-
-  /**
-   * Enforces strict state separation between PLAY_MODE and EDITOR_MODE.
-   * Entering PLAY_MODE snapshots the editor level so returning to EDITOR_MODE
-   * restores all obstacles and the player to their exact edited transforms.
-   */
-  setMode(targetMode) {
-    if (targetMode === this.mode) return;
-    this.sound.playUiTick(targetMode === 'EDITOR_MODE' ? 520 : 720);
-
-    if (targetMode === 'EDITOR_MODE') {
-      this.mode = 'EDITOR_MODE';
-      this.clearPlayerInputs();
-
-      if (this.editorSnapshot) {
-        this.factory.loadLevel(this.editorSnapshot);
+      if (drifted) {
+        base.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0)`;
+        base.classList.add('is-floating');
+        this.joystickHome = { x: event.clientX, y: event.clientY, radius: geometry.radius };
       } else {
-        this.factory.resetAllForModeSwitch();
+        this.joystickHome = { x: geometry.centerX, y: geometry.centerY, radius: geometry.radius };
       }
 
-      const sp = this.editorSnapshot?.spawnPoint || [0, 2.2, 0];
-      this.player.setSpawnPoint(new THREE.Vector3(sp[0], sp[1], sp[2]), null);
-      this.player.respawn(false);
-      this.dom.morphSlider.value = '0';
-      this.syncTouchMorphButtons();
-
-      // Position OrbitControls around the player's current region for immediate editing.
-      const focusZ = Math.min(-8, this.player.rootGroup.position.z - 6);
-      this.editor.orbitControls.target.set(0, 2.0, focusZ);
-      this.camera.fov = 58;
-      this.camera.updateProjectionMatrix();
-      this.camera.position.set(16, 15, focusZ + 18);
-      this.editor.orbitControls.update();
-
-      this.editor.setEnabled(true);
-      this.dom.modeIndicator.textContent = 'EDITOR MODE';
-      this.dom.modeIndicator.classList.add('is-editor');
-      this.dom.btnToggleMode.textContent = 'Play Track [ESC]';
-      this.dom.playControlsBar.hidden = true;
-      this.dom.touchControls.hidden = true;
-      this.dom.editorInspector.hidden = false;
-      this.dom.editorDock.hidden = false;
-      this.renderInspector(this.editor.selectedObstacle);
-      this.showToast('Editor Mode: Tap obstacles to transform or choose a tool below.');
-    } else {
-      // Serialize the exact edited state before starting physics simulation.
-      this.editorSnapshot = this.factory.serializeLevel({
-        name: this.currentPresetId,
-        spawnPoint: [0, 2.2, 0]
-      });
-
-      this.mode = 'PLAY_MODE';
-      this.editor.setEnabled(false);
-      this.dom.modeIndicator.textContent = 'PLAY MODE';
-      this.dom.modeIndicator.classList.remove('is-editor');
-      this.dom.btnToggleMode.textContent = 'Edit Track [ESC]';
-      this.dom.playControlsBar.hidden = false;
-      this.dom.touchControls.hidden = false;
-      this.dom.editorInspector.hidden = true;
-      this.dom.editorDock.hidden = true;
-
-      this.restartRace();
-      this.showToast('Play Mode: Race to the checkered Finish Arch!');
-    }
-  }
-
-  clearPlayerInputs() {
-    Object.keys(this.player.keys).forEach((k) => {
-      this.player.keys[k] = false;
-    });
-    this.resetJoystick?.();
-  }
-
-  loadPresetCourse(presetId, forceReset = false) {
-    this.currentPresetId = presetId;
-    let levelData = PRESET_LEVELS[presetId];
-
-    if (presetId === 'custom_saved') {
-      const savedRaw = localStorage.getItem(STORAGE_CUSTOM_LEVEL_KEY);
-      if (savedRaw) {
-        try {
-          levelData = JSON.parse(savedRaw);
-        } catch {
-          levelData = PRESET_LEVELS.beginner_bounce;
-        }
-      } else {
-        levelData = PRESET_LEVELS.beginner_bounce;
-        this.showToast('No saved custom track yet. Loaded Beginner Bounce as starting template.');
-      }
-    }
-
-    if (!levelData) {
-      levelData = PRESET_LEVELS.beginner_bounce;
-    }
-
-    this.editor.selectObstacle(null);
-    this.factory.loadLevel(levelData);
-    this.editorSnapshot = this.factory.serializeLevel({
-      name: levelData.name || presetId,
-      spawnPoint: levelData.spawnPoint || [0, 2.2, 0]
+      this.joystickPointerId = event.pointerId;
+      zone.setPointerCapture?.(event.pointerId);
+      track(event.clientX, event.clientY);
     });
 
+    zone.addEventListener('pointermove', (event) => {
+      if (event.pointerId !== this.joystickPointerId) return;
+      event.preventDefault();
+      track(event.clientX, event.clientY);
+    });
+
+    const end = (event) => {
+      if (event.pointerId !== this.joystickPointerId) return;
+      release();
+    };
+    zone.addEventListener('pointerup', end);
+    zone.addEventListener('pointercancel', end);
+    window.addEventListener('blur', release);
+
+    // A rotation invalidates the cached ring geometry.
+    window.addEventListener('orientationchange', () => {
+      release();
+      this.scheduleViewportResize();
+    });
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Course lifecycle
+   * ---------------------------------------------------------------- */
+
+  loadLevel(index, { announce = true } = {}) {
+    const nextIndex = clamp(Math.round(index), 0, LEVELS.length - 1);
+    this.levelIndex = nextIndex;
+    this.currentLevel = LEVELS[nextIndex];
+
+    this.factory.loadLevel(this.currentLevel);
     this.restartRace();
+    this.updateLevelChip();
     this.updateBestTimeDisplay();
+    this.saveLastPlayed();
 
-    if (!forceReset) {
-      this.showToast(`Loaded course: ${levelData.name || presetId}`);
-    }
+    if (announce) this.showLevelIntro(this.currentLevel);
   }
 
   restartRace() {
     this.raceTime = 0;
     this.raceCompleted = false;
+    this.hudCache = {};
+    this.hudAccumulator = HUD_REFRESH_INTERVAL;
+    this.frameSamples.length = 0;
     this.particles.clear();
     this.factory.resetAllForModeSwitch();
 
-    const sp = this.editorSnapshot?.spawnPoint || [0, 2.2, 0];
-    this.player.setSpawnPoint(new THREE.Vector3(sp[0], sp[1], sp[2]), null);
+    const spawn = this.currentLevel?.spawnPoint ?? [0, 2.2, 0];
+    this.player.setSpawnPoint(new THREE.Vector3(spawn[0], spawn[1], spawn[2]), null);
+    this.player.respawn(false);
+    this.player.analogInput.set(0, 0);
+    this.dom.morphSlider.value = '0';
+    this.syncTouchMorphButtons();
+  }
+
+  resetPlayerToCheckpoint(message) {
+    this.particles.emitDroplets(this.player.rootGroup.position, this.player.getPalette().hex, 12);
     this.player.respawn(false);
     this.dom.morphSlider.value = '0';
     this.syncTouchMorphButtons();
+    if (message) this.showToast(message);
   }
 
   handleRaceVictory() {
     if (this.raceCompleted) return;
     this.raceCompleted = true;
 
-    const prevBest = this.bestTimes[this.currentPresetId];
-    if (!prevBest || this.raceTime < prevBest) {
-      this.bestTimes[this.currentPresetId] = this.raceTime;
+    const level = this.currentLevel;
+    const previousBest = this.bestTimes[level.id];
+    const isRecord = !previousBest || this.raceTime < previousBest;
+    if (isRecord) {
+      this.bestTimes[level.id] = this.raceTime;
       this.saveBestTimes();
     }
 
+    const isFinal = this.levelIndex >= LEVELS.length - 1;
+    let unlockedNewCourse = false;
+    if (!isFinal && this.progress.unlocked < this.levelIndex + 2) {
+      this.progress.unlocked = this.levelIndex + 2;
+      this.saveProgress();
+      unlockedNewCourse = true;
+    }
+
+    this.updateLevelChip();
     this.updateBestTimeDisplay();
+
+    const courseNumber = String(this.levelIndex + 1).padStart(2, '0');
+    this.dom.victoryEyebrow.textContent = isFinal
+      ? `FINAL COURSE ${courseNumber} CLEARED`
+      : `COURSE ${courseNumber} COMPLETE`;
+    this.dom.victoryTitle.textContent = level.name;
+    this.dom.victorySummary.textContent = isFinal
+      ? `All ${LEVELS.length} courses cleared. That is every hazard in the game, beaten.`
+      : unlockedNewCourse
+        ? `Course ${String(this.levelIndex + 2).padStart(2, '0')} unlocked.`
+        : 'You guided the jelly all the way to the finish arch.';
+    this.dom.victoryRecord.hidden = !isRecord;
     this.dom.victoryTime.textContent = this.formatTime(this.raceTime);
-    this.dom.victoryBest.textContent = this.formatTime(this.bestTimes[this.currentPresetId]);
+    this.dom.victoryBest.textContent = this.formatTime(this.bestTimes[level.id]);
+
+    const nextLevel = LEVELS[this.levelIndex + 1];
+    this.dom.btnVictoryNext.hidden = !nextLevel;
+    if (nextLevel) this.dom.btnVictoryNext.textContent = `Next: ${nextLevel.name}`;
+
+    this.sound.playVictory?.();
     this.dom.victoryModal.hidden = false;
+    const focusTarget = nextLevel ? this.dom.btnVictoryNext : this.dom.btnVictoryReplay;
+    focusTarget.focus?.();
   }
 
-  renderInspector(obstacle) {
-    this.syncGizmoButtons();
-    this.syncCatalogHighlight();
-
-    if (!obstacle) {
-      this.dom.inspectorEmpty.hidden = false;
-      this.dom.inspectorForm.hidden = true;
-      return;
-    }
-
-    // Auto-expand the mobile inspector sheet when an obstacle is actively selected.
-    this.dom.editorInspector.classList.remove('is-minimized');
-    if (this.dom.btnToggleInspector) {
-      this.dom.btnToggleInspector.textContent = 'Minimize';
-      this.dom.btnToggleInspector.setAttribute('aria-expanded', 'true');
-    }
-
-    this.dom.inspectorEmpty.hidden = true;
-    this.dom.inspectorForm.hidden = false;
-
-    this.dom.inspId.textContent = obstacle.id;
-    this.dom.inspType.textContent = obstacle.type;
-
-    this.dom.inspPosX.value = obstacle.group.position.x.toFixed(2);
-    this.dom.inspPosY.value = obstacle.group.position.y.toFixed(2);
-    this.dom.inspPosZ.value = obstacle.group.position.z.toFixed(2);
-
-    this.dom.inspRotX.value = THREE.MathUtils.radToDeg(obstacle.group.rotation.x).toFixed(0);
-    this.dom.inspRotY.value = THREE.MathUtils.radToDeg(obstacle.group.rotation.y).toFixed(0);
-    this.dom.inspRotZ.value = THREE.MathUtils.radToDeg(obstacle.group.rotation.z).toFixed(0);
-
-    this.dom.inspScaleX.value = obstacle.group.scale.x.toFixed(2);
-    this.dom.inspScaleY.value = obstacle.group.scale.y.toFixed(2);
-    this.dom.inspScaleZ.value = obstacle.group.scale.z.toFixed(2);
-
-    this.renderDynamicObstacleParams(obstacle);
+  hideVictoryModal() {
+    this.dom.victoryModal.hidden = true;
   }
 
-  renderDynamicObstacleParams(obstacle) {
-    const container = this.dom.inspParamsContainer;
-    container.innerHTML = '';
-
-    const params = obstacle.params;
-    const addNumberField = (key, label, step = 0.5, min = -90, max = 100) => {
-      const wrap = document.createElement('label');
-      wrap.className = 'param-field';
-      wrap.innerHTML = `<span>${label}</span>`;
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.step = String(step);
-      input.min = String(min);
-      input.max = String(max);
-      input.value = String(params[key] ?? 0);
-      input.addEventListener('change', () => {
-        const val = parseFloat(input.value);
-        if (!Number.isNaN(val)) {
-          this.factory.rebuildObstacle(obstacle, { [key]: val });
-          this.editor.selectObstacle(obstacle);
-        }
-      });
-      wrap.appendChild(input);
-      container.appendChild(wrap);
-    };
-
-    const addSelectField = (key, label, options) => {
-      const wrap = document.createElement('label');
-      wrap.className = 'param-field';
-      wrap.innerHTML = `<span>${label}</span>`;
-      const select = document.createElement('select');
-      options.forEach(([val, text]) => {
-        const opt = document.createElement('option');
-        opt.value = val;
-        opt.textContent = text;
-        if (params[key] === val) opt.selected = true;
-        select.appendChild(opt);
-      });
-      select.addEventListener('change', () => {
-        this.factory.rebuildObstacle(obstacle, { [key]: select.value });
-        this.editor.selectObstacle(obstacle);
-      });
-      wrap.appendChild(select);
-      container.appendChild(wrap);
-    };
-
-    const addColorField = (key, label) => {
-      const wrap = document.createElement('label');
-      wrap.className = 'param-field';
-      wrap.innerHTML = `<span>${label}</span>`;
-      const input = document.createElement('input');
-      input.type = 'color';
-      input.value = params[key] || '#ff4d6d';
-      input.addEventListener('input', () => {
-        this.factory.rebuildObstacle(obstacle, { [key]: input.value });
-      });
-      wrap.appendChild(input);
-      container.appendChild(wrap);
-    };
-
-    switch (obstacle.type) {
-      case 'track_block':
-        addNumberField('width', 'Width (m)', 0.5, 1.5, 40);
-        addNumberField('length', 'Length (m)', 1, 2, 80);
-        addNumberField('height', 'Thickness (m)', 0.2, 0.3, 10);
-        addNumberField('slopeAngle', 'Slope Angle (°)', 5, -45, 45);
-        addColorField('color', 'Surface Color');
-        break;
-      case 'spinning_sweeper':
-        addNumberField('armLength', 'Bar Length (m)', 0.5, 2.5, 20);
-        addNumberField('speed', 'Spin Speed (rad/s)', 0.2, -10, 10);
-        addNumberField('barHeight', 'Bar Height (m)', 0.1, 0.4, 4);
-        addColorField('color', 'Stripe Color');
-        break;
-      case 'moving_platform':
-        addNumberField('width', 'Width (m)', 0.5, 2, 20);
-        addNumberField('length', 'Length (m)', 0.5, 2, 25);
-        addSelectField('axis', 'Travel Axis', [
-          ['x', 'Horizontal (X)'],
-          ['y', 'Vertical Lift (Y)'],
-          ['z', 'Forward/Back (Z)']
-        ]);
-        addNumberField('distance', 'Travel Dist (m)', 0.5, 0.5, 25);
-        addNumberField('speed', 'Oscillation Speed', 0.2, 0.2, 8);
-        addColorField('color', 'Platform Color');
-        break;
-      case 'bouncy_pad':
-        addNumberField('width', 'Width (m)', 0.5, 1.5, 16);
-        addNumberField('length', 'Length (m)', 0.5, 1.5, 16);
-        addNumberField('bounceForce', 'Launch Impulse', 1, 8, 40);
-        addColorField('color', 'Slime Color');
-        break;
-      case 'shape_gate':
-        addSelectField('cutoutShape', 'Gate Cutout', [
-          ['flat_wide', 'Flat & Wide [Q]'],
-          ['tall_narrow', 'Tall & Narrow [E]']
-        ]);
-        addNumberField('wallWidth', 'Wall Width (m)', 0.5, 4.5, 20);
-        addNumberField('wallHeight', 'Wall Height (m)', 0.5, 3.0, 12);
-        addColorField('color', 'Gate Color');
-        break;
-      case 'checkpoint_finish':
-        addSelectField('variant', 'Gate Role', [
-          ['checkpoint', 'Checkpoint Pad'],
-          ['finish', 'Finish Line Arch']
-        ]);
-        addNumberField('width', 'Arch Width (m)', 0.5, 3.5, 20);
-        addColorField('color', 'Beacon Color');
-        break;
-      default:
-        break;
-    }
-  }
-
-  applyInspectorTransform() {
-    const obs = this.editor.selectedObstacle;
-    if (!obs) return;
-
-    const px = parseFloat(this.dom.inspPosX.value) || 0;
-    const py = parseFloat(this.dom.inspPosY.value) || 0;
-    const pz = parseFloat(this.dom.inspPosZ.value) || 0;
-
-    const rx = THREE.MathUtils.degToRad(parseFloat(this.dom.inspRotX.value) || 0);
-    const ry = THREE.MathUtils.degToRad(parseFloat(this.dom.inspRotY.value) || 0);
-    const rz = THREE.MathUtils.degToRad(parseFloat(this.dom.inspRotZ.value) || 0);
-
-    const sx = Math.max(0.2, parseFloat(this.dom.inspScaleX.value) || 1);
-    const sy = Math.max(0.2, parseFloat(this.dom.inspScaleY.value) || 1);
-    const sz = Math.max(0.2, parseFloat(this.dom.inspScaleZ.value) || 1);
-
-    obs.group.position.set(px, py, pz);
-    obs.group.rotation.set(rx, ry, rz);
-    obs.group.scale.set(sx, sy, sz);
-
-    this.factory.rebuildObstacle(obs);
-    this.editor.selectObstacle(obs);
-  }
-
-  syncGizmoButtons() {
-    const mode = this.editor.getTransformMode();
-    document.querySelectorAll('[data-gizmo]').forEach((btn) => {
-      btn.classList.toggle('is-active', btn.dataset.gizmo === mode);
-    });
-  }
-
-  syncCatalogHighlight() {
-    const activeType = this.editor.placementType;
-    document.querySelectorAll('.catalog-tile').forEach((btn) => {
-      btn.classList.toggle('is-active', btn.dataset.obstacleType === activeType);
-    });
-  }
-
-  saveToLocalStorage() {
-    const payload = this.factory.serializeLevel({
-      name: 'Saved Custom Track',
-      spawnPoint: [0, 2.2, 0]
-    });
-    localStorage.setItem(STORAGE_CUSTOM_LEVEL_KEY, JSON.stringify(payload));
-    this.editorSnapshot = payload;
-    this.currentPresetId = 'custom_saved';
-    this.dom.presetSelect.value = 'custom_saved';
-    this.sound.playCheckpoint();
-    this.showToast('Saved custom track to browser LocalStorage.');
-  }
-
-  openJsonModal(mode = 'export') {
-    this.dom.jsonFeedback.hidden = true;
-    if (mode === 'export') {
-      const serialized = this.factory.serializeLevel({
-        name: this.currentPresetId === 'custom_saved' ? 'Saved Custom Track' : this.currentPresetId,
-        spawnPoint: [0, 2.2, 0]
-      });
-      this.dom.jsonTextarea.value = JSON.stringify(serialized, null, 2);
-    } else {
-      this.dom.jsonTextarea.value = '';
-      this.dom.jsonTextarea.placeholder =
-        'Paste level JSON here, e.g. {"version": 1, "name": "My Track", "obstacles": [...]}';
-    }
-    this.dom.jsonModal.hidden = false;
-    this.dom.jsonTextarea.focus();
-  }
-
-  applyImportedJson(rawText) {
-    if (!rawText || !rawText.trim()) {
-      this.setJsonFeedback('Please paste a valid JSON level object before loading.', true);
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(rawText);
-      if (!parsed || !Array.isArray(parsed.obstacles)) {
-        this.setJsonFeedback('Invalid format: JSON must contain an "obstacles" array.', true);
-        return;
-      }
-
-      this.editor.selectObstacle(null);
-      this.factory.loadLevel(parsed);
-      this.editorSnapshot = this.factory.serializeLevel({
-        name: parsed.name || 'Imported Track',
-        spawnPoint: parsed.spawnPoint || [0, 2.2, 0]
-      });
-      localStorage.setItem(STORAGE_CUSTOM_LEVEL_KEY, JSON.stringify(this.editorSnapshot));
-      this.currentPresetId = 'custom_saved';
-      this.dom.presetSelect.value = 'custom_saved';
-
-      this.setJsonFeedback(`Loaded ${parsed.obstacles.length} obstacles into track.`, false);
-      this.sound.playCheckpoint();
-      setTimeout(() => {
-        this.dom.jsonModal.hidden = true;
-      }, 550);
-    } catch (err) {
-      this.setJsonFeedback(`JSON parse error: ${err.message}`, true);
-    }
-  }
-
-  setJsonFeedback(message, isError = false) {
-    this.dom.jsonFeedback.hidden = false;
-    this.dom.jsonFeedback.textContent = message;
-    this.dom.jsonFeedback.classList.toggle('is-error', isError);
-  }
-
-  setEditorStatus(msg) {
-    if (this.dom.editorStatusLine) {
-      this.dom.editorStatusLine.textContent = msg;
-    }
-    this.syncCatalogHighlight();
-  }
-
-  showToast(message) {
-    this.dom.toastBanner.textContent = message;
-    this.dom.toastBanner.hidden = false;
-    if (this.toastTimeout) {
-      clearTimeout(this.toastTimeout);
-    }
-    this.toastTimeout = setTimeout(() => {
-      this.dom.toastBanner.hidden = true;
-    }, 2800);
-  }
+  /* ---------------------------------------------------------------- *
+   * Progress persistence
+   *
+   * `jellometry_best_times_v1` is deliberately untouched so personal bests
+   * recorded before the campaign existed still count.
+   * ---------------------------------------------------------------- */
 
   loadBestTimes() {
     try {
       const raw = localStorage.getItem(STORAGE_BEST_TIMES_KEY);
-      return raw ? JSON.parse(raw) : {};
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
     } catch {
       return {};
     }
@@ -1019,34 +748,205 @@ class JellometryGame {
     try {
       localStorage.setItem(STORAGE_BEST_TIMES_KEY, JSON.stringify(this.bestTimes));
     } catch {
-      // Ignore storage quota errors in private browsing.
+      // Private mode: personal bests stay in memory for this session.
     }
   }
 
+  loadProgress() {
+    this.unlockAll = /[?&]unlockAll=1/.test(window.location.search);
+
+    try {
+      const raw = localStorage.getItem(STORAGE_PROGRESS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Number.isFinite(parsed.unlocked)) {
+          return {
+            unlocked: clamp(Math.floor(parsed.unlocked), 1, LEVELS.length),
+            lastPlayed: typeof parsed.lastPlayed === 'string' ? parsed.lastPlayed : null
+          };
+        }
+      }
+    } catch {
+      // Fall through to the migration below.
+    }
+
+    // One-time migration: a recorded time on course N implies course N + 1 was
+    // already reachable, so veteran saves keep their run.
+    let unlocked = 1;
+    LEVELS.forEach((level, index) => {
+      if (this.bestTimes[level.id]) unlocked = Math.max(unlocked, index + 2);
+    });
+    return { unlocked: clamp(unlocked, 1, LEVELS.length), lastPlayed: null };
+  }
+
+  saveProgress() {
+    try {
+      localStorage.setItem(
+        STORAGE_PROGRESS_KEY,
+        JSON.stringify({
+          version: 1,
+          unlocked: this.progress.unlocked,
+          lastPlayed: this.progress.lastPlayed
+        })
+      );
+    } catch {
+      // Private mode: progression silently resets next session.
+    }
+  }
+
+  saveLastPlayed() {
+    const id = this.currentLevel?.id;
+    if (!id || this.progress.lastPlayed === id) return;
+    this.progress.lastPlayed = id;
+    this.saveProgress();
+  }
+
+  unlockedCount() {
+    if (this.unlockAll) return LEVELS.length;
+    return clamp(this.progress.unlocked, 1, LEVELS.length);
+  }
+
+  resolveStartingLevelIndex() {
+    const count = this.unlockedCount();
+    const lastIndex = LEVELS.findIndex((level) => level.id === this.progress.lastPlayed);
+    if (lastIndex >= 0 && lastIndex < count) return lastIndex;
+    return clamp(count - 1, 0, LEVELS.length - 1);
+  }
+
+  /* ---------------------------------------------------------------- *
+   * HUD
+   * ---------------------------------------------------------------- */
+
+  updateLevelChip() {
+    const level = this.currentLevel;
+    if (!level) return;
+    this.dom.hudLevelIndex.textContent = String(this.levelIndex + 1).padStart(2, '0');
+    this.dom.hudLevelName.textContent = level.name;
+  }
+
   updateBestTimeDisplay() {
-    const best = this.bestTimes[this.currentPresetId];
+    const best = this.bestTimes[this.currentLevel?.id];
     this.dom.hudBest.textContent = best ? this.formatTime(best) : '--:--.--';
   }
 
-  formatTime(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    const hundredths = Math.floor((seconds % 1) * 100);
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
+  showToast(message) {
+    if (!this.dom.toast) return;
+    this.dom.toast.textContent = message;
+    this.dom.toast.hidden = false;
+    window.clearTimeout(this.toastTimeout);
+    this.toastTimeout = window.setTimeout(() => {
+      this.dom.toast.hidden = true;
+    }, 3200);
   }
+
+  showLevelIntro(level) {
+    const best = this.bestTimes[level.id];
+    this.dom.levelIntroIndex.textContent = `COURSE ${String(this.levelIndex + 1).padStart(2, '0')}`;
+    this.dom.levelIntroName.textContent = level.name;
+    const stars = '\u2605'.repeat(level.difficulty) + '\u2606'.repeat(5 - level.difficulty);
+    this.dom.levelIntroDiff.textContent = stars;
+    this.dom.levelIntroDiff.setAttribute('aria-label', `Difficulty ${level.difficulty} of 5`);
+    this.dom.levelIntroObjective.textContent = level.objective;
+    this.dom.levelIntroRecord.hidden = !best;
+    if (best) this.dom.levelIntroRecord.textContent = `YOUR RECORD ${this.formatTime(best)}`;
+
+    this.dom.levelIntro.hidden = false;
+    window.clearTimeout(this.introTimeout);
+    this.introTimeout = window.setTimeout(() => {
+      this.dom.levelIntro.hidden = true;
+    }, 5200);
+  }
+
+  formatTime(seconds) {
+    if (!Number.isFinite(seconds)) return '--:--.--';
+    const total = Math.max(0, seconds);
+    const minutes = Math.floor(total / 60);
+    const secs = Math.floor(total % 60);
+    const hundredths = Math.floor((total * 100) % 100);
+    return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(
+      hundredths
+    ).padStart(2, '0')}`;
+  }
+
+  updateHUD(dt) {
+    this.hudAccumulator += dt;
+    if (this.hudAccumulator < HUD_REFRESH_INTERVAL) return;
+    this.hudAccumulator = 0;
+
+    const timeText = this.formatTime(this.raceTime);
+    if (this.hudCache.time !== timeText) {
+      this.dom.hudTimer.textContent = timeText;
+      this.hudCache.time = timeText;
+    }
+
+    const speedText = `${this.player.getSpeed().toFixed(1)} m/s`;
+    if (this.hudCache.speed !== speedText) {
+      this.dom.hudSpeed.textContent = speedText;
+      this.hudCache.speed = speedText;
+    }
+
+    const dims = this.player.currentDims;
+    const volume = dims.x * dims.y * dims.z;
+    const dimsText = `${dims.x.toFixed(2)}W x ${dims.y.toFixed(2)}H x ${dims.z.toFixed(
+      2
+    )}D (${volume.toFixed(2)}m\u00B3)`;
+    if (this.hudCache.dims !== dimsText) {
+      this.dom.hudMorphDims.textContent = dimsText;
+      this.hudCache.dims = dimsText;
+    }
+
+    const morphName = this.player.getMorphProfileName();
+    if (this.hudCache.morphName !== morphName) {
+      this.dom.hudMorphName.textContent = morphName;
+      this.hudCache.morphName = morphName;
+    }
+
+    const sliderValue = this.player.morphValue;
+    if (Math.abs((this.hudCache.slider ?? 99) - sliderValue) > 0.02) {
+      this.hudCache.slider = sliderValue;
+      this.dom.morphSlider.value = String(sliderValue.toFixed(2));
+      this.syncTouchMorphButtons();
+    }
+  }
+
+  /**
+   * Mobile safety valve: once the rolling average frame time blows the budget,
+   * drop the pixel ratio (and shadows on desktop) exactly once.
+   */
+  checkAdaptiveQuality(dt) {
+    if (this.qualityDegraded) return;
+
+    this.frameSamples.push(dt * 1000);
+    if (this.frameSamples.length < PERF_SAMPLE_SIZE) return;
+
+    const average = this.frameSamples.reduce((sum, value) => sum + value, 0) / this.frameSamples.length;
+    this.frameSamples.length = 0;
+    if (average <= PERF_BUDGET_MS) return;
+
+    this.qualityDegraded = true;
+    this.renderer.setPixelRatio(this.targetPixelRatio());
+    this.viewportWidth = null;
+    this.applyViewportSize();
+    this.renderer.shadowMap.enabled = false;
+    if (this.dirLight) this.dirLight.castShadow = false;
+    this.showToast('Performance mode on: resolution reduced to keep the frame rate smooth.');
+  }
+
+  /* ---------------------------------------------------------------- *
+   * Frame loop
+   * ---------------------------------------------------------------- */
 
   updatePlayCamera(dt) {
     const playerPos = this.player.rootGroup.position;
     const speed = this.player.getSpeed();
 
-    // Hor+ compensation keeps the full 7m track width visible on portrait (9:16) smartphone screens.
+    // Hor+ compensation keeps the full track width visible on a portrait phone.
     const aspect = this.camera.aspect || 1;
     const portraitRatio = aspect < 1 ? 1 - aspect : 0;
     const portraitFovBoost = portraitRatio * 18;
     const camHeight = 4.4 + portraitRatio * 1.8;
     const camDistZ = 8.6 + portraitRatio * 5.2;
 
-    // Boost FOV dynamically when accelerating or launching off slime pads.
     const targetFov = THREE.MathUtils.clamp(
       58 + portraitFovBoost + Math.max(0, speed - 3) * 1.35,
       58,
@@ -1062,74 +962,44 @@ class JellometryGame {
       playerPos.y + camHeight,
       playerPos.z + camDistZ
     );
-    const posBlend = 1 - Math.exp(-8.5 * dt);
-    this.camera.position.lerp(desiredPos, posBlend);
+    this.camera.position.lerp(desiredPos, 1 - Math.exp(-8.5 * dt));
 
-    const desiredLook = new THREE.Vector3(
-      playerPos.x * 0.85,
-      playerPos.y + 0.8,
-      playerPos.z - 5.2
-    );
+    const desiredLook = new THREE.Vector3(playerPos.x * 0.85, playerPos.y + 0.8, playerPos.z - 5.2);
     this.cameraLookTarget.lerp(desiredLook, 1 - Math.exp(-12 * dt));
     this.camera.lookAt(this.cameraLookTarget);
 
-    // Keep directional shadow frustum centered around the player along the course.
     this.dirLight.position.set(playerPos.x + 18, playerPos.y + 34, playerPos.z + 22);
     this.dirLight.target.position.copy(playerPos);
     this.dirLight.target.updateMatrixWorld();
-  }
-
-  updateHUD() {
-    this.dom.hudTimer.textContent = this.formatTime(this.raceTime);
-    const speed = this.player.getSpeed();
-    this.dom.hudSpeed.textContent = `${speed.toFixed(1)} m/s`;
-
-    const dims = this.player.currentDims;
-    const vol = dims.x * dims.y * dims.z;
-    this.dom.hudMorphName.textContent = this.player.getMorphProfileName();
-    this.dom.hudMorphDims.textContent = `${dims.x.toFixed(2)}W x ${dims.y.toFixed(2)}H x ${dims.z.toFixed(2)}D (${vol.toFixed(2)}m³)`;
-
-    if (this.player.keys.morphFlat || this.player.keys.morphTall) {
-      this.dom.morphSlider.value = String(this.player.morphValue.toFixed(2));
-      this.syncTouchMorphButtons();
-    }
   }
 
   animate() {
     requestAnimationFrame(this.animate);
 
     const dt = Math.min(this.clock.getDelta(), 0.05);
-    const isPlay = this.mode === 'PLAY_MODE';
+    const simulating = this.dom.levelModal.hidden && this.dom.victoryModal.hidden;
 
-    if (isPlay) {
-      if (!this.raceCompleted) {
-        this.raceTime += dt;
-      }
+    if (simulating) {
+      if (!this.raceCompleted) this.raceTime += dt;
+
       this.physicsWorld.step(dt);
       this.player.update(dt, !this.raceCompleted);
       this.factory.updateVisuals(dt, this.player, !this.raceCompleted);
 
-      // Out-of-bounds respawn rule when the jelly falls below Y = -10.
-      if (this.player.body.position.y < -10) {
-        this.particles.emitDroplets(
-          this.player.rootGroup.position,
-          this.player.getPalette().hex,
-          18
-        );
+      if (this.player.body.position.y < FALL_LIMIT_Y) {
+        this.particles.emitDroplets(this.player.rootGroup.position, this.player.getPalette().hex, 18);
         this.player.respawn(true);
         this.dom.morphSlider.value = '0';
-        this.showToast('Splash! Respawned at last activated checkpoint.');
+        this.syncTouchMorphButtons();
+        this.showToast('Splash! Back to the last checkpoint.');
       }
 
-      this.updatePlayCamera(dt);
-      this.updateHUD();
-    } else {
-      this.player.update(dt, false);
-      this.factory.updateVisuals(dt, this.player, false);
-      this.editor.update();
+      this.updateHUD(dt);
+      this.checkAdaptiveQuality(dt);
     }
 
-    this.particles.update(dt);
+    this.updatePlayCamera(dt);
+    this.particles.update(simulating ? dt : 0);
     this.renderer.render(this.scene, this.camera);
   }
 }
