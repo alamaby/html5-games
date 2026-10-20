@@ -6,9 +6,29 @@ import { ParticleSystem } from './core/ParticleSystem.js';
 import { JellyPlayer, JELLY_PALETTES } from './entities/JellyPlayer.js';
 import { ObstacleFactory } from './entities/ObstacleFactory.js';
 import { LEVELS } from './entities/PresetLevels.js';
+import { generateCourse } from './core/LevelGenerator.js';
+import {
+  normalizeOptions,
+  decodeOptions,
+  encodeOptions,
+  randomSeedName,
+  isDifficultyReachable,
+  difficultyFor,
+  lengthFor,
+  DIFFICULTIES,
+  LENGTHS,
+  CHECKPOINTS,
+  HAZARDS,
+  PALETTES
+} from './core/CourseOptions.js';
 
 const STORAGE_BEST_TIMES_KEY = 'jellometry_best_times_v1';
 const STORAGE_PROGRESS_KEY = 'jellometry_progress_v1';
+const STORAGE_RANDOM_BESTS_KEY = 'jellometry_random_bests_v1';
+const RANDOM_BEST_LIMIT = 50;
+
+/** Query params that describe a random course, removed when a campaign run loads. */
+const COURSE_URL_PARAMS = ['course', 'diff', 'len', 'haz', 'cp', 'pal'];
 
 // DOM writes are the cheapest thing to cut on a phone: the hundredths column
 // reads fine at 16 Hz and the frame budget stays free.
@@ -29,8 +49,14 @@ class JellometryGame {
     this.raceTime = 0;
     this.raceCompleted = false;
     this.bestTimes = this.loadBestTimes();
+    this.randomBests = this.loadRandomBests();
     this.progress = this.loadProgress();
-    this.levelIndex = this.resolveStartingLevelIndex();
+
+    this.initialRandomOptions = decodeOptions(window.location.search);
+    this.currentCourse = null;
+    this.randomOptions = null;
+    this.randomPreviewTimer = null;
+    this.activeTab = 'campaign';
 
     this.toastTimeout = null;
     this.introTimeout = null;
@@ -61,11 +87,16 @@ class JellometryGame {
 
     this.initUI();
     this.bindGameplayControls();
-    this.loadLevel(this.levelIndex, { announce: false, focusModal: false });
+    this.loadStartingCourse();
 
     this.clock = new THREE.Clock();
     this.animate = this.animate.bind(this);
     requestAnimationFrame(this.animate);
+  }
+
+  /** The level currently loaded, whichever mode produced it. */
+  get currentLevel() {
+    return this.currentCourse?.level ?? null;
   }
 
   /* ---------------------------------------------------------------- *
@@ -211,8 +242,23 @@ class JellometryGame {
       victoryTime: $('victory-time'),
       victoryBest: $('victory-best'),
       btnVictoryNext: $('btn-victory-next'),
+      btnVictoryNewSeed: $('btn-victory-newseed'),
       btnVictoryReplay: $('btn-victory-replay'),
       btnVictoryLevels: $('btn-victory-levels'),
+      tabCampaign: $('tab-campaign'),
+      tabRandom: $('tab-random'),
+      panelCampaign: $('panel-campaign'),
+      panelRandom: $('panel-random'),
+      randomSeed: $('random-seed'),
+      btnRandomDice: $('btn-random-dice'),
+      randomMetrics: $('random-metrics'),
+      randomDifficulty: $('random-difficulty'),
+      randomLength: $('random-length'),
+      randomCheckpoints: $('random-checkpoints'),
+      randomPalette: $('random-palette'),
+      randomHazards: $('random-hazards'),
+      btnRandomPlay: $('btn-random-play'),
+      btnRandomCopy: $('btn-random-copy'),
       morphSlider: $('morph-slider'),
       btnMorphFlat: $('btn-morph-flat'),
       btnMorphTall: $('btn-morph-tall'),
@@ -226,6 +272,7 @@ class JellometryGame {
     };
 
     this.bindLevelSelectUI();
+    this.bindRandomPanel();
     this.bindMobileActionUI();
     this.syncColorUI();
     this.syncMuteUI();
@@ -253,13 +300,22 @@ class JellometryGame {
     });
 
     this.dom.btnVictoryNext.addEventListener('click', () => {
-      const next = this.levelIndex + 1;
+      if (this.currentCourse?.kind !== 'campaign') return;
+      const next = this.currentCourse.index + 1;
       this.hideVictoryModal();
-      if (next < LEVELS.length) this.loadLevel(next);
+      if (next < LEVELS.length) this.loadCampaignLevel(next);
     });
     this.dom.btnVictoryReplay.addEventListener('click', () => {
+      const course = this.currentCourse;
+      if (!course) return;
       this.hideVictoryModal();
-      this.loadLevel(this.levelIndex, { announce: false });
+      if (course.kind === 'random') this.loadRandomCourse(course.options, { announce: false });
+      else this.loadCampaignLevel(course.index, { announce: false });
+    });
+    this.dom.btnVictoryNewSeed.addEventListener('click', () => {
+      const options = normalizeOptions({ ...(this.currentCourse?.options ?? {}), seed: randomSeedName() });
+      this.hideVictoryModal();
+      this.loadRandomCourse(options);
     });
     this.dom.btnVictoryLevels.addEventListener('click', () => {
       this.hideVictoryModal();
@@ -271,7 +327,12 @@ class JellometryGame {
     this.modalReturnFocus = document.activeElement;
     this.renderLevelGrid();
     this.dom.levelModal.hidden = false;
-    this.dom.levelGrid.querySelector('.level-card.is-current:not(:disabled)')?.focus();
+    if (this.activeTab === 'random') this.updateRandomPreview();
+    const target =
+      this.activeTab === 'random'
+        ? this.dom.tabRandom
+        : this.dom.levelGrid.querySelector('.level-card.is-current:not(:disabled)');
+    target?.focus();
   }
 
   closeLevelModal() {
@@ -296,7 +357,9 @@ class JellometryGame {
       card.type = 'button';
       card.className = 'level-card';
       card.dataset.levelIndex = String(index);
-      if (index === this.levelIndex) card.classList.add('is-current');
+      if (this.currentCourse?.kind === 'campaign' && index === this.currentCourse.index) {
+        card.classList.add('is-current');
+      }
       if (!unlocked) {
         card.classList.add('is-locked');
         card.disabled = true;
@@ -329,10 +392,281 @@ class JellometryGame {
 
       card.addEventListener('click', () => {
         this.closeLevelModal();
-        this.loadLevel(index);
+        this.loadCampaignLevel(index);
       });
       grid.appendChild(card);
     });
+  }
+
+  /* --- random course panel ----------------------------------------- */
+
+  buildSegmented(container, items, { selected, isUnavailable, onSelect, multi = false }) {
+    container.innerHTML = '';
+    const buttons = [];
+
+    const refresh = () => {
+      buttons.forEach((button, index) => {
+        const active = multi ? selected(index) : index === selected();
+        if (multi) button.setAttribute('aria-pressed', String(active));
+        else {
+          button.setAttribute('aria-checked', String(active));
+          button.tabIndex = active ? 0 : -1;
+        }
+        button.classList.toggle('is-unavailable', Boolean(isUnavailable?.(index)));
+      });
+    };
+
+    items.forEach((item, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = item.label;
+      if (!multi) button.setAttribute('role', 'radio');
+
+      button.addEventListener('click', () => {
+        onSelect(index);
+        refresh();
+      });
+
+      if (!multi) {
+        // Roving tabindex: arrows move the selection, matching a native radio group.
+        button.addEventListener('keydown', (event) => {
+          const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+          if (!step) return;
+          const next = (selected() + step + items.length) % items.length;
+          onSelect(next);
+          refresh();
+          buttons[next]?.focus();
+          event.preventDefault();
+        });
+      }
+
+      buttons.push(button);
+      container.appendChild(button);
+    });
+
+    refresh();
+    return { buttons, refresh };
+  }
+
+  bindRandomPanel() {
+    this.randomTabs = { campaign: this.dom.tabCampaign, random: this.dom.tabRandom };
+    this.randomPanels = { campaign: this.dom.panelCampaign, random: this.dom.panelRandom };
+
+    for (const [name, tab] of Object.entries(this.randomTabs)) {
+      tab.addEventListener('click', () => this.selectCourseTab(name));
+      tab.addEventListener('keydown', (event) => {
+        if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+        const names = Object.keys(this.randomTabs);
+        const index = names.indexOf(name);
+        const next =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? names.length - 1
+              : (index + (event.key === 'ArrowRight' ? 1 : -1) + names.length) % names.length;
+        this.selectCourseTab(names[next], { focusTab: true });
+        event.preventDefault();
+      });
+    }
+
+    this.randomOptions = this.initialRandomOptions ?? normalizeOptions({ seed: randomSeedName() });
+
+    this.dom.randomSeed.value = this.randomOptions.seed;
+    this.dom.randomSeed.addEventListener('input', () => {
+      const typed = this.dom.randomSeed.value;
+      this.randomOptions = normalizeOptions({ ...this.randomOptions, seed: typed });
+      this.scheduleRandomPreview(this.dom.randomSeed.value.trim() ? null : 'Type a seed to generate a course.');
+    });
+    this.dom.randomSeed.addEventListener('blur', () => {
+      // Snap the field back to the canonical seed (trimmed, length-capped) so the
+      // text always matches the course that will actually be generated.
+      const wasEmpty = !this.dom.randomSeed.value.trim();
+      this.randomOptions = normalizeOptions(this.randomOptions);
+      this.dom.randomSeed.value = this.randomOptions.seed;
+      // An empty field leaves the preview showing its error and Play disabled.
+      // Once the canonical seed is back in the box, that course has to appear.
+      if (wasEmpty) this.scheduleRandomPreview();
+    });
+
+    this.dom.btnRandomDice.addEventListener('click', () => {
+      this.randomOptions = normalizeOptions({ ...this.randomOptions, seed: randomSeedName() });
+      this.dom.randomSeed.value = this.randomOptions.seed;
+      this.scheduleRandomPreview();
+    });
+
+    this.randomDifficultyControl = this.buildSegmented(this.dom.randomDifficulty, DIFFICULTIES, {
+      selected: () => this.randomOptions.difficulty,
+      isUnavailable: (index) =>
+        !isDifficultyReachable(index, {
+          ...this.randomOptions,
+          difficulty: index
+        }),
+      onSelect: (index) => {
+        this.randomOptions = normalizeOptions({ ...this.randomOptions, difficulty: index });
+        this.scheduleRandomPreview();
+      }
+    });
+
+    this.randomLengthControl = this.buildSegmented(this.dom.randomLength, LENGTHS, {
+      selected: () => this.randomOptions.length,
+      onSelect: (index) => {
+        this.randomOptions = normalizeOptions({ ...this.randomOptions, length: index });
+        this.scheduleRandomPreview();
+      }
+    });
+
+    this.randomCheckpointControl = this.buildSegmented(this.dom.randomCheckpoints, CHECKPOINTS, {
+      selected: () => this.randomOptions.checkpoints,
+      onSelect: (index) => {
+        this.randomOptions = normalizeOptions({ ...this.randomOptions, checkpoints: index });
+        this.scheduleRandomPreview();
+      }
+    });
+
+    this.randomPaletteControl = this.buildSegmented(this.dom.randomPalette, PALETTES, {
+      selected: () => this.randomOptions.palette,
+      onSelect: (index) => {
+        this.randomOptions = normalizeOptions({ ...this.randomOptions, palette: index });
+        this.scheduleRandomPreview();
+      }
+    });
+
+    this.randomHazardControl = this.buildSegmented(this.dom.randomHazards, HAZARDS, {
+      multi: true,
+      selected: (index) => Boolean(this.randomOptions.hazards[HAZARDS[index].key]),
+      onSelect: (index) => {
+        const key = HAZARDS[index].key;
+        this.randomOptions = normalizeOptions({
+          ...this.randomOptions,
+          hazards: { ...this.randomOptions.hazards, [key]: !this.randomOptions.hazards[key] }
+        });
+        this.randomDifficultyControl.refresh();
+        this.scheduleRandomPreview();
+      }
+    });
+
+    this.dom.btnRandomPlay.addEventListener('click', () => this.playRandomCourse());
+    this.dom.btnRandomCopy.addEventListener('click', () => this.copyRandomLink());
+
+    this.selectCourseTab('campaign');
+    this.updateRandomPreview();
+  }
+
+  selectCourseTab(name, { focusTab = false, preview = true } = {}) {
+    this.activeTab = name;
+    for (const [key, tab] of Object.entries(this.randomTabs)) {
+      const active = key === name;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+    }
+    for (const [key, panel] of Object.entries(this.randomPanels)) {
+      panel.hidden = key !== name;
+    }
+    if (name === 'campaign') this.renderLevelGrid();
+    // Regenerating here would duplicate the work `syncRandomPanel` just did on
+    // load, and a worst-case attempt loop is long enough to be a visible hitch.
+    else if (preview) this.updateRandomPreview();
+    if (focusTab) this.randomTabs[name]?.focus();
+  }
+
+  scheduleRandomPreview(message = null) {
+    window.clearTimeout(this.randomPreviewTimer);
+    if (message) {
+      this.dom.btnRandomPlay.disabled = true;
+      this.dom.randomMetrics.className = 'random-metrics is-error';
+      this.dom.randomMetrics.textContent = message;
+      return;
+    }
+    this.randomPreviewTimer = window.setTimeout(() => this.updateRandomPreview(), 120);
+  }
+
+  updateRandomPreview() {
+    const options = normalizeOptions(this.randomOptions);
+    const difficulty = difficultyFor(options);
+    const length = lengthFor(options);
+    const reachable = isDifficultyReachable(options.difficulty, options);
+    const result = generateCourse(options);
+
+    if (!result) {
+      this.dom.btnRandomPlay.disabled = true;
+      this.dom.randomMetrics.className = 'random-metrics is-error';
+      this.dom.randomMetrics.textContent =
+        'No valid course for these settings. Try another seed or lower the difficulty.';
+      return;
+    }
+
+    this.dom.btnRandomPlay.disabled = false;
+
+    const m = result.metrics;
+    const density = m.threat / Math.max(1, m.length);
+    const summary = [
+      `${m.length} m`,
+      difficulty.label,
+      length.label,
+      `${m.checkpoints} checkpoint${m.checkpoints === 1 ? '' : 's'}`,
+      `${m.sweepers} sweeper${m.sweepers === 1 ? '' : 's'}`,
+      `${m.gates} gate${m.gates === 1 ? '' : 's'}`,
+      `${m.platforms} bridge${m.platforms === 1 ? '' : 's'}`,
+      `threat ${density.toFixed(3)}/m`
+    ].join(' \u00B7 ');
+
+    let note = '';
+    if (!reachable) {
+      note = ` These hazards top out below ${difficulty.label}, so the course lands easier than requested.`;
+    } else if (!result.inBand) {
+      note = ` Closest match to ${difficulty.label} (${difficulty.density[0]}\u2013${difficulty.density[1]}/m).`;
+    }
+
+    this.dom.randomMetrics.className = `random-metrics${note ? ' is-warning' : ''}`;
+    this.dom.randomMetrics.textContent = `${summary}.${note}`;
+
+    this.randomDifficultyControl.refresh();
+  }
+
+  playRandomCourse() {
+    const options = normalizeOptions(this.randomOptions);
+    if (!this.loadRandomCourse(options)) return;
+    this.closeLevelModal();
+  }
+
+  copyRandomLink() {
+    const url = new URL(window.location.href);
+    // Replace the whole query: a share link should carry the six course params
+    // and nothing else, so it cannot smuggle the sender's `unlockAll=1` into
+    // someone else's session.
+    url.search = encodeOptions(normalizeOptions(this.randomOptions));
+    const link = url.toString();
+    const onCopied = () => {
+      this.dom.btnRandomCopy.textContent = 'Copied';
+      window.setTimeout(() => {
+        this.dom.btnRandomCopy.textContent = 'Copy Link';
+      }, 1600);
+    };
+    const onFailed = () => {
+      this.dom.btnRandomCopy.textContent = 'Copy failed';
+      window.setTimeout(() => {
+        this.dom.btnRandomCopy.textContent = 'Copy Link';
+      }, 1600);
+    };
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(link).then(onCopied, onFailed);
+    } else {
+      onFailed();
+    }
+  }
+
+  syncRandomPanel() {
+    if (!this.randomOptions) return;
+    this.randomOptions = normalizeOptions(this.randomOptions);
+    this.dom.randomSeed.value = this.randomOptions.seed;
+    this.randomDifficultyControl?.refresh();
+    this.randomLengthControl?.refresh();
+    this.randomCheckpointControl?.refresh();
+    this.randomPaletteControl?.refresh();
+    this.randomHazardControl?.refresh();
+    this.updateRandomPreview();
   }
 
   /* --- mobile action cluster & colour/audio toggles ---------------- */
@@ -424,9 +758,8 @@ class JellometryGame {
 
   bindGameplayControls() {
     window.addEventListener('keydown', (event) => {
-      const tag = document.activeElement?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-
+      // Escape is handled before the typing guard: a seed field must not trap
+      // the player inside the dialog.
       if (event.key === 'Escape') {
         if (!this.dom.levelModal.hidden) {
           this.closeLevelModal();
@@ -438,7 +771,13 @@ class JellometryGame {
         return;
       }
 
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
       if (event.code === 'KeyL') {
+        // The victory dialog owns the screen. Opening Course Select behind it
+        // would move focus into a panel the player cannot see.
+        if (!this.dom.victoryModal.hidden) return;
         if (this.dom.levelModal.hidden) this.openLevelModal();
         else this.closeLevelModal();
         return;
@@ -451,9 +790,15 @@ class JellometryGame {
       // Freeze the jelly while a dialog owns the screen.
       if (!this.dom.levelModal.hidden || !this.dom.victoryModal.hidden) {
         if (event.code === 'Enter' && !this.dom.victoryModal.hidden) {
-          this.dom.btnVictoryNext.hidden
-            ? this.dom.btnVictoryReplay.click()
-            : this.dom.btnVictoryNext.click();
+          // A focused button already activates on Enter; only synthesize a
+          // click when focus sits outside the dialog.
+          const active = document.activeElement;
+          if (active && active.tagName === 'BUTTON' && this.dom.victoryModal.contains(active)) {
+            return;
+          }
+          if (!this.dom.btnVictoryNext.hidden) this.dom.btnVictoryNext.click();
+          else if (!this.dom.btnVictoryNewSeed.hidden) this.dom.btnVictoryNewSeed.click();
+          else this.dom.btnVictoryReplay.click();
         }
         return;
       }
@@ -636,18 +981,95 @@ class JellometryGame {
    * Course lifecycle
    * ---------------------------------------------------------------- */
 
-  loadLevel(index, { announce = true } = {}) {
-    const nextIndex = clamp(Math.round(index), 0, LEVELS.length - 1);
-    this.levelIndex = nextIndex;
-    this.currentLevel = LEVELS[nextIndex];
+  loadStartingCourse() {
+    if (this.initialRandomOptions) {
+      if (this.loadRandomCourse(this.initialRandomOptions, { announce: false })) return;
+      // A link that cannot be generated falls back to the campaign rather than
+      // leaving the player on an empty track.
+      this.showToast('That course link could not be generated. Loading the campaign.');
+    }
+    this.loadCampaignLevel(this.resolveStartingLevelIndex(), { announce: false });
+  }
 
-    this.factory.loadLevel(this.currentLevel);
+  loadCampaignLevel(index, { announce = true } = {}) {
+    const nextIndex = clamp(Math.round(index), 0, LEVELS.length - 1);
+    this.currentCourse = {
+      kind: 'campaign',
+      index: nextIndex,
+      id: LEVELS[nextIndex].id,
+      level: LEVELS[nextIndex]
+    };
+    this.applyCourse({ announce });
+  }
+
+  loadRandomCourse(rawOptions, { announce = true } = {}) {
+    const options = normalizeOptions(rawOptions);
+    const generated = generateCourse(options);
+    if (!generated) {
+      this.showToast('Could not build that course. Try a different seed.');
+      return false;
+    }
+
+    this.currentCourse = {
+      kind: 'random',
+      id: generated.id,
+      level: generated.level,
+      options,
+      metrics: generated.metrics,
+      inBand: generated.inBand,
+      reachable: generated.reachable
+    };
+    // Keep the form showing the course that is actually loaded, so reopening
+    // Course Select never lies about what the player is racing.
+    this.randomOptions = options;
+    this.syncRandomPanel();
+    this.applyCourse({ announce });
+    return true;
+  }
+
+  applyCourse({ announce = true } = {}) {
+    const course = this.currentCourse;
+    if (!course) return;
+    this.factory.loadLevel(course.level);
     this.restartRace();
     this.updateLevelChip();
     this.updateBestTimeDisplay();
-    this.saveLastPlayed();
+    if (course.kind === 'campaign') this.saveLastPlayed();
+    // Course Select should open on the tab matching the run in progress.
+    if (course.kind === 'random' && this.activeTab !== 'random') {
+      this.selectCourseTab('random', { preview: false });
+    }
+    this.syncCourseParamsToUrl(course);
+    if (announce) this.showLevelIntro(course.level);
+  }
 
-    if (announce) this.showLevelIntro(this.currentLevel);
+  /**
+   * Keep the address bar in step with the loaded course.
+   *
+   * Without this, opening a shared `?course=` link and then picking a campaign
+   * level leaves the stale params in the URL, so a refresh would silently drop
+   * the player back into the old random course. `replaceState` (not `pushState`)
+   * keeps the back button out of it, and unrelated params such as `unlockAll`
+   * are preserved.
+   */
+  syncCourseParamsToUrl(course) {
+    try {
+      const url = new URL(window.location.href);
+      if (course.kind === 'random') {
+        const params = new URLSearchParams(encodeOptions(course.options));
+        for (const [key, value] of params) url.searchParams.set(key, value);
+      } else {
+        const hadCourse = url.searchParams.has('course');
+        if (!hadCourse) return;
+        for (const key of COURSE_URL_PARAMS) url.searchParams.delete(key);
+      }
+
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (next !== current) window.history.replaceState(null, '', next);
+    } catch {
+      // No History API (or a sandboxed frame): the link simply stays as it is.
+    }
   }
 
   restartRace() {
@@ -679,7 +1101,13 @@ class JellometryGame {
     if (this.raceCompleted) return;
     this.raceCompleted = true;
 
+    if (this.currentCourse?.kind === 'random') {
+      this.handleRandomVictory(this.currentCourse);
+      return;
+    }
+
     const level = this.currentLevel;
+    const course = this.currentCourse;
     const previousBest = this.bestTimes[level.id];
     const isRecord = !previousBest || this.raceTime < previousBest;
     if (isRecord) {
@@ -687,10 +1115,10 @@ class JellometryGame {
       this.saveBestTimes();
     }
 
-    const isFinal = this.levelIndex >= LEVELS.length - 1;
+    const isFinal = course.index >= LEVELS.length - 1;
     let unlockedNewCourse = false;
-    if (!isFinal && this.progress.unlocked < this.levelIndex + 2) {
-      this.progress.unlocked = this.levelIndex + 2;
+    if (!isFinal && this.progress.unlocked < course.index + 2) {
+      this.progress.unlocked = course.index + 2;
       this.saveProgress();
       unlockedNewCourse = true;
     }
@@ -698,7 +1126,7 @@ class JellometryGame {
     this.updateLevelChip();
     this.updateBestTimeDisplay();
 
-    const courseNumber = String(this.levelIndex + 1).padStart(2, '0');
+    const courseNumber = String(course.index + 1).padStart(2, '0');
     this.dom.victoryEyebrow.textContent = isFinal
       ? `FINAL COURSE ${courseNumber} CLEARED`
       : `COURSE ${courseNumber} COMPLETE`;
@@ -706,20 +1134,51 @@ class JellometryGame {
     this.dom.victorySummary.textContent = isFinal
       ? `All ${LEVELS.length} courses cleared. That is every hazard in the game, beaten.`
       : unlockedNewCourse
-        ? `Course ${String(this.levelIndex + 2).padStart(2, '0')} unlocked.`
+        ? `Course ${String(course.index + 2).padStart(2, '0')} unlocked.`
         : 'You guided the jelly all the way to the finish arch.';
     this.dom.victoryRecord.hidden = !isRecord;
+    this.dom.victoryRecord.textContent = 'NEW COURSE RECORD';
     this.dom.victoryTime.textContent = this.formatTime(this.raceTime);
     this.dom.victoryBest.textContent = this.formatTime(this.bestTimes[level.id]);
 
-    const nextLevel = LEVELS[this.levelIndex + 1];
+    const nextLevel = LEVELS[course.index + 1];
     this.dom.btnVictoryNext.hidden = !nextLevel;
+    this.dom.btnVictoryNewSeed.hidden = true;
+    this.dom.btnVictoryReplay.textContent = 'Race Again';
     if (nextLevel) this.dom.btnVictoryNext.textContent = `Next: ${nextLevel.name}`;
 
     this.sound.playVictory?.();
     this.dom.victoryModal.hidden = false;
     const focusTarget = nextLevel ? this.dom.btnVictoryNext : this.dom.btnVictoryReplay;
     focusTarget.focus?.();
+  }
+
+  handleRandomVictory(course) {
+    const { isRecord, best } = this.recordRandomBest(course);
+    this.updateLevelChip();
+    this.updateBestTimeDisplay();
+
+    const metrics = course.metrics;
+    const density = metrics ? metrics.threat / Math.max(1, metrics.length) : 0;
+
+    this.dom.victoryEyebrow.textContent = 'RANDOM COURSE CLEARED';
+    this.dom.victoryTitle.textContent = course.level.name;
+    this.dom.victorySummary.textContent =
+      `${lengthFor(course.options).label} \u00B7 ${difficultyFor(course.options).label} \u00B7 ` +
+      `${metrics?.length ?? 0} m \u00B7 threat ${density.toFixed(3)}/m. ` +
+      'Random courses never advance the campaign.';
+    this.dom.victoryRecord.hidden = !isRecord;
+    this.dom.victoryRecord.textContent = 'NEW RANDOM RECORD';
+    this.dom.victoryTime.textContent = this.formatTime(this.raceTime);
+    this.dom.victoryBest.textContent = this.formatTime(best);
+
+    this.dom.btnVictoryNext.hidden = true;
+    this.dom.btnVictoryNewSeed.hidden = false;
+    this.dom.btnVictoryReplay.textContent = 'Race Again';
+
+    this.sound.playVictory?.();
+    this.dom.victoryModal.hidden = false;
+    this.dom.btnVictoryNewSeed.focus?.();
   }
 
   hideVictoryModal() {
@@ -750,6 +1209,59 @@ class JellometryGame {
     } catch {
       // Private mode: personal bests stay in memory for this session.
     }
+  }
+
+  /**
+   * Random-course bests live under their own key so `jellometry_best_times_v1`
+   * keeps meaning "campaign", and so a generated course disappearing from the
+   * campaign list can never look like a deleted record.
+   */
+  loadRandomBests() {
+    try {
+      const raw = localStorage.getItem(STORAGE_RANDOM_BESTS_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const valid = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        if (!value || !Number.isFinite(value.time)) continue;
+        valid[key] = value;
+      }
+      return valid;
+    } catch {
+      return {};
+    }
+  }
+
+  saveRandomBests() {
+    try {
+      // Least-recently-recorded entries fall off first, so the key cannot grow
+      // without bound on a phone that never clears storage.
+      const entries = Object.entries(this.randomBests).sort(
+        (a, b) => (b[1].at ?? 0) - (a[1].at ?? 0)
+      );
+      if (entries.length > RANDOM_BEST_LIMIT) {
+        this.randomBests = Object.fromEntries(entries.slice(0, RANDOM_BEST_LIMIT));
+      }
+      localStorage.setItem(STORAGE_RANDOM_BESTS_KEY, JSON.stringify(this.randomBests));
+    } catch {
+      // Private mode: random bests stay in memory for this session.
+    }
+  }
+
+  recordRandomBest(course) {
+    const existing = this.randomBests[course.id];
+    const isRecord = !existing || this.raceTime < existing.time;
+    if (isRecord) {
+      this.randomBests[course.id] = {
+        time: this.raceTime,
+        name: course.level.name,
+        options: course.options,
+        at: Date.now()
+      };
+      this.saveRandomBests();
+    }
+    return { isRecord, best: this.randomBests[course.id]?.time };
   }
 
   loadProgress() {
@@ -818,14 +1330,20 @@ class JellometryGame {
    * ---------------------------------------------------------------- */
 
   updateLevelChip() {
-    const level = this.currentLevel;
-    if (!level) return;
-    this.dom.hudLevelIndex.textContent = String(this.levelIndex + 1).padStart(2, '0');
-    this.dom.hudLevelName.textContent = level.name;
+    const course = this.currentCourse;
+    if (!course) return;
+    this.dom.hudLevelIndex.textContent =
+      course.kind === 'random' ? 'RND' : String(course.index + 1).padStart(2, '0');
+    this.dom.hudLevelName.textContent = course.level.name;
   }
 
   updateBestTimeDisplay() {
-    const best = this.bestTimes[this.currentLevel?.id];
+    const course = this.currentCourse;
+    const best = !course
+      ? undefined
+      : course.kind === 'random'
+        ? this.randomBests[course.id]?.time
+        : this.bestTimes[course.level.id];
     this.dom.hudBest.textContent = best ? this.formatTime(best) : '--:--.--';
   }
 
@@ -840,8 +1358,13 @@ class JellometryGame {
   }
 
   showLevelIntro(level) {
-    const best = this.bestTimes[level.id];
-    this.dom.levelIntroIndex.textContent = `COURSE ${String(this.levelIndex + 1).padStart(2, '0')}`;
+    const course = this.currentCourse;
+    const isRandom = course?.kind === 'random';
+    const best = isRandom ? this.randomBests[course.id]?.time : this.bestTimes[level.id];
+
+    this.dom.levelIntroIndex.textContent = isRandom
+      ? `RANDOM \u00B7 ${difficultyFor(course.options).label.toUpperCase()}`
+      : `COURSE ${String(course.index + 1).padStart(2, '0')}`;
     this.dom.levelIntroName.textContent = level.name;
     const stars = '\u2605'.repeat(level.difficulty) + '\u2606'.repeat(5 - level.difficulty);
     this.dom.levelIntroDiff.textContent = stars;

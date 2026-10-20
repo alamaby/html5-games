@@ -34,6 +34,7 @@ Ten hand-authored courses, six obstacle types, a morph mechanic that changes you
 - [The morph mechanic](#the-morph-mechanic)
 - [Controls](#controls)
 - [The ten courses](#the-ten-courses)
+- [Random courses](#random-courses)
 - [Obstacle vocabulary](#obstacle-vocabulary)
 - [Progression and saved data](#progression-and-saved-data)
 - [Getting started](#getting-started)
@@ -60,6 +61,7 @@ Everything is generated at runtime: textures are drawn to canvases, sound is syn
 - **Volume-preserving morph** across a continuous range, not three fixed states — the slider is analogue, the keyboard/touch presets are shortcuts.
 - **Six obstacle types** composed into ten layouts: track blocks (including ramps), spinning sweepers, moving platforms on three axes, slime bounce pads, shape gates, and checkpoint/finish arches.
 - **Checkpoint respawn** — falling off sends you back to the last arch you touched, not to the start.
+- **Seeded random courses** — a six-control generator in Course Select that builds a validated course from a text seed, and a shareable link that reproduces it exactly.
 - **Per-course personal bests** with a "new record" badge on the victory screen.
 - **Mobile-first input** — a floating thumbstick that recentres onto your thumb, and a morph/JUMP cluster sized for a right thumb. Desktop gets keyboard and mouse wheel.
 - **Runs from source.** No bundler required for the live demo; `vite build` is optional.
@@ -151,6 +153,92 @@ What each course is actually testing:
 
 Course 1 and course 6 keep the `beginner_bounce` and `morph_madness` ids from the two-course version of the game, so existing personal bests still resolve.
 
+## Random courses
+
+Course Select has two tabs: **Campaign** and **Random**. The Random tab builds a fresh course from six controls and plays it immediately. It uses the same six obstacle types as the campaign — the difference is that [`src/core/LevelGenerator.js`](src/core/LevelGenerator.js) assembles them from a seed instead of a human writing them down.
+
+| Control | Options | What it actually does |
+|---|---|---|
+| **Seed** | free text, or 🎲 | The seed *becomes* the course name (`misty-otter-42` → *Misty Otter 42*). Same seed plus same settings produces the same course on any device, so a seed is a share code. |
+| **Difficulty** | Chill / Normal / Spicy / Brutal | Sets a target **threat per metre**, not an absolute threat score, so a 65 m course is judged on the same scale as a 150 m one. |
+| **Length** | Short 65–85 m / Medium 95–115 m / Long 125–150 m | A budget. The finished course lands wherever the layout ends, typically inside the range. |
+| **Checkpoints** | Minimal / Normal / Generous → 1 / 2 / 3 | Never zero: the validator requires at least one, so the option cannot produce an unfair course. |
+| **Hazards** | Sweepers / Gates / Bridges / Pads | Any combination. Families the target difficulty cannot reach are marked before you press play. |
+| **Palette** | four schemes | Recolours decks and gate trims. It never changes layout, so a palette swap cannot invalidate a best time. |
+
+A preview line under the controls reports the real length, hazard counts and measured threat density. It turns amber when the requested difficulty sits outside what the selected hazards can reach, or when even the closest course misses the band.
+
+### Sharing a course
+
+`Copy Link` copies a URL like:
+
+```
+?course=misty-otter-42&diff=2&len=1&haz=1111&cp=1&pal=0
+```
+
+`course` is the seed; `diff`, `len`, `cp` and `pal` are indices into the option tables; `haz` is a four-bit mask in sweepers/gates/bridges/pads order. Opening that link loads the identical course. Unknown or partial values fall back to defaults rather than failing, so a hand-edited URL still opens something playable.
+
+The address bar is kept in step with whatever is loaded: generating a course writes those six params, and switching to a campaign level removes them. Unrelated params such as `unlockAll=1` are preserved, and `replaceState` is used so the back button never walks through old seeds.
+
+### Why difficulty is a band, not a slider
+
+The campaign's own density runs from `0.053` to `0.138` threat per metre. Random difficulties are bands laid over that same measured range:
+
+| Difficulty | Target density | Reached by |
+|---|---|---|
+| Chill | `0.044–0.070 /m` | Any family. |
+| Normal | `0.064–0.099 /m` | Sweepers, gates or bridges; pads alone top out too low. |
+| Spicy | `0.088–0.122 /m` | Sweepers, bridges at high counts. |
+| Brutal | `0.106–0.156 /m` | Sweepers, effectively mandatory. |
+
+The bands overlap on purpose: hazard counts are integers, so the gap between "one more sweeper" and "one fewer" can be wider than a band.
+
+Per-family ceilings are **measured** by seed sweep, not assumed:
+
+| Family | Sustained max density |
+|---|---|
+| Sweepers | `~0.148 /m` |
+| Bridges | `~0.090 /m` |
+| Gates | `~0.079 /m` |
+| Pads | `~0.060 /m` |
+
+A pad costs 30–40 m of deck for `0.25` threat, so pads-only is legitimately a Chill experience. The UI says so instead of quietly generating a course that misses the band.
+
+### How an attempt is built
+
+1. Plan a hazard sequence from the target length and difficulty, then add ~22% filler segments so the rhythm is not metronomic.
+2. Build decks, hazards, checkpoints and the finish, tracking the running course length.
+3. Validate the result with the **same** `validateLevel()` the campaign uses.
+4. Accept only if there are zero hard problems, at most two warnings, and the measured density lands in the requested band.
+
+A course gets up to 120 attempts. Each attempt is seeded from `hash(optionsKey + ':' + attempt)` and sweeps hazard density, so a retry searches the budget instead of only rolling the dice again. The first attempt that validates **and** lands in the band wins. If none lands in the band, the closest valid course is returned and the preview says so; only a run where nothing validates returns `null`, which disables the button — it never falls back to an unvalidated course.
+
+### What random mode never does
+
+- It never writes to `jellometry_progress_v1`.
+- It never unlocks a campaign course.
+- The victory screen offers **New Seed**, not **Next Course**.
+- Best times live under a separate key and are capped (see [Progression and saved data](#progression-and-saved-data)).
+
+Checkpoints and the finish ride on ordinary hazard decks rather than dedicated rest decks. A rest deck would cost 8–11 m of zero-threat runway, which caps how dense a short course can be.
+
+### v1 is straight-only
+
+Random courses always run toward −Z with every obstacle at `x = 0`. Turning is designed for but deliberately not shipped:
+
+- Curved tracks are not shipped, but the layout is expressed as an ordered run of decks along −Z where each deck knows its `z` range and top height. That is enough to re-project the whole layout through a heading curve later, so bending can be a post-process rather than a rewrite.
+- The validator is one-dimensional — it projects onto `z` and ignores `x` entirely. A curved course could not be validated until that is rewritten to work in arc length.
+
+Shipping turning now would mean both untested code and unverifiable courses in one change. Splitting them keeps every generated course provable.
+
+### Checking the generator
+
+```bash
+node scripts/fuzz-generator.mjs --seeds 500
+```
+
+This runs 500 seeds × 4 difficulties × 3 lengths, builds every course, and pushes it through the validator. The run fails on any invalid course, missing band, over-budget length, unbuildable settings, broken hazard toggle, or wrong checkpoint count. It also tests the reachability claims: if the UI says Brutal is reachable with gates only, the fuzz has to actually reach that band. Two further assertions guard behaviour the validator cannot see: a palette swap must leave geometry and the course id untouched (only colours may change), and no checkpoint arch may sit within 2.9 m of a sweeper or gate.
+
 ## Obstacle vocabulary
 
 All ten courses are built from six types. No new obstacle code was added for the campaign — the later courses simply switch on parameters the original two courses never used.
@@ -168,16 +256,19 @@ Gate walls are always at least 4.0 m proud of the deck, above the 3.31 m jump ap
 
 ## Progression and saved data
 
-Two `localStorage` keys, both versioned by suffix:
+Three `localStorage` keys, all versioned by suffix:
 
 | Key | Contents |
 |---|---|
 | `jellometry_best_times_v1` | Map of course `id` → best time in seconds. Unchanged since the two-course version. |
 | `jellometry_progress_v1` | `{ version: 1, unlocked, lastPlayed }` |
+| `jellometry_random_bests_v1` | Map of generated course `id` (`rnd_<8hex>`) → `{ time, name, options, at }`. |
+
+Random bests are capped at **50 entries**; when the cap is hit, the least recently recorded entry is evicted first. Keeping them in their own key means a generated course falling out of that cap can never look like a deleted campaign record — and campaign code never has to distinguish the two.
 
 On first load with no progress key, the game **migrates** from the best-times map: a recorded time on course *N* implies course *N + 1* was already reachable, so a returning player keeps their unlocked range.
 
-Clearing a course unlocks the next one and records the time if it beats the previous best. All storage access is wrapped in `try`/`catch` — in private browsing the game degrades to session-only progress rather than throwing.
+Clearing a campaign course unlocks the next one and records the time if it beats the previous best. Clearing a random course records a time only in `jellometry_random_bests_v1` and leaves progression untouched. All storage access is wrapped in `try`/`catch` — in private browsing the game degrades to session-only progress rather than throwing.
 
 ### Unlocking everything for testing
 
@@ -253,7 +344,11 @@ jellometry/
 │   ├── core/
 │   │   ├── PhysicsWorld.js     cannon-es world, gravity, contact materials, preStep dispatch
 │   │   ├── ParticleSystem.js   Splash / confetti droplets
-│   │   └── ProceduralTextures.js  Canvas-generated track, slime, hazard and checkered textures
+│   │   ├── ProceduralTextures.js  Canvas-generated track, slime, hazard and checkered textures
+│   │   ├── Rng.js              Seeded PRNG (xmur3 + mulberry32) and stable id hashing
+│   │   ├── CourseOptions.js    Random-course options, URL codec, measured density bands
+│   │   ├── LevelValidator.js   Shared validator — no Three.js, runs in Node
+│   │   └── LevelGenerator.js   Seeded random-course builder
 │   │
 │   ├── entities/
 │   │   ├── JellyPlayer.js      Morph maths, soft-body deformation, movement, jump latch
@@ -268,6 +363,7 @@ jellometry/
 │
 ├── scripts/
 │   ├── validate-levels.mjs     Offline reachability + difficulty-curve validator
+│   ├── fuzz-generator.mjs      Random-course fuzz harness (6000 courses by default)
 │   └── strip-dead-css.mjs      One-off: removed the editor's CSS rules
 │
 ├── plans/                      Design and implementation plans
@@ -348,8 +444,10 @@ The `1.40×` ceiling exists because a single hazard is worth 1.2–2.2 points. W
 ## Known limitations
 
 - **The campaign has not been playtested by a human yet.** Every course passes geometric validation, but the difficulty weights are estimates. Expect one calibration pass after real play.
+- **Random courses are straight-only.** Turning is designed for but deferred: the layout is a run of decks with known `z` ranges, so a heading curve can be applied as a post-process — but the validator would need an arc-length rewrite before a curved course could be proven. See [v1 is straight-only](#v1-is-straight-only).
+- **Random difficulty bands are measured, not playtested.** The bands come from the campaign's own threat density plus a seed sweep per hazard family. They describe what the generator *builds*, not how hard it *feels*.
 - **Mobile layout has not been verified on a physical device.** Portrait and landscape breakpoints, notch insets, dialog scrolling and 120 Hz timing were reasoned from source, not observed on hardware. If you have a phone handy, that is the most useful thing you could test.
-- **No automated browser tests.** There is no CI. The two machine checks are `npm run build` and `node scripts/validate-levels.mjs`.
+- **No automated browser tests.** There is no CI. The three machine checks are `npm run build`, `node scripts/validate-levels.mjs` and `node scripts/fuzz-generator.mjs`.
 - **`src/editor/LevelEditor.js` is dead code.** The 3D level builder was removed from the game, but the class is still on disk. It is not imported anywhere, so it is tree-shaken out of the bundle. Deleting it is an open call.
 - **Three validator warnings are intentional.** They flag jumps where a full-sprint landing would overshoot the far edge — speed control is part of those challenges, and the warnings exist to show where that demand sits.
 - **No lives, no game over.** Falling respawns you at the last checkpoint and keeps the timer running. The game is a time trial, not a survival test.

@@ -4,6 +4,22 @@ import { ProceduralTextures } from '../core/ProceduralTextures.js';
 
 let nextObstacleCounter = 1;
 
+/** Material slots that may hold a texture the factory owns. */
+const TEXTURE_SLOTS = [
+  'map',
+  'alphaMap',
+  'aoMap',
+  'bumpMap',
+  'displacementMap',
+  'emissiveMap',
+  'envMap',
+  'lightMap',
+  'metalnessMap',
+  'normalMap',
+  'roughnessMap',
+  'specularMap'
+];
+
 export const OBSTACLE_CATALOG = [
   {
     type: 'track_block',
@@ -737,6 +753,36 @@ export class ObstacleFactory {
     }
   }
 
+  /**
+   * Release GPU memory for one obstacle.
+   *
+   * Geometry and materials in this factory are always built per obstacle, so
+   * they are safe to dispose. Textures are not: `getTrackTexture` and friends
+   * are cloned per obstacle (disposable), while `getHazardStripeTexture` and
+   * `getSlimePadTexture` hand out the cache entry itself (immortal). Disposing
+   * a cache entry turns every other mesh using it black, and that failure is
+   * only visible in a browser.
+   */
+  disposeGroup(root) {
+    root.traverse((object) => {
+      object.geometry?.dispose?.();
+
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : object.material
+          ? [object.material]
+          : [];
+
+      for (const material of materials) {
+        for (const key of TEXTURE_SLOTS) {
+          const texture = material[key];
+          if (texture && !ProceduralTextures.isShared(texture)) texture.dispose?.();
+        }
+        material.dispose?.();
+      }
+    });
+  }
+
   rebuildObstacle(obstacle, newParams = {}) {
     obstacle.params = { ...obstacle.params, ...newParams };
 
@@ -751,6 +797,7 @@ export class ObstacleFactory {
     while (obstacle.group.children.length > 0) {
       const child = obstacle.group.children[0];
       obstacle.group.remove(child);
+      this.disposeGroup(child);
     }
 
     this.buildObstacleInternals(obstacle);
@@ -765,6 +812,7 @@ export class ObstacleFactory {
       this.physicsWorld.removeBody(body);
     }
     this.scene.remove(obstacle.group);
+    this.disposeGroup(obstacle.group);
     this.obstacles.delete(id);
   }
 

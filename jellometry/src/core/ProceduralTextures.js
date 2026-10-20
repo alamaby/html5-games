@@ -3,6 +3,26 @@ import * as THREE from 'three';
 export class ProceduralTextures {
   static cache = new Map();
 
+  /**
+   * Textures that must never be disposed by a consumer.
+   *
+   * A WeakSet rather than a `userData` flag: `Texture.clone()` copies userData,
+   * so a clone would inherit a "shared" marker and leak instead of being freed.
+   * The clone is per-obstacle and disposable; only the cache entry is immortal.
+   */
+  static sharedTextures = new WeakSet();
+
+  static remember(key, texture) {
+    this.cache.set(key, texture);
+    this.sharedTextures.add(texture);
+    return texture;
+  }
+
+  /** True when `texture` is a cache entry and must not be disposed. */
+  static isShared(texture) {
+    return Boolean(texture) && this.sharedTextures.has(texture);
+  }
+
   static getStudioEnvironment() {
     if (this.cache.has('studio_env')) {
       return this.cache.get('studio_env');
@@ -36,8 +56,7 @@ export class ProceduralTextures {
     const texture = new THREE.CanvasTexture(canvas);
     texture.mapping = THREE.EquirectangularReflectionMapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    this.cache.set('studio_env', texture);
-    return texture;
+    return this.remember('studio_env', texture);
   }
 
   static getTrackTexture(primaryHex = '#e9eef7', secondaryHex = '#d5deec') {
@@ -65,8 +84,7 @@ export class ProceduralTextures {
     texture.wrapT = THREE.RepeatWrapping;
     texture.anisotropy = 4;
     texture.colorSpace = THREE.SRGBColorSpace;
-    this.cache.set(key, texture);
-    return texture;
+    return this.remember(key, texture);
   }
 
   static getSlimePadTexture(baseHex = '#2ec4b6') {
@@ -106,8 +124,7 @@ export class ProceduralTextures {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    this.cache.set(key, texture);
-    return texture;
+    return this.remember(key, texture);
   }
 
   static getHazardStripeTexture(stripeHex = '#ff9f1c', darkHex = '#1e2432') {
@@ -137,8 +154,7 @@ export class ProceduralTextures {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    this.cache.set(key, texture);
-    return texture;
+    return this.remember(key, texture);
   }
 
   static getCheckeredTexture() {
@@ -163,7 +179,6 @@ export class ProceduralTextures {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    this.cache.set('checkered_finish', texture);
-    return texture;
+    return this.remember('checkered_finish', texture);
   }
 }

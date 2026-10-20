@@ -174,7 +174,140 @@
             <h2 id="level-modal-title" class="modal-title">Select Course</h2>
             <p id="level-modal-progress" class="modal-subtitle">1 of 10 unlocked</p>
           </div>
-          <div id="level-grid" class="level-grid"></div>
+
+          <div class="modal-tabs" role="tablist" aria-label="Course source">
+            <button
+              id="tab-campaign"
+              type="button"
+              class="modal-tab is-active"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-campaign"
+              tabindex="0"
+            >
+              Campaign
+            </button>
+            <button
+              id="tab-random"
+              type="button"
+              class="modal-tab"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-random"
+              tabindex="-1"
+            >
+              Random
+            </button>
+          </div>
+
+          <div
+            id="panel-campaign"
+            class="modal-panel"
+            role="tabpanel"
+            aria-labelledby="tab-campaign"
+          >
+            <div id="level-grid" class="level-grid"></div>
+          </div>
+
+          <div
+            id="panel-random"
+            class="modal-panel"
+            role="tabpanel"
+            aria-labelledby="tab-random"
+            hidden
+          >
+            <div class="random-form">
+              <div class="field field-wide">
+                <label for="random-seed" class="field-label">Seed</label>
+                <div class="seed-row">
+                  <input
+                    id="random-seed"
+                    type="text"
+                    class="text-input"
+                    maxlength="40"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    aria-describedby="random-seed-hint"
+                  />
+                  <button
+                    id="btn-random-dice"
+                    type="button"
+                    class="btn btn-secondary btn-dice"
+                    aria-label="Roll a new seed"
+                    title="Roll a new seed"
+                  >
+                    &#127922;
+                  </button>
+                </div>
+                <span id="random-seed-hint" class="field-hint"
+                  >The seed names the course. Share the link to share the run.</span
+                >
+              </div>
+
+              <div class="field">
+                <span class="field-label" id="label-difficulty">Difficulty</span>
+                <div
+                  id="random-difficulty"
+                  class="segmented"
+                  role="radiogroup"
+                  aria-labelledby="label-difficulty"
+                ></div>
+              </div>
+
+              <div class="field">
+                <span class="field-label" id="label-length">Length</span>
+                <div
+                  id="random-length"
+                  class="segmented"
+                  role="radiogroup"
+                  aria-labelledby="label-length"
+                ></div>
+              </div>
+
+              <div class="field">
+                <span class="field-label" id="label-checkpoints">Checkpoints</span>
+                <div
+                  id="random-checkpoints"
+                  class="segmented"
+                  role="radiogroup"
+                  aria-labelledby="label-checkpoints"
+                ></div>
+              </div>
+
+              <div class="field">
+                <span class="field-label" id="label-palette">Palette</span>
+                <div
+                  id="random-palette"
+                  class="segmented"
+                  role="radiogroup"
+                  aria-labelledby="label-palette"
+                ></div>
+              </div>
+
+              <div class="field field-wide field-hazards">
+                <span class="field-label">Hazards</span>
+                <div
+                  id="random-hazards"
+                  class="segmented"
+                  role="group"
+                  aria-label="Hazard types"
+                ></div>
+              </div>
+
+              <p id="random-metrics" class="random-metrics" role="status" aria-live="polite"></p>
+
+              <div class="random-actions">
+                <button id="btn-random-play" type="button" class="btn btn-primary">
+                  Generate &amp; Play
+                </button>
+                <button id="btn-random-copy" type="button" class="btn btn-secondary">
+                  Copy Link
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div class="modal-actions">
             <button id="btn-level-close" type="button" class="btn btn-secondary">
               Close [ESC]
@@ -212,6 +345,9 @@
           <div class="modal-actions">
             <button id="btn-victory-next" type="button" class="btn btn-primary">
               Next Course
+            </button>
+            <button id="btn-victory-newseed" type="button" class="btn btn-primary" hidden>
+              New Seed
             </button>
             <button id="btn-victory-replay" type="button" class="btn btn-secondary">
               Race Again

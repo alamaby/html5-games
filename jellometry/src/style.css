@@ -191,6 +191,15 @@ select {
   background: var(--accent-coral-hover);
 }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn:disabled:active {
+  transform: none;
+}
+
 .btn-secondary {
   background: var(--bg-slate-800);
   color: var(--text-primary);
@@ -200,8 +209,6 @@ select {
 .btn-secondary:hover {
   background: var(--bg-slate-700);
 }
-
-.btn-secondary.is-active,
 
 /* Bottom Play Mode Bar */
 .play-controls-bar {
@@ -415,6 +422,181 @@ select {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   color: var(--text-muted);
+}
+
+/* Course Select tabs */
+.modal-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--bg-slate-800);
+  border: 1px solid var(--border-subtle);
+}
+
+.modal-tab {
+  flex: 1 1 0;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.modal-tab:hover {
+  color: var(--text-primary);
+}
+
+.modal-tab.is-active {
+  background: var(--bg-slate-700);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.modal-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Random course form */
+.random-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.field-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.field-hint {
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.seed-row {
+  display: flex;
+  gap: 6px;
+}
+
+.text-input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-slate-800);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+}
+
+.text-input:focus-visible {
+  outline: 2px solid var(--accent-lime);
+  outline-offset: 1px;
+}
+
+.btn-dice {
+  flex: 0 0 auto;
+  min-width: 48px;
+  min-height: 42px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.segmented button {
+  flex: 1 1 auto;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-slate-800);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented button:hover {
+  border-color: var(--accent-lime);
+  color: var(--text-primary);
+}
+
+.segmented button[aria-checked='true'],
+.segmented button[aria-pressed='true'] {
+  background: var(--accent-lime);
+  border-color: var(--accent-lime);
+  color: #141821;
+}
+
+.segmented button.is-unavailable {
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.random-metrics {
+  grid-column: 1 / -1;
+  min-height: 2.7em;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.random-metrics strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.random-metrics.is-warning {
+  color: var(--accent-gold);
+}
+
+.random-metrics.is-error {
+  color: var(--accent-coral);
+}
+
+.random-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+
+.random-actions .btn {
+  flex: 1 1 0;
 }
 
 .modal-title {
@@ -882,6 +1064,60 @@ body {
   .level-card-objective {
     display: none;
   }
+
+  /* The random form packs into three columns so a 390 px-tall landscape
+     viewport needs as little scroll as possible. */
+  .modal-levels {
+    width: min(720px, 100%);
+    padding: 14px;
+    gap: 10px;
+  }
+
+  .modal-tab {
+    min-height: 32px;
+    font-size: 0.78rem;
+  }
+
+  .random-form {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px 10px;
+  }
+
+  .field-hazards {
+    grid-column: span 2;
+  }
+
+  .field-hint {
+    display: none;
+  }
+
+  .segmented button,
+  .text-input,
+  .btn-dice {
+    min-height: 32px;
+    padding: 4px 8px;
+    font-size: 0.74rem;
+  }
+
+  .random-metrics {
+    min-height: 0;
+    font-size: 0.68rem;
+  }
+
+  /* On a 390 px-tall viewport the form is a few pixels taller than the screen.
+     Putting the buttons before the preview keeps Generate & Play above the
+     fold; the status line stays visible right below them. */
+  .random-actions {
+    order: 1;
+  }
+
+  .random-metrics {
+    order: 2;
+  }
+
+  .random-actions .btn {
+    min-height: 34px;
+  }
 }
 
 /* Compact Portrait Phone State */
@@ -930,6 +1166,14 @@ body {
 
   .level-card-objective {
     display: none;
+  }
+
+  .random-form {
+    grid-template-columns: 1fr;
+  }
+
+  .field-hazards {
+    grid-column: 1 / -1;
   }
 
   .victory-stats {
