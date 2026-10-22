@@ -210,3 +210,133 @@
 - **Fix:** `pollKeys()` sekarang memakai rumus yang sama persis seperti joystick
   (Up = arah pandang kamera). Diverifikasi headless dengan kamera sintetis:
   Up→camFwd, Right→camRight, Down→−camFwd. Tidak berdampak ke HP (joystick).
+
+---
+
+# FASE 3 — "Empire" (2026-10-22, BELUM di-push — menunggu approval user)
+
+## Yang dibangun
+1. **Hire Picker (§4.7)** — `PickerSys` (§20 game.js): maks 3 NPC, auto
+   selective-pick sederhana (hanya cherry state 3/matang, TANPA timing
+   minigame, 1 cherry per 0,55 dtk saat menempel di cluster), angkut maks 12,
+   lalu antar ke pad wash **zona panennya** dan tuang via
+   `WashSys.beginPourBatch()` — masuk antrean wash yang sama seperti pour
+   pemain (pemain tetap routing di fork; auto-route 2 dtk juga berlaku).
+   Quality batch picker selalu 100 (hanya memetik matang). Jalan terus saat
+   pemain idle (dipanggil dari Game.frame). Visual: 1 InstancedMesh kotak
+   bersama (3 picker × 6 bagian tubuh, warna baju beda per picker) =
+   **1 draw call total** untuk semua picker.
+2. **Upgrade modal (§5)** — `UpgradeSys` (§21): tombol ⬆ UPGRADES di HUD →
+   modal. Formula biaya WAJIB SPEC: `Math.floor(BaseCost * Math.pow(1.18, level))`.
+   Upgrade level (maks 5): Pick Speed, Basket Capacity, Dryer Speed, Drum
+   Stability, Channel Flow. Item khusus: Hire Picker (maks 3) + Zone Unlock
+   (harga tetap SPEC). Efek: pick cycle ×0,92^lvl; basket +8/lvl (40→80);
+   dryer ×0,85^lvl; channel flow ×0,88^lvl; zona hijau roast melebar
+   (150−3·lvl … 225+5·lvl → maks 135–250°C). **Level 0 = perilaku Fase 2
+   persis** untuk semua efek (regresi-safe).
+3. **Zona (§4.8)** — lihat keputusan desain di bawah. Harga karung mengikuti
+   zona asal biji: hopper DrySys sekarang per-zona (`hop[3]`), batch roast
+   diambil dari zona stok terbanyak ≥12 (`DrySys.takeBatch()`), harga =
+   `ZONES[batchZone].price` ($12/$20/$35). Isi keranjang dilacak per zona
+   (`BasketSys.byZone`), batch wash memakai zona mayoritas.
+4. **Offline earnings (§5)** — `OfflineSys` (§22): saat boot (SEBELUM save
+   pertama menimpa lastSave) hitung `(now − lastSave) × rate`, cap 8 jam.
+   Modal "selama kamu pergi" hanya muncul bila pergi ≥5 menit DAN hasil ≥$1.
+   Tombol COLLECT (1×) dan 2× COLLECT (mock ad overlay hitung mundur 3 dtk,
+   pola §6 — SDK asli tetap Fase 4, tidak dibangun).
+
+## Keputusan desain (yang terbesar: pewujudan zona)
+- **Zona = tiga ladang 4×4 berdampingan di satu map yang diperluas ke +x**
+  (pusat field x=0/38/76; clamp pemain x −13..89). Alasan: (a) tetap satu
+  dunia kontinu — pemain/picker cukup BERJALAN antar zona, tanpa loading/
+   gerbang/transisi; (b) semua sistem Fase 2 (satu drum roast, satu tumpukan
+   karung, satu truk) tetap dipakai bersama — yang digandakan hanya yang
+   diminta SPEC: **dermaga wash sendiri per zona**; (c) instancing membuat
+   biayanya nyaris nol: bush/cherry/rak digabung ke InstancedMesh yang sama
+   (48 bush/864 cherry tetap 4 draw call), visual statis 3 wash station
+   digabung jadi 8 IM bersama (base, air, bin, pad, gate, ring, foam, rak).
+  Per zona: tint daun beda (instanceColor foliage: hijau Arabika / hijau
+  terang Robusta / teal Liberika) + warna cherry matang beda (merah / oranye
+  / magenta tua) + marker siap-petik ikut tint zona. Zona terkunci: semak
+  kusam keabu-abuan, tanpa cherry, tidak bisa dipetik; membuka zona dari
+  modal mewarnai daun + menanam cherry seketika (`World.activateZone`).
+  Matahari sekarang mengikuti pemain (offset tetap) agar kotak shadow ±25
+  tetap hidup di zona 2/3. Ground/terasering/bukit diperlebar menutupi
+  ketiga zona. Drum roast tetap di zona 1 (sesuai SPEC yang menempatkan
+  unlock hanya pada ladang + wash dock).
+- **Picker menuang seperti pemain** (bukan langsung ke hopper): menjaga satu
+  jalur wash tunggal (tidak ada jalur pintas yang mengacaukan ekonomi
+  quality) dan pemain tetap berinteraksi dengan hasil picker di fork.
+  Pengecualian kecil: picker tidak memakai flyer (item wash diaktifkan
+  timer 0,07 dtk di WashSys) dan `endPour(false)` tidak mereset keranjang
+  pemain. Picker menunggu di pad bila wash sedang sibuk.
+- **BaseCost upgrade (keputusan tuning, SPEC tidak memberi angka)** —
+  patokan ekonomi: karung Arabika $12 (≈$15 match), Robusta $20, Liberika
+  $35; unlock zona $600/$3.000 (dari SPEC):
+  Pick Speed $50 · Basket Capacity $75 · Dryer Speed $60 · Drum Stability
+  $80 · Channel Flow $60 · Hire Picker $150 (→ $150/$177/$208 untuk picker
+  ke-1/2/3). Total menamatkan semua level ≈ $4.100 — terjangkau setelah
+  zona 2 terbuka, tetap terasa sebagai progresi. Biaya per level tumbuh
+  ×1,18 sesuai formula wajib.
+- **Rumus offline rate**: `picker × 0,20 karung/menit × harga karung zona
+  terbaik yang terbuka / 60` $/detik. 0,20 karung/menit ≈ laju picker di
+  dalam game yang disengaja dibuat konservatif (di game: 1 picker ≈ 36
+  cherry/60 dtk ≈ 0,6 batch wash/menit sebelum routing manual pemain —
+  offline tidak mengasumsikan routing pemain, jadi diambil jauh lebih
+  rendah). Tanpa picker = $0 (picker adalah mesin idle-nya).
+- **Kapasitas keranjang upgrade**: pool wash diperbesar 40 → 84
+  (`CFG.WASH_POOL`, ≥ basket maks 80 + margin), visual isi keranjang
+  dibangun 80 slot sejak awal; slot di atas kapasitas efektif tidak pernah
+  terisi karena `BasketSys.cap()` membatasi.
+
+## Hasil test headless (2026-10-22)
+- `node test-wash-pour.mjs` — **PASS** (regresi deadlock Fase 2; stub test
+  diperbarui minimal: World.stations + pulsePads; assertion tidak berubah).
+- `node test-fase3.mjs` (baru, 90+ assertion) — **ALL PASS**: formula biaya
+  persis untuk semua upgrade & level; efek upgrade (cap 40→80, cycle,
+  dry/flow time, green zone 150–225 → 135–250; lvl 0 = nilai Fase 2); alur
+  beli (potong cash, maks, dana kurang); **picker menghasilkan 20/20 cherry
+  tanpa pemain** (stub) dengan quality 100 zona asal; offline (4 jam =
+  $1.920 @ 2 picker Robusta, cap 8 jam bekerja, tanpa picker = 0,
+  collect(2) melipatgandakan); **save Fase 2 murni → load aman** (cash/
+  karung utuh, hopper lama bermigrasi ke zona 0, nilai rusak ter-clamp);
+  takeBatch memilih zona & harga $20/$35 dengan benar.
+- **Smoke integrasi**: boot game.js asli headless (WebGLRenderer palsu +
+  DOM stub), save berisi 1 picker + zona 2 terbuka, 60 detik frame loop
+  pemain idle penuh: picker memetik 36 cherry, 2+ batch ter-deliver, wash
+  auto-route jalan, 6 slot dryer aktif, 10 biji masuk hopper zona 0 —
+  rantai idle Fase 3 utuh end-to-end dengan sistem asli.
+- Paritas i18n: 59 kunci EN = 59 ID, semua `data-i18n` + kunci dinamis
+  modal terdaftar di dua bahasa. Semua 35 `getElementById` ada di
+  template.html & index.dev.html.
+- `python3 build_inline.py` OK (416 alias binding — `three_alias_consts()`
+  tidak disentuh), `node --check` pada module hasil ekstrak dist: OK.
+  File terbit 794 KB.
+
+## Draw calls (estimasi statis — tidak bisa diukur tanpa WebGL)
+Fase 2 ≈ 47. Fase 3: picker +1 (IM bersama), station visuals digabung
+(10 mesh zona 1 → 8 IM untuk 3 zona: −2 bersih), sisanya sama → estimasi
+idle ≈ 47–49, puncak (semua sistem aktif) < 55. Tetap di bawah batas 60,
+tapi **angka pastinya belum terverifikasi** — cek pill "calls" di HP saat
+playtest.
+
+## Deviasi / catatan
+- Gauge hijau pada panel roast masih statis di CSS (posisi Fase 2); zona
+  hijau LOGIKA melebar dengan Drum Stability dan jarum + angka °C adalah
+  acuan pastinya. Menyelaraskan gauge secara dinamis ditunda agar tidak
+  mengubah tampilan tervalidasi user tanpa playtest visual.
+- `CFG.SACK_PRICE` kini tidak dipakai (harga pindah ke `ZONES[].price`;
+  nilai zona 0 sama $12) — dipertahankan di CFG sebagai dokumentasi.
+- Picker tidak bersuara saat memetik (menghindari bunyi pluck berulang
+  saat pemain jauh); splash tetap bunyi saat picker menuang.
+- Save: field baru `upg{}`, `zones[3]`, `dryZones[3]` di kunci yang sama
+  `kh_save_v1` dengan default aman — save lama tidak kehilangan progres
+  (terverifikasi test #6).
+
+## Belum terverifikasi (tidak ada WebGL di VM ini)
+- Semua visual Fase 3: tampilan 3 zona & tint-nya, semak zona terkunci,
+  NPC picker berjalan, modal upgrade/offline di layar portrait HP,
+  matahari mengikuti pemain (bayangan zona 2/3), draw calls aktual.
+- Gameplay feel: laju picker vs laju pemain, ekonomi menuju unlock $600,
+  keterbacaan pill zona di HUD.
+- Menunggu playtest HP user seperti Fase 1/2. **Belum di-push.**

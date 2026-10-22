@@ -47,7 +47,10 @@ const Player = { pos: V3(11.1, 0, 9.1), basketCherries: { count: 40 },
 global.Player = Player;
 
 const World = { hutPos: V3(11.1, 0, 9.1),
-  hutPad: { scale: { set(){} }, material: { opacity: 0 } } };
+  hutPad: { scale: { set(){} }, material: { opacity: 0 } },
+  // Fase 3: HutSys memilih stasiun terdekat + pulsePads
+  stations: [{ zi: 0, padPos: V3(11.1, 0, 9.1) }],
+  pulsePads() {} };
 global.World = World;
 
 // Flyers stub: spawn sukses & arrival sinkron (simulasi flyer selesai instan)

@@ -17,8 +17,10 @@
     <div class="pill" id="pill-basket">&#x1F9FA; <span id="hud-basket">0/40</span></div>
     <div class="pill" id="pill-quality">&#x2B50; <span id="hud-quality">100</span></div>
     <div class="pill" id="pill-sacks">&#x1F333; <span id="hud-sacks">0</span></div>
+    <div class="pill" id="pill-zone">&#x1F33F; <span id="hud-zone">Arabika</span></div>
     <div class="spacer"></div>
     <div class="pill small"><span id="hud-fps">--</span> fps &middot; <span id="hud-calls">--</span> calls</div>
+    <button class="pill btn" id="btn-upgrades">&#x2B06; <span data-i18n="upgrades">UPGRADES</span></button>
     <button class="pill btn" id="btn-lang">ID</button>
   </div>
   <div id="hint" data-i18n="hint_start"></div>
@@ -55,6 +57,37 @@
   </div>
   <div id="firstcrack-banner"><span data-i18n="first_crack">FIRST CRACK!</span></div>
   <button id="btn-collect"><span data-i18n="collect">COLLECT</span> <span id="collect-val">$0</span></button>
+  <!-- Fase 3: modal upgrade -->
+  <div id="upgrade-modal" class="modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span data-i18n="upg_title">Empire Upgrades</span>
+        <span id="upg-cash">$0.00</span>
+      </div>
+      <div id="upg-list"></div>
+      <button id="btn-upg-close" class="modal-close"><span data-i18n="close">CLOSE</span></button>
+    </div>
+  </div>
+  <!-- Fase 3: modal offline earnings -->
+  <div id="offline-modal" class="modal">
+    <div class="modal-card">
+      <div class="modal-head"><span data-i18n="offline_title">While you were away</span></div>
+      <div class="offline-body">
+        <div class="offline-label" data-i18n="offline_earned">Your pickers earned</div>
+        <div id="offline-amt">$0.00</div>
+      </div>
+      <button id="btn-off-collect" class="modal-close"><span data-i18n="offline_collect">COLLECT</span></button>
+      <button id="btn-off-double" class="modal-alt"><span data-i18n="offline_double">2× COLLECT (AD)</span></button>
+    </div>
+  </div>
+  <!-- Fase 3: mock ad overlay (SDK asli Fase 4) -->
+  <div id="ad-overlay">
+    <div class="ad-box">
+      <div class="ad-tag" data-i18n="ad_mock">MOCK AD</div>
+      <div class="ad-text" data-i18n="ad_text">Ad playing…</div>
+      <div id="ad-count">3</div>
+    </div>
+  </div>
 </div>
 <!--INLINE:MODULE-->
 </body>

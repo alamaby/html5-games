@@ -36,7 +36,17 @@ const CFG = {
   UNDER_PENALTY: 0.8,     // penalti under-roasted
   SACKS_FOR_TRUCK: 8,     // karung -> truk datang
   FIRST_CRACK_TEMP: 196,  // °C momen first crack
+  WASH_POOL: 84,          // Fase 3: pool wash >= kapasitas keranjang maks (80) + margin
 };
+
+// --- Fase 3: zona / varietas (§4.8) ---
+// Ladang diperluas ke +x: tiga field 4x4, masing-masing dengan wash station sendiri.
+// price = $ dasar per karung; ripe/leaf = tint visual per zona.
+const ZONES = [
+  { name: 'Lower Terraces', variety: 'Arabika',  price: 12, xOff: 0,  leaf: 0x2E7D46, ripe: 0xE8452C, unlock: 0 },
+  { name: 'Upper Slopes',   variety: 'Robusta',  price: 20, xOff: 38, leaf: 0x4C9440, ripe: 0xF26B1D, unlock: 600 },
+  { name: 'Cloud Forest',   variety: 'Liberika', price: 35, xOff: 76, leaf: 0x1F6E5E, ripe: 0xA61E4D, unlock: 3000 },
+];
 
 const COL = {
   sky: 0xF6C87E, fog: 0xF2C078,
@@ -84,6 +94,20 @@ const STRINGS = {
     contaminated: 'Contaminated!',
     sacks: 'Sacks',
     order_light: 'Light', order_medium: 'Medium', order_dark: 'Dark',
+    // --- Fase 3 ---
+    upgrades: 'UPGRADES', upg_title: 'Empire Upgrades', close: 'CLOSE',
+    buy: 'BUY', max: 'MAX', lvl: 'Lv',
+    up_pickSpeed: 'Pick Speed', up_pickSpeed_d: 'Charge ring fills faster',
+    up_basketCap: 'Basket Capacity', up_basketCap_d: '+8 cherries per level',
+    up_dryerSpeed: 'Dryer Speed', up_dryerSpeed_d: 'Beans dry faster',
+    up_drumStability: 'Drum Stability', up_drumStability_d: 'Wider green heat zone',
+    up_channelFlow: 'Channel Flow', up_channelFlow_d: 'Cherries flow faster',
+    up_picker: 'Hire Picker', up_picker_d: 'Auto-picks ripe cherries for you',
+    zones_title: 'Zones', per_sack: '/sack', unlock: 'UNLOCK', owned: 'OWNED',
+    offline_title: 'While you were away',
+    offline_earned: 'Your pickers earned',
+    offline_collect: 'COLLECT', offline_double: '2× COLLECT (AD)',
+    ad_text: 'Ad playing…', ad_mock: 'MOCK AD',
   },
   id: {
     pick: 'PETIK', hint_start: 'Jalan ke semak kopi. Tahan PETIK, lepas di ring emas!',
@@ -108,6 +132,20 @@ const STRINGS = {
     contaminated: 'Terkontaminasi!',
     sacks: 'Karung',
     order_light: 'Light', order_medium: 'Medium', order_dark: 'Dark',
+    // --- Fase 3 ---
+    upgrades: 'UPGRADE', upg_title: 'Upgrade Empire', close: 'TUTUP',
+    buy: 'BELI', max: 'MAKS', lvl: 'Lv',
+    up_pickSpeed: 'Kecepatan Petik', up_pickSpeed_d: 'Ring charge lebih cepat penuh',
+    up_basketCap: 'Kapasitas Keranjang', up_basketCap_d: '+8 cherry per level',
+    up_dryerSpeed: 'Kecepatan Jemur', up_dryerSpeed_d: 'Biji lebih cepat kering',
+    up_drumStability: 'Stabilitas Drum', up_drumStability_d: 'Zona panas hijau lebih lebar',
+    up_channelFlow: 'Arus Channel', up_channelFlow_d: 'Cherry mengalir lebih cepat',
+    up_picker: 'Rekrut Picker', up_picker_d: 'Otomatis memetik cherry matang',
+    zones_title: 'Zona', per_sack: '/karung', unlock: 'BUKA', owned: 'DIMILIKI',
+    offline_title: 'Selama kamu pergi',
+    offline_earned: 'Picker kamu menghasilkan',
+    offline_collect: 'AMBIL', offline_double: '2× AMBIL (IKLAN)',
+    ad_text: 'Iklan diputar…', ad_mock: 'IKLAN MOCK',
   },
 };
 let lang = 'en';
@@ -123,7 +161,11 @@ function applyI18n() {
    ============================================================================ */
 const SaveSys = {
   data: { v: 1, cash: 0, lang: 'en', stats: { picked: 0, perfect: 0, strips: 0, sold: 0, bestQ: 0 },
-    sacks: 0, sackValue: 0, defect: 0, dryCount: 0, dryQSum: 0, lastSave: 0 },
+    sacks: 0, sackValue: 0, defect: 0, dryCount: 0, dryQSum: 0, lastSave: 0,
+    // Fase 3: level upgrade, zona terbuka, hopper per zona (default aman utk save lama)
+    upg: { pickSpeed: 0, basketCap: 0, dryerSpeed: 0, drumStability: 0, channelFlow: 0, picker: 0 },
+    zones: [true, false, false],
+    dryZones: [{ c: 0, q: 0 }, { c: 0, q: 0 }, { c: 0, q: 0 }] },
   load() {
     try {
       const raw = localStorage.getItem(CFG.SAVE_KEY);
@@ -140,6 +182,28 @@ const SaveSys = {
           this.data.dryCount = Math.max(0, Math.floor(+d.dryCount || 0));
           this.data.dryQSum = Math.max(0, +d.dryQSum || 0);
           this.data.lastSave = +d.lastSave || 0;
+          // Fase 3: upgrade (clamp ke rentang sah), zona, hopper per zona
+          const du = (d && d.upg) || {};
+          const clampLvl = (v, max) => Math.max(0, Math.min(max, Math.floor(+v || 0)));
+          this.data.upg = {
+            pickSpeed: clampLvl(du.pickSpeed, 5), basketCap: clampLvl(du.basketCap, 5),
+            dryerSpeed: clampLvl(du.dryerSpeed, 5), drumStability: clampLvl(du.drumStability, 5),
+            channelFlow: clampLvl(du.channelFlow, 5), picker: clampLvl(du.picker, 3),
+          };
+          const dz = Array.isArray(d.zones) ? d.zones : [];
+          this.data.zones = [true, !!dz[1], !!dz[2]];
+          const dzz = Array.isArray(d.dryZones) ? d.dryZones : [];
+          for (let i = 0; i < 3; i++) {
+            const e = dzz[i] || {};
+            this.data.dryZones[i] = {
+              c: Math.max(0, Math.floor(+e.c || 0)),
+              q: Math.max(0, +e.q || 0),
+            };
+          }
+          // save Fase 2 (tanpa dryZones) tapi punya stok hopper -> wariskan ke zona 0
+          if (!Array.isArray(d.dryZones) && this.data.dryCount > 0) {
+            this.data.dryZones[0] = { c: this.data.dryCount, q: this.data.dryQSum };
+          }
         }
       }
     } catch (e) { /* corrupted save -> mulai baru */ }
@@ -225,6 +289,12 @@ const AudioSys = {
     for (let i = 0; i < seq.length; i++) this._tone(seq[i], 0.16, 'triangle', 0.3, i * 0.09);
   },
   gate() { this._noise(0.08, 0.22, 900); this._tone(240, 0.1, 'square', 0.14, 0, 140); },
+  // --- Fase 3 ---
+  upgrade() {
+    // arpeggio naik cerah (beli upgrade / unlock zona)
+    const seq = [440, 587, 880, 1174];
+    for (let i = 0; i < seq.length; i++) this._tone(seq[i], 0.14, 'triangle', 0.3, i * 0.07);
+  },
   loadDrum() { this._tone(140, 0.3, 'sawtooth', 0.18, 0, 90); this._noise(0.25, 0.15, 500, 0.05); },
   // drum hum: osilator kontinu, pitch mengikuti panas
   hum: null,
@@ -293,6 +363,7 @@ const Engine = {
     sun.shadow.bias = -0.0008;
     this.scene.add(sun);
     this.scene.add(sun.target);
+    this.sun = sun;   // Fase 3: sun mengikuti pemain agar bayangan hidup di semua zona
 
     window.addEventListener('resize', () => this.onResize());
     this.onResize();
@@ -313,6 +384,13 @@ const Engine = {
     this.camera.position.lerp(_v1, k);
     this.camTarget.set(px, 1.0, pz);
     this.camera.lookAt(this.camTarget);
+    // sun + target mengikuti pemain (kotak shadow +-25 selalu di sekitar pemain,
+    // jadi zona 2/3 yang jauh di +x tetap dapat bayangan golden-hour)
+    if (this.sun) {
+      this.sun.position.set(px - 18, 14, pz + 8);
+      this.sun.target.position.set(px, 0, pz);
+      this.sun.target.updateMatrixWorld();
+    }
   },
 };
 // temp objects — dipakai ulang, tidak pernah new di loop
@@ -335,31 +413,32 @@ const World = {
   cherryIM: null,
   build() {
     const S = Engine.scene;
-    // --- tanah lapang ---
-    const ground = new Mesh(new PlaneGeometry(70, 70), stdMat(COL.terrace));
-    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+    // --- tanah lapang (Fase 3: diperlebar menutupi 3 zona, pusat x=38) ---
+    const ground = new Mesh(new PlaneGeometry(150, 76), stdMat(COL.terrace));
+    ground.rotation.x = -Math.PI / 2; ground.position.x = 38; ground.receiveShadow = true;
     S.add(ground);
 
-    // --- terasering latar (5 undak naik ke -z) ---
-    const terrGeo = new BoxGeometry(46, 1.15, 5);
+    // --- terasering latar (5 undak naik ke -z, membentang di semua zona) ---
+    const terrGeo = new BoxGeometry(140, 1.15, 5);
     const terrIM = new InstancedMesh(terrGeo, stdMat(COL.terrace), 6);
-    const edgeGeo = new BoxGeometry(46, 0.35, 0.5);
+    const edgeGeo = new BoxGeometry(140, 0.35, 0.5);
     const edgeIM = new InstancedMesh(edgeGeo, stdMat(COL.terraceEdge), 6);
     for (let i = 0; i < 6; i++) {
       const z = -15 - i * 5, y = 0.55 + i * 1.15;
-      _dummy.position.set(0, y, z); _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1);
+      _dummy.position.set(38, y, z); _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1);
       _dummy.updateMatrix(); terrIM.setMatrixAt(i, _dummy.matrix);
-      _dummy.position.set(0, y + 0.55, z + 2.5); _dummy.updateMatrix();
+      _dummy.position.set(38, y + 0.55, z + 2.5); _dummy.updateMatrix();
       edgeIM.setMatrixAt(i, _dummy.matrix);
     }
     terrIM.receiveShadow = true;
     S.add(terrIM); S.add(edgeIM);
 
-    // --- bukit jauh ---
+    // --- bukit jauh (tersebar di ketiga zona) ---
     const hillGeo = new IcosahedronGeometry(1, 1);
-    const hillIM = new InstancedMesh(hillGeo, stdMat(0x6FA05C), 4);
-    const hillPos = [[-30, -2, -42, 14], [5, -3, -48, 18], [32, -2, -40, 12], [-8, -4, -55, 22]];
-    for (let i = 0; i < 4; i++) {
+    const hillIM = new InstancedMesh(hillGeo, stdMat(0x6FA05C), 8);
+    const hillPos = [[-30, -2, -42, 14], [5, -3, -48, 18], [32, -2, -40, 12], [-8, -4, -55, 22],
+      [43, -3, -48, 18], [70, -2, -40, 12], [46, -4, -55, 22], [84, -2, -44, 16]];
+    for (let i = 0; i < hillPos.length; i++) {
       _dummy.position.set(hillPos[i][0], hillPos[i][1], hillPos[i][2]);
       _dummy.scale.set(hillPos[i][3], hillPos[i][3] * 0.45, hillPos[i][3] * 0.7);
       _dummy.rotation.set(0, i, 0); _dummy.updateMatrix();
@@ -372,22 +451,24 @@ const World = {
     this.buildReadyMarkers(S);
     this.buildGrass(S);
     this.buildHut(S);
-    this.buildWashStation(S);   // Fase 2
-    this.buildDryer(S);         // Fase 2
+    this.buildStations(S);      // Fase 3: wash station + dryer racks per zona
     this.buildDrum(S);          // Fase 2
   },
 
   buildBushes(S) {
-    const n = CFG.BUSH_ROWS * CFG.BUSH_COLS;                 // 16
+    // Fase 3: 3 zona x 16 bush = 48 bush / 864 cherry, tetap 4 draw call (IM bersama).
     const per = CFG.CLUSTERS_PER_BUSH, cp = CFG.CHERRIES_PER_CLUSTER;
-    // trunk + foliage + tanah: instanced (hemat draw call)
-    const trunkIM = new InstancedMesh(new CylinderGeometry(0.09, 0.13, 0.9, 6), stdMat(COL.trunk), n);
-    const folIM = new InstancedMesh(new IcosahedronGeometry(0.95, 0), stdMat(COL.leaf), n * 3);
-    const dirtIM = new InstancedMesh(new CircleGeometry(1.25, 10), stdMat(COL.soil), n);
+    const nBush = ZONES.length * CFG.BUSH_ROWS * CFG.BUSH_COLS;      // 48
+    const trunkIM = new InstancedMesh(new CylinderGeometry(0.09, 0.13, 0.9, 6), stdMat(COL.trunk), nBush);
+    // foliage: material putih + instanceColor per zona (tint daun beda tiap varietas)
+    const folIM = new InstancedMesh(new IcosahedronGeometry(0.95, 0),
+      new MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.68, metalness: 0.05, flatShading: true }), nBush * 3);
+    const dirtIM = new InstancedMesh(new CircleGeometry(1.25, 10), stdMat(COL.soil), nBush);
     trunkIM.castShadow = true; folIM.castShadow = true;
     dirtIM.frustumCulled = false;
+    this.folIM = folIM;
 
-    const totalCherries = n * per * cp;                       // 288
+    const totalCherries = nBush * per * cp;                          // 864
     const cherryIM = new InstancedMesh(
       new SphereGeometry(0.09, 6, 5),
       new MeshStandardMaterial({ roughness: 0.55, metalness: 0.05, flatShading: true }),
@@ -397,55 +478,86 @@ const World = {
     this.cherryIM = cherryIM;
 
     const gap = CFG.BUSH_GAP, off = (CFG.BUSH_ROWS - 1) * gap / 2;
+    const grey = new Color(0x8A8A7A);
     let bi = 0, ci = 0;
     const now = performance.now() / 1000;
-    for (let r = 0; r < CFG.BUSH_ROWS; r++) for (let c = 0; c < CFG.BUSH_COLS; c++) {
-      const x = c * gap - off, z = r * gap - off;
-      // tanah
-      _dummy.position.set(x, 0.02, z); _dummy.rotation.set(-Math.PI / 2, 0, 0);
-      _dummy.scale.set(1, 1, 1); _dummy.updateMatrix(); dirtIM.setMatrixAt(bi, _dummy.matrix);
-      // trunk
-      _dummy.position.set(x, 0.45, z); _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
-      trunkIM.setMatrixAt(bi, _dummy.matrix);
-      // foliage 3 blob
-      const blobs = [[0, 1.15, 0, 1.0], [0.45, 0.95, 0.25, 0.72], [-0.42, 0.98, -0.22, 0.78]];
-      for (let b = 0; b < 3; b++) {
-        _dummy.position.set(x + blobs[b][0], blobs[b][1], z + blobs[b][2]);
-        _dummy.scale.set(blobs[b][3], blobs[b][3] * 0.75, blobs[b][3]);
-        _dummy.rotation.set(0, bi + b, 0); _dummy.updateMatrix();
-        folIM.setMatrixAt(bi * 3 + b, _dummy.matrix);
-      }
-      // clusters
-      const bush = { pos: new Vector3(x, 0, z), clusters: [] };
-      const angles = [Math.PI / 2, Math.PI / 2 + 2.1, Math.PI / 2 + 4.2];
-      for (let k = 0; k < per; k++) {
-        const ax = x + Math.cos(angles[k]) * 0.62, az = z + Math.sin(angles[k]) * 0.62;
-        const ay = 1.05 + (k % 2) * 0.3;
-        const anchor = new Vector3(ax, ay, az);
-        const idxs = [];
-        for (let j = 0; j < cp; j++) {
-          const th = (j / cp) * Math.PI * 2 + k;
-          _v1.set(anchor.x + Math.cos(th) * 0.26, anchor.y + Math.sin(j * 2.3) * 0.2, anchor.z + Math.sin(th) * 0.26);
-          const cherry = { inst: ci, idx: this.cherries.length, state: 0, at: 0, pos: _v1.clone(), cluster: null };
-          this.cherries.push(cherry);
-          // state awal campuran agar langsung bisa dipetik
-          const roll = Math.random();
-          if (roll < 0.55) this._setState(cherry, 3, now + rand(30, 50));       // ripe -> over
-          else if (roll < 0.85) this._setState(cherry, 2, now + rand(10, 18));   // green -> ripe
-          else if (roll < 0.93) this._setState(cherry, 4, now + rand(15, 25));  // over -> drop
-          else this._setState(cherry, 1, now + rand(2, 6));                     // flower -> green
-          idxs.push(cherry.idx);
-          ci++;
+    for (let zi = 0; zi < ZONES.length; zi++) {
+      const unlocked = !!SaveSys.data.zones[zi];
+      const xOff = ZONES[zi].xOff;
+      for (let r = 0; r < CFG.BUSH_ROWS; r++) for (let c = 0; c < CFG.BUSH_COLS; c++) {
+        const x = c * gap - off + xOff, z = r * gap - off;
+        // tanah
+        _dummy.position.set(x, 0.02, z); _dummy.rotation.set(-Math.PI / 2, 0, 0);
+        _dummy.scale.set(1, 1, 1); _dummy.updateMatrix(); dirtIM.setMatrixAt(bi, _dummy.matrix);
+        // trunk
+        _dummy.position.set(x, 0.45, z); _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        trunkIM.setMatrixAt(bi, _dummy.matrix);
+        // foliage 3 blob (warna zona; zona terkunci = kusam keabu-abuan)
+        _color.set(ZONES[zi].leaf);
+        if (!unlocked) _color.lerp(grey, 0.62);
+        const blobs = [[0, 1.15, 0, 1.0], [0.45, 0.95, 0.25, 0.72], [-0.42, 0.98, -0.22, 0.78]];
+        for (let b = 0; b < 3; b++) {
+          _dummy.position.set(x + blobs[b][0], blobs[b][1], z + blobs[b][2]);
+          _dummy.scale.set(blobs[b][3], blobs[b][3] * 0.75, blobs[b][3]);
+          _dummy.rotation.set(0, bi + b, 0); _dummy.updateMatrix();
+          folIM.setMatrixAt(bi * 3 + b, _dummy.matrix);
+          folIM.setColorAt(bi * 3 + b, _color);
         }
-        const cluster = { anchor: anchor, cherryIdx: idxs, squash: 0 };
-        idxs.forEach(ii => { this.cherries[ii].cluster = cluster; });
-        bush.clusters.push(cluster);
+        // clusters
+        const bush = { pos: new Vector3(x, 0, z), clusters: [], zone: zi };
+        const angles = [Math.PI / 2, Math.PI / 2 + 2.1, Math.PI / 2 + 4.2];
+        for (let k = 0; k < per; k++) {
+          const ax = x + Math.cos(angles[k]) * 0.62, az = z + Math.sin(angles[k]) * 0.62;
+          const ay = 1.05 + (k % 2) * 0.3;
+          const anchor = new Vector3(ax, ay, az);
+          const idxs = [];
+          for (let j = 0; j < cp; j++) {
+            const th = (j / cp) * Math.PI * 2 + k;
+            _v1.set(anchor.x + Math.cos(th) * 0.26, anchor.y + Math.sin(j * 2.3) * 0.2, anchor.z + Math.sin(th) * 0.26);
+            const cherry = { inst: ci, idx: this.cherries.length, state: 0, at: 0, pos: _v1.clone(), cluster: null, zone: zi };
+            this.cherries.push(cherry);
+            idxs.push(cherry.idx);
+            ci++;
+          }
+          const cluster = { anchor: anchor, cherryIdx: idxs, squash: 0, zone: zi };
+          idxs.forEach(ii => { this.cherries[ii].cluster = cluster; });
+          bush.clusters.push(cluster);
+          if (unlocked) this._seedCluster(cluster, now);
+          else for (const ii of idxs) this._setState(this.cherries[ii], 0, 0); // terkunci: kosong
+        }
+        this.bushes.push(bush);
+        bi++;
       }
-      this.bushes.push(bush);
-      bi++;
     }
     cherryIM.instanceColor.needsUpdate = true;
+    if (folIM.instanceColor) folIM.instanceColor.needsUpdate = true;
     S.add(trunkIM); S.add(folIM); S.add(dirtIM); S.add(cherryIM);
+  },
+
+  // distribusi state awal cluster (juga dipakai saat zona dibuka)
+  _seedCluster(cluster, now) {
+    for (const ii of cluster.cherryIdx) {
+      const cherry = this.cherries[ii];
+      const roll = Math.random();
+      if (roll < 0.55) this._setState(cherry, 3, now + rand(30, 50));       // ripe -> over
+      else if (roll < 0.85) this._setState(cherry, 2, now + rand(10, 18));   // green -> ripe
+      else if (roll < 0.93) this._setState(cherry, 4, now + rand(15, 25));  // over -> drop
+      else this._setState(cherry, 1, now + rand(2, 6));                     // flower -> green
+    }
+  },
+
+  // zona dibuka dari modal upgrade: warnai daun + tanam cherry
+  activateZone(zi) {
+    const now = performance.now() / 1000;
+    _color.set(ZONES[zi].leaf);
+    for (let bi = 0; bi < this.bushes.length; bi++) {
+      const b = this.bushes[bi];
+      if (b.zone !== zi) continue;
+      for (let k = 0; k < 3; k++) this.folIM.setColorAt(bi * 3 + k, _color);
+      for (const cl of b.clusters) this._seedCluster(cl, now);
+    }
+    if (this.folIM.instanceColor) this.folIM.instanceColor.needsUpdate = true;
+    this.cherryIM.instanceColor.needsUpdate = true;
   },
 
   // state cherry: 0 gone, 1 flower, 2 green, 3 ripe, 4 over
@@ -454,7 +566,7 @@ const World = {
     const s = st === 1 ? 0.5 : st === 2 ? 0.75 : st === 0 ? 0.0001 : 1.0;
     _dummy.position.copy(ch.pos); _dummy.rotation.set(0, 0, 0); _dummy.scale.set(s, s, s);
     _dummy.updateMatrix(); this.cherryIM.setMatrixAt(ch.inst, _dummy.matrix);
-    _color.set(st === 1 ? COL.cherryFlower : st === 2 ? COL.cherryGreen : st === 3 ? COL.cherryRipe : st === 4 ? COL.cherryOver : 0x000000);
+    _color.set(st === 1 ? COL.cherryFlower : st === 2 ? COL.cherryGreen : st === 3 ? ZONES[ch.zone].ripe : st === 4 ? COL.cherryOver : 0x000000);
     this.cherryIM.setColorAt(ch.inst, _color);
     this.cherryIM.instanceMatrix.needsUpdate = true;
     this.cherryIM.instanceColor.needsUpdate = true;
@@ -493,7 +605,9 @@ const World = {
       _dummy.position.set(0, -10, 0); _dummy.scale.set(0.0001, 0.0001, 0.0001);
       _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
       this.readyIM.setMatrixAt(i, _dummy.matrix);
+      this.readyIM.setColorAt(i, _color.set(ZONES[this.bushes[i].zone].ripe));   // Fase 3: tint zona
     }
+    if (this.readyIM.instanceColor) this.readyIM.instanceColor.needsUpdate = true;
     S.add(this.readyIM);
   },
 
@@ -526,10 +640,10 @@ const World = {
   },
 
   buildGrass(S) {
-    const gIM = new InstancedMesh(new ConeGeometry(0.09, 0.42, 5), stdMat(0x5FA968), 70);
+    const gIM = new InstancedMesh(new ConeGeometry(0.09, 0.42, 5), stdMat(0x5FA968), 150);
     let placed = 0, guard = 0;
-    while (placed < 70 && guard++ < 600) {
-      const x = rand(-13, 13), z = rand(-13, 13);
+    while (placed < 150 && guard++ < 1500) {
+      const x = rand(-13, 89), z = rand(-13, 13);
       let ok = true;
       for (const b of this.bushes) {
         if (Math.abs(b.pos.x - x) < 1.6 && Math.abs(b.pos.z - z) < 1.6) { ok = false; break; }
@@ -564,66 +678,130 @@ const World = {
     this.hutPad = pad; this.hutPos = CFG.HUT_POS.clone();
   },
 
-  /* ---- Fase 2: wash channel + dryer + roast drum (visual) ---- */
-  buildWashStation(S) {
-    // Channel: pour (9.5, 9.1) -> fork (3.0, 9.1) -> GOOD dock (1.0, 9.1).
-    // Cabang DEFECT ke (3.0, 11.3). Air y=0.62.
-    const px = 9.5, gx = 0.5, fx = 3.0, z = 9.1, len = px - gx, cx = (px + gx) / 2;
-    const troughMat = stdMat(0x8A5A3B);
-    const base = new Mesh(new BoxGeometry(len, 0.3, 1.2), troughMat);
-    base.position.set(cx, 0.35, z); base.receiveShadow = true;
-    const water = new Mesh(new PlaneGeometry(len, 0.9),
-      new MeshStandardMaterial({ color: COL.water, transparent: true, opacity: 0.78, roughness: 0.25 }));
-    water.rotation.x = -Math.PI / 2; water.position.set(cx, 0.62, z);
-    S.add(base); S.add(water);
-    this.washWater = water;
-    // foam: garis-garis putih yang mengalir (1 draw call)
+  /* ---- Fase 3: wash station + dryer racks PER ZONA, visual digabung IM ----
+     Semua bagian statis 3 stasiun dirender dengan 8 InstancedMesh bersama
+     (base, air, bin, pad, gate, ring, foam, rak) -> hemat draw call.
+     Data per stasiun di this.stations[zi]; WashSys menunjuk stasiun aktif. */
+  buildStations(S) {
+    this.stations = [];
+    const woodMat = stdMat(0x8A5A3B);
+    const baseIM = new InstancedMesh(new BoxGeometry(1, 1, 1), woodMat, 9);
+    baseIM.castShadow = true; baseIM.receiveShadow = true; baseIM.frustumCulled = false;
+    const waterIM = new InstancedMesh(new PlaneGeometry(1, 1),
+      new MeshStandardMaterial({ color: COL.water, transparent: true, opacity: 0.78, roughness: 0.25 }), 6);
+    waterIM.frustumCulled = false;
+    const binIM = new InstancedMesh(new CylinderGeometry(0.55, 0.45, 0.9, 10), stdMat(COL.defectBin), 3);
+    binIM.castShadow = true; binIM.frustumCulled = false;
+    const padIM = new InstancedMesh(new RingGeometry(1.7, 2.3, 28),
+      new MeshBasicMaterial({ color: 0xFFD34D, transparent: true, opacity: 0.75, side: DoubleSide }), 3);
+    padIM.frustumCulled = false;
+    const gateIM = new InstancedMesh(new BoxGeometry(0.9, 0.5, 0.12), stdMat(COL.hazard), 6);
+    gateIM.castShadow = true; gateIM.frustumCulled = false;
+    gateIM.instanceMatrix.setUsage(DynamicDrawUsage);
+    const ringIM = new InstancedMesh(new RingGeometry(0.35, 0.5, 20),
+      new MeshBasicMaterial({ color: 0xFFD34D, transparent: true, opacity: 0.9, side: DoubleSide }), 3);
+    ringIM.frustumCulled = false;
+    ringIM.instanceMatrix.setUsage(DynamicDrawUsage);
     const foamIM = new InstancedMesh(new PlaneGeometry(0.5, 0.12),
-      new MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.5 }), 10);
+      new MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.5 }), 30);
     foamIM.frustumCulled = false;
-    this.washFoam = foamIM; this.washFoamT = 0;
-    S.add(foamIM);
-    // cabang DEFECT (pendek, ke +z)
-    const dLen = 2.2, dBase = new Mesh(new BoxGeometry(1.2, 0.3, dLen), troughMat);
-    dBase.position.set(fx, 0.35, z + dLen / 2); dBase.receiveShadow = true;
-    const dWater = new Mesh(new PlaneGeometry(0.9, dLen), water.material);
-    dWater.rotation.x = -Math.PI / 2; dWater.position.set(fx, 0.62, z + dLen / 2);
-    S.add(dBase); S.add(dWater);
-    // pintu air: 2 paddle di fork (diputar saat routing)
-    const gateMat = stdMat(COL.hazard);
-    const mkGate = (gx, gz, ry) => {
-      const p = new Mesh(new BoxGeometry(0.9, 0.5, 0.12), gateMat);
-      p.position.set(gx, 0.85, gz); p.rotation.y = ry; p.castShadow = true;
-      S.add(p); return p;
+    foamIM.instanceMatrix.setUsage(DynamicDrawUsage);
+    const rackIM = new InstancedMesh(new BoxGeometry(1, 1, 1), stdMat(0xC9A86A), 6);
+    rackIM.castShadow = true; rackIM.receiveShadow = true; rackIM.frustumCulled = false;
+    this.stBaseIM = baseIM; this.stGateIM = gateIM; this.stRingIM = ringIM; this.stFoamIM = foamIM;
+    this.dryerRacks = [];
+
+    const setBox = (im, i, x, y, z, sx, sy, sz) => {
+      _dummy.position.set(x, y, z); _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.set(sx, sy, sz); _dummy.updateMatrix(); im.setMatrixAt(i, _dummy.matrix);
     };
-    this.gateGood = mkGate(fx - 0.2, z - 0.75, 0.5);
-    this.gateDefect = mkGate(fx + 0.35, z + 0.75, -0.5);
-    // dermaga GOOD: platform kayu di ujung channel
-    const dock = new Mesh(new BoxGeometry(1.6, 0.25, 1.6), stdMat(0x8A5A3B));
-    dock.position.set(1.0, 0.35, z); dock.receiveShadow = true; dock.castShadow = true;
-    S.add(dock);
-    // bin DEFECT
-    const bin = new Mesh(new CylinderGeometry(0.55, 0.45, 0.9, 10), stdMat(COL.defectBin));
-    bin.position.set(fx, 0.45, z + dLen + 0.4); bin.castShadow = true;
-    S.add(bin);
-    // ring highlight di fork (cherry yang menunggu routing)
-    const ring = new Mesh(new RingGeometry(0.35, 0.5, 20),
-      new MeshBasicMaterial({ color: 0xFFD34D, transparent: true, opacity: 0.9, side: DoubleSide }));
-    ring.rotation.x = -Math.PI / 2; ring.position.set(fx, 0.7, z); ring.visible = false;
-    S.add(ring);
-    this.forkRing = ring;
+    const setPlane = (im, i, x, y, z, sx, sy) => {
+      _dummy.position.set(x, y, z); _dummy.rotation.set(-Math.PI / 2, 0, 0);
+      _dummy.scale.set(sx, sy, 1); _dummy.updateMatrix(); im.setMatrixAt(i, _dummy.matrix);
+    };
+
+    for (let zi = 0; zi < ZONES.length; zi++) {
+      const off = ZONES[zi].xOff, z = 9.1;
+      // trough utama + cabang DEFECT + dermaga GOOD
+      setBox(baseIM, zi * 3 + 0, 5.0 + off, 0.35, z, 9, 0.3, 1.2);
+      setBox(baseIM, zi * 3 + 1, 3.0 + off, 0.35, z + 1.1, 1.2, 0.3, 2.2);
+      setBox(baseIM, zi * 3 + 2, 1.0 + off, 0.35, z, 1.6, 0.25, 1.6);
+      // air
+      setPlane(waterIM, zi * 2 + 0, 5.0 + off, 0.62, z, 9, 0.9);
+      setPlane(waterIM, zi * 2 + 1, 3.0 + off, 0.62, z + 1.1, 0.9, 2.2);
+      // bin DEFECT
+      setBox(binIM, zi, 3.0 + off, 0.45, z + 2.6, 1, 1, 1);
+      // rak jemur (2 per zona)
+      setBox(rackIM, zi * 2 + 0, -1.2 + off, 0.5, 8.0, 2.2, 0.22, 1.4);
+      setBox(rackIM, zi * 2 + 1, -1.2 + off, 0.5, 10.2, 2.2, 0.22, 1.4);
+      const r0 = new Vector3(-1.2 + off, 0.62, 8.0); r0.zone = zi;
+      const r1 = new Vector3(-1.2 + off, 0.62, 10.2); r1.zone = zi;
+      this.dryerRacks.push(r0); this.dryerRacks.push(r1);
+      // foam disembunyikan dulu (ditulis WashSys tiap frame)
+      for (let i = 0; i < 10; i++) {
+        _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+        _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        foamIM.setMatrixAt(zi * 10 + i, _dummy.matrix);
+      }
+      const st = {
+        zi: zi, xOff: off, z: z,
+        POUR: new Vector3(9.5 + off, 0, z), FORK: new Vector3(3.0 + off, 0, z),
+        GOOD_DOCK: new Vector3(1.0 + off, 0, z), DEFECT_DOCK: new Vector3(3.0 + off, 0, z + 2.6),
+        padPos: new Vector3(11.1 + off, 0, z),
+        foamCx: 6.25 + off, foamLen: 6.5, foamBase: zi * 10,
+        gateGoodI: zi * 2, gateDefectI: zi * 2 + 1, ringI: zi, padI: zi,
+        gateGoodPos: new Vector3(2.8 + off, 0.85, z - 0.75),
+        gateDefectPos: new Vector3(3.35 + off, 0.85, z + 0.75),
+        baseRyGood: 0.5, baseRyDefect: -0.5, swingGood: 0, swingDefect: 0,
+      };
+      this.stations.push(st);
+      this.gateMatrix(st, true); this.gateMatrix(st, false);
+      this.ringMatrix(st, 0);
+    }
+    S.add(baseIM); S.add(waterIM); S.add(binIM); S.add(padIM);
+    S.add(gateIM); S.add(ringIM); S.add(foamIM); S.add(rackIM);
+    this.stPadIM = padIM;
+    this.pulsePads(0);
   },
 
-  buildDryer(S) {
-    // 2 rak bambu; biji dijemur di atasnya (otomatis, bukan taktil)
-    const rackMat = stdMat(0xC9A86A);
-    const mkRack = (x, z) => {
-      const r = new Mesh(new BoxGeometry(2.2, 0.22, 1.4), rackMat);
-      r.position.set(x, 0.5, z); r.castShadow = true; r.receiveShadow = true;
-      S.add(r);
-    };
-    mkRack(-1.2, 8.0); mkRack(-1.2, 10.2);
-    this.dryerRacks = [new Vector3(-1.2, 0.62, 8.0), new Vector3(-1.2, 0.62, 10.2)];
+  // posisi/rotasi satu pintu air ke IM bersama (dipakai WashSys saat swing)
+  gateMatrix(st, isGood) {
+    const sw = isGood ? st.swingGood : st.swingDefect;
+    const base = isGood ? st.baseRyGood : st.baseRyDefect;
+    const p = isGood ? st.gateGoodPos : st.gateDefectPos;
+    _dummy.position.copy(p);
+    _dummy.rotation.set(0, base + Math.sin(sw * Math.PI) * 0.7, 0);
+    _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+    this.stGateIM.setMatrixAt(isGood ? st.gateGoodI : st.gateDefectI, _dummy.matrix);
+    this.stGateIM.instanceMatrix.needsUpdate = true;
+  },
+
+  // ring highlight fork: scale<=0 = sembunyi
+  ringMatrix(st, scale) {
+    if (scale > 0) {
+      _dummy.position.set(st.FORK.x, 0.7, st.z);
+      _dummy.rotation.set(-Math.PI / 2, 0, 0);
+      _dummy.scale.set(scale, scale, 1);
+    } else {
+      _dummy.position.set(0, -99, 0); _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.set(0.001, 0.001, 0.001);
+    }
+    _dummy.updateMatrix();
+    this.stRingIM.setMatrixAt(st.ringI, _dummy.matrix);
+    this.stRingIM.instanceMatrix.needsUpdate = true;
+  },
+
+  // pad tuang berdenyut (semua zona)
+  pulsePads(now) {
+    for (let zi = 0; zi < this.stations.length; zi++) {
+      const st = this.stations[zi];
+      const s = 1 + Math.sin(now * 4 + zi * 1.3) * 0.07;
+      _dummy.position.set(st.padPos.x, 0.03, st.padPos.z);
+      _dummy.rotation.set(-Math.PI / 2, 0, 0);
+      _dummy.scale.set(s, s, 1); _dummy.updateMatrix();
+      this.stPadIM.setMatrixAt(st.padI, _dummy.matrix);
+    }
+    this.stPadIM.instanceMatrix.needsUpdate = true;
   },
 
   buildDrum(S) {
@@ -725,7 +903,7 @@ const Flyers = {
     this.im.frustumCulled = false;
     for (let i = 0; i < this.MAX; i++) {
       // dest: 'basket' | 'wash' | 'dryer'; data: boolean/number tergantung dest
-      this.items.push({ t: 1, dur: 0.5, p0: new Vector3(), p1: new Vector3(), p2: new Vector3(), dest: 'basket', data: true });
+      this.items.push({ t: 1, dur: 0.5, p0: new Vector3(), p1: new Vector3(), p2: new Vector3(), dest: 'basket', data: true, zone: 0 });
       _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
       _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
       this.im.setMatrixAt(i, _dummy.matrix);
@@ -734,15 +912,15 @@ const Flyers = {
     this.im.instanceColor.needsUpdate = true;
     S.add(this.im);
   },
-  spawn(from, to, dest, data) {
+  spawn(from, to, dest, data, zone) {
     for (let i = 0; i < this.MAX; i++) {
       const f = this.items[i];
       if (f.t < 1) continue;
-      f.t = 0; f.dur = rand(0.4, 0.55); f.dest = dest || 'basket'; f.data = data;
+      f.t = 0; f.dur = rand(0.4, 0.55); f.dest = dest || 'basket'; f.data = data; f.zone = zone || 0;
       f.p0.copy(from); f.p2.copy(to);
       f.p1.copy(from).lerp(to, 0.5); f.p1.y += 1.6;      // titik kontrol arc
       const cc = (f.dest === 'dryer') ? COL.beanDry
-        : (f.data === false ? COL.cherryGreen : COL.cherryRipe);
+        : (f.data === false ? COL.cherryGreen : (f.dest === 'basket' ? ZONES[f.zone].ripe : COL.cherryRipe));
       this.im.setColorAt(i, _color.set(cc));
       this.im.instanceColor.needsUpdate = true;
       return true;
@@ -768,8 +946,8 @@ const Flyers = {
         _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
         _dummy.updateMatrix(); this.im.setMatrixAt(i, _dummy.matrix);
         if (f.dest === 'wash') WashSys.onPourArrived(f.data);
-        else if (f.dest === 'dryer') DrySys.onBeanArrived(f.data);
-        else BasketSys.onCherryArrived();
+        else if (f.dest === 'dryer') DrySys.onBeanArrived(f.data, f.zone);
+        else BasketSys.onCherryArrived(f.zone);
       }
     }
     if (dirty) this.im.instanceMatrix.needsUpdate = true;
@@ -849,14 +1027,15 @@ const Player = {
     rim.rotation.x = Math.PI / 2; rim.position.y = 0.31;
     basket.add(cup); basket.add(bottom); basket.add(rim);
     basket.position.set(0, 1.0, -0.42);   // di punggung (belakang arah hadap)
-    // isi keranjang: 40 cherry mini (4 lapis x 10), visibility = jumlah
+    // isi keranjang: cherry mini (8 lapis x 10 = 80 = kapasitas maks Fase 3),
+    // visibility via .count = jumlah saat ini (dibatasi BasketSys.cap())
     const bc = new InstancedMesh(new SphereGeometry(0.07, 6, 5),
-      new MeshStandardMaterial({ color: COL.cherryRipe, roughness: 0.55, flatShading: true }), CFG.BASKET_CAP);
+      new MeshStandardMaterial({ color: COL.cherryRipe, roughness: 0.55, flatShading: true }), 80);
     let bi2 = 0;
-    for (let layer = 0; layer < 4; layer++) for (let k = 0; k < 10; k++) {
+    for (let layer = 0; layer < 8; layer++) for (let k = 0; k < 10; k++) {
       const a = (k / 10) * Math.PI * 2 + layer * 0.3;
-      const rr = 0.19 - layer * 0.02;
-      _dummy.position.set(Math.cos(a) * rr, -0.02 + layer * 0.1, Math.sin(a) * rr);
+      const rr = 0.19 - (layer % 4) * 0.02;
+      _dummy.position.set(Math.cos(a) * rr, -0.02 + (layer % 4) * 0.1, Math.sin(a) * rr);
       _dummy.scale.set(1, 1, 1); _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
       bc.setMatrixAt(bi2++, _dummy.matrix);
     }
@@ -884,7 +1063,7 @@ const Player = {
     if (_v1.lengthSq() > 1) _v1.normalize();
     _v1.multiplyScalar(CFG.PLAYER_SPEED);
     this.vel.lerp(_v1, 1 - Math.exp(-10 * dt));
-    this.pos.x = clamp(this.pos.x + this.vel.x * dt, -13, 13);
+    this.pos.x = clamp(this.pos.x + this.vel.x * dt, -13, 89);
     this.pos.z = clamp(this.pos.z + this.vel.z * dt, -13, 13);
     // hadap arah gerak
     if (this.moving) {
@@ -917,15 +1096,27 @@ const Player = {
    ============================================================================ */
 const BasketSys = {
   count: 0, quality: 100, good: 0, defect: 0,   // good=ripe, defect=hijau+over (untuk wash)
-  onCherryArrived() {
-    if (this.count >= CFG.BASKET_CAP) return;
+  byZone: [0, 0, 0],                            // Fase 3: count per zona asal (harga karung)
+  cap() { return UpgradeSys.basketCap(); },     // kapasitas efektif (base 40 + upgrade)
+  batchZone() {                                  // zona mayoritas isi keranjang
+    let bi = 0;
+    for (let i = 1; i < 3; i++) if (this.byZone[i] > this.byZone[bi]) bi = i;
+    return bi;
+  },
+  onCherryArrived(zone) {
+    if (this.count >= this.cap()) return;
     this.count++;
+    this.byZone[zone || 0]++;
     Player.basketCherries.count = this.count;
     AudioSys.pop();
     Hud.dirty = true;
   },
-  get full() { return this.count >= CFG.BASKET_CAP; },
-  reset() { this.count = 0; this.quality = 100; this.good = 0; this.defect = 0; Player.basketCherries.count = 0; Hud.dirty = true; },
+  get full() { return this.count >= this.cap(); },
+  reset() {
+    this.count = 0; this.quality = 100; this.good = 0; this.defect = 0;
+    this.byZone[0] = 0; this.byZone[1] = 0; this.byZone[2] = 0;
+    Player.basketCherries.count = 0; Hud.dirty = true;
+  },
   qualityMult() { return 0.5 + (this.quality / 100); },   // 0.5x .. 1.5x
 };
 
@@ -1084,6 +1275,7 @@ const PickSys = {
   findTarget() {
     let best = null, bestD = CFG.PICK_RANGE;
     for (const b of World.bushes) {
+      if (!SaveSys.data.zones[b.zone]) continue;   // Fase 3: zona terkunci tak bisa dipetik
       for (const cl of b.clusters) {
         _v1.copy(cl.anchor); _v1.y = 0;
         _v2.copy(Player.pos); _v2.y = 0;
@@ -1106,7 +1298,8 @@ const PickSys = {
     this.ringEl.style.display = 'none';
     const cl = this.target;
     if (!cl) return;
-    const phase = (this.chargeT % CFG.PICK_CYCLE) / CFG.PICK_CYCLE;
+    const cyc = UpgradeSys.pickCycle();
+    const phase = (this.chargeT % cyc) / cyc;
     const r = 52 - 42 * phase;
     const clean = Math.abs(r - CFG.GOLD_R) <= CFG.GOLD_TOL;
     this.resolvePick(cl, clean);
@@ -1123,7 +1316,7 @@ const PickSys = {
       if (wasRipe) ripe++; else if (ch.state === 2) green++; else over++;
       World._setState(ch, 0, now + rand(8, 14)); // gone -> regrow (cukup lama agar harus pindah bush)
       _v1.copy(ch.pos);
-      Flyers.spawn(_v1, bw, 'basket', wasRipe);
+      Flyers.spawn(_v1, bw, 'basket', wasRipe, cl.zone);
       Particles.burst(ch.pos, wasRipe ? COL.cherryRipe : COL.cherryGreen, 3, 2.2);
     }
     if (ripe + green + over === 0) {
@@ -1167,7 +1360,8 @@ const PickSys = {
     if (this.charging) {
       if (!this.target) { this.release(); return; }  // target hilang saat charge
       this.chargeT += dt;
-      const phase = (this.chargeT % CFG.PICK_CYCLE) / CFG.PICK_CYCLE;
+      const cyc = UpgradeSys.pickCycle();
+      const phase = (this.chargeT % cyc) / cyc;
       const r = 52 - 42 * phase;
       const inGold = Math.abs(r - CFG.GOLD_R) <= CFG.GOLD_TOL;
       this.shrinkEl.setAttribute('r', r.toFixed(1));
@@ -1206,29 +1400,35 @@ const PickSys = {
    ============================================================================ */
 const HutSys = {
   pourAcc: 0, pourInflight: 0, pouring: false,
-  markerEl: null,
+  markerEl: null, station: null,   // Fase 3: stasiun aktif untuk batch pemain
   init() { this.markerEl = document.getElementById('hut-marker'); },
   update(dt, now) {
-    // pad berpijar
-    const s = 1 + Math.sin(now * 4) * 0.07;
-    World.hutPad.scale.set(s, s, 1);
-    World.hutPad.material.opacity = 0.6 + Math.sin(now * 4) * 0.2;
+    // pad semua zona berpijar
+    World.pulsePads(now);
+    // stasiun terdekat dari pemain (pemain bisa tuang di dermaga zona mana pun);
+    // batch yang sedang berjalan mengunci stasiunnya sendiri
+    let st = null, bestD = 1e9;
+    _v1.copy(Player.pos); _v1.y = 0;
+    for (const s of World.stations) {
+      const d = _v1.distanceTo(s.padPos);
+      if (d < bestD) { bestD = d; st = s; }
+    }
+    if (this.pouring && this.station) st = this.station;
     // marker "ke sini" saat keranjang penuh & wash bebas
-    const show = BasketSys.full && !WashSys.busy();
+    const show = BasketSys.full && !WashSys.busy() && !!st;
     this.markerEl.style.display = show ? 'block' : 'none';
     if (show) {
-      _v1.copy(World.hutPos); _v1.y = 3.4; _v1.project(Engine.camera);
+      _v1.copy(st.padPos); _v1.y = 3.4; _v1.project(Engine.camera);
       this.markerEl.style.left = ((_v1.x * 0.5 + 0.5) * window.innerWidth) + 'px';
       this.markerEl.style.top = ((-_v1.y * 0.5 + 0.5) * window.innerHeight) + 'px';
     }
     // tuang: berdiri di pad -> cherry terbang ke channel satu per satu
-    _v1.copy(Player.pos); _v1.y = 0;
-    const near = _v1.distanceTo(World.hutPos) < CFG.HUT_RADIUS;
+    const near = bestD < CFG.HUT_RADIUS;
     // Lanjutkan pour yang sedang berjalan (this.pouring); cegah batch baru saat wash sibuk.
     // Tanpa `|| this.pouring`, beginPour() membuat busy()=true di frame pertama
     // sehingga loop tuang tidak pernah jalan lagi -> deadlock (keranjang 40/40 selamanya).
     if (near && BasketSys.count > 0 && (!WashSys.busy() || this.pouring)) {
-      if (!this.pouring) { this.pouring = true; WashSys.beginPour(); AudioSys.splash(); }
+      if (!this.pouring) { this.pouring = true; this.station = st; WashSys.beginPour(st); AudioSys.splash(); }
       this.pourAcc += dt;
       while (this.pourAcc >= 0.06 && BasketSys.count > 0 && WashSys.pourLen > 0) {
         this.pourAcc -= 0.06;
@@ -1260,7 +1460,7 @@ const Hud = {
   dirty: true, frames: 0, fpsT: 0,
   el: {},
   init() {
-    ['hud-cash', 'hud-basket', 'hud-quality', 'hud-sacks', 'hud-fps', 'hud-calls'].forEach(id => {
+    ['hud-cash', 'hud-basket', 'hud-quality', 'hud-sacks', 'hud-fps', 'hud-calls', 'hud-zone'].forEach(id => {
       this.el[id] = document.getElementById(id);
     });
   },
@@ -1268,15 +1468,20 @@ const Hud = {
     if (!this.dirty) return;
     this.dirty = false;
     this.el['hud-cash'].textContent = '$' + SaveSys.data.cash.toFixed(2);
-    this.el['hud-basket'].textContent = BasketSys.count + '/' + CFG.BASKET_CAP;
+    this.el['hud-basket'].textContent = BasketSys.count + '/' + BasketSys.cap();
     this.el['hud-quality'].textContent = BasketSys.quality;
     this.el['hud-sacks'].textContent = SaveSys.data.sacks;
+    // Fase 3: zona tempat pemain berdiri
+    const zi = clamp(Math.floor((Player.pos.x + 19) / 38), 0, 2);
+    this.el['hud-zone'].textContent = ZONES[zi].variety;
   },
   fpsTick(dt) {
     this.frames++; this.fpsT += dt;
     if (this.fpsT >= 0.5) {
       this.el['hud-fps'].textContent = Math.round(this.frames / this.fpsT);
       this.el['hud-calls'].textContent = Engine.renderer.info.render.calls;
+      const zi = clamp(Math.floor((Player.pos.x + 19) / 38), 0, 2);
+      this.el['hud-zone'].textContent = ZONES[zi].variety;
       this.frames = 0; this.fpsT = 0;
     }
   },
@@ -1287,7 +1492,7 @@ function refreshHint(force) {
   if (SackSys.collectValue > 0) key = 'hint_collect';
   else if (RoastSys.active) key = 'hint_roasting';
   else if (WashSys.busy()) key = 'hint_wash';
-  else if (DrySys.count >= CFG.ROAST_MIN_BEANS) key = 'hint_roast';
+  else if (DrySys.maxZoneCount() >= CFG.ROAST_MIN_BEANS) key = 'hint_roast';
   else if (BasketSys.full) key = 'hint_pour';
   else if (PickSys.target) key = 'hint_pick';
   else key = 'hint_start';
@@ -1312,6 +1517,7 @@ const Game = {
     World.updateCherries(tSec);
     World.updateReadyMarkers(tSec);
     PickSys.update(dt, tSec);
+    PickerSys.update(dt);          // Fase 3: NPC picker (jalan juga saat pemain idle)
     Flyers.update(dt);
     Particles.update(dt);
     Floaters.update(dt);
@@ -1350,16 +1556,19 @@ function boot() {
   Floaters.init();
   Player.init(Engine.scene);
   PickSys.init(Engine.scene);
+  PickerSys.init(Engine.scene);   // Fase 3
   HutSys.init();
   WashSys.init(Engine.scene);
   DrySys.init(Engine.scene);
   RoastSys.init();
   SackSys.init(Engine.scene);
   Hud.init();
+  UpgradeSys.init();              // Fase 3 (tombol + modal upgrade)
   InputSys.init();
   applyI18n();
   refreshHint(true);
   Hud.update();
+  OfflineSys.check();             // Fase 3: SEBELUM save pertama menimpa lastSave
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { Game.stop(); AudioSys.setMuted(true); }
@@ -1386,23 +1595,22 @@ const WashSys = {
   pouring: false, flowing: false,
   pourQueue: null, pourLen: 0,
   batchQuality: 100,
+  batchZone: 0, st: null, auto: false, pourTimer: 0,   // Fase 3: batch & stasiun aktif
   items: [], im: null,
   waitList: null, waitCount: 0,   // antrean index item di fork (FIFO)
-  uiEl: null, foamT: 0,
+  uiEl: null, foamT: 0, _ringOn: false,
   goodRouted: 0, defectRouted: 0,
 
   init(S) {
-    this.POUR = new Vector3(9.5, 0, 9.1);
-    this.FORK = new Vector3(3.0, 0, 9.1);
-    this.GOOD_DOCK = new Vector3(1.0, 0, 9.1);
-    this.DEFECT_DOCK = new Vector3(3.0, 0, 11.7);
-    this.pourQueue = new Array(40);
-    this.waitList = new Array(40);
+    this.setStation(World.stations[0]);
+    const N = CFG.WASH_POOL;
+    this.pourQueue = new Array(N);
+    this.waitList = new Array(N);
     this.im = new InstancedMesh(new SphereGeometry(0.09, 6, 5),
-      new MeshStandardMaterial({ roughness: 0.5, flatShading: true }), 40);
+      new MeshStandardMaterial({ roughness: 0.5, flatShading: true }), N);
     this.im.instanceMatrix.setUsage(DynamicDrawUsage);
     this.im.frustumCulled = false;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < N; i++) {
       this.items.push({ active: false, t: 0, sinker: true, mode: 0, forkT: 0,
         routeT: 0, good: true, qpos: 0,
         fx: 0, fy: 0, fz: 0, tx: 0, ty: 0, tz: 0 });
@@ -1414,44 +1622,80 @@ const WashSys = {
     this.im.instanceColor.needsUpdate = true;
     S.add(this.im);
     this.uiEl = document.getElementById('wash-ui');
-    World.gateGood.userData.baseRy = World.gateGood.rotation.y;
-    World.gateDefect.userData.baseRy = World.gateDefect.rotation.y;
-    World.gateGood.userData.swing = 0; World.gateDefect.userData.swing = 0;
+  },
+
+  // Fase 3: arahkan POUR/FORK/dock ke stasiun zona aktif
+  setStation(st) {
+    this.st = st;
+    this.POUR = st.POUR; this.FORK = st.FORK;
+    this.GOOD_DOCK = st.GOOD_DOCK; this.DEFECT_DOCK = st.DEFECT_DOCK;
   },
 
   busy() { return this.pouring || this.flowing; },
 
-  beginPour() {
+  beginPour(st) {
     // pindahkan komposisi batch dari keranjang ke antrean tuang, diacak.
     // (good+defect = yang dipetik; bisa > count karena overflow -> potong)
-    const g = Math.min(BasketSys.good, 40), d = Math.min(BasketSys.defect, 40);
+    this.setStation(st || World.stations[0]);
+    const capN = CFG.WASH_POOL;
+    const g = Math.min(BasketSys.good, capN), d = Math.min(BasketSys.defect, capN);
     let n = 0;
-    for (let i = 0; i < g && n < 40; i++) this.pourQueue[n++] = true;
-    for (let i = 0; i < d && n < 40; i++) this.pourQueue[n++] = false;
+    for (let i = 0; i < g && n < capN; i++) this.pourQueue[n++] = true;
+    for (let i = 0; i < d && n < capN; i++) this.pourQueue[n++] = false;
     for (let i = n - 1; i > 0; i--) {
       const j = (Math.random() * (i + 1)) | 0;
       const tmp = this.pourQueue[i]; this.pourQueue[i] = this.pourQueue[j]; this.pourQueue[j] = tmp;
     }
     this.pourLen = Math.min(BasketSys.count, n);
     this.batchQuality = BasketSys.quality;
+    this.batchZone = BasketSys.batchZone();   // Fase 3: harga karung ikut zona asal
+    this.auto = false;
     this.pouring = true;
     this.goodRouted = 0; this.defectRouted = 0;
   },
 
-  onPourArrived(sinker) {
-    HutSys.pourInflight--;
-    for (let i = 0; i < 40; i++) {
+  /* Fase 3: pour otomatis dari picker NPC. Keranjang pemain TIDAK disentuh;
+     item diaktifkan langsung oleh timer di update() (tanpa flyer). */
+  beginPourBatch(good, defect, quality, batchZone, station) {
+    if (this.busy()) return false;
+    this.setStation(station || World.stations[batchZone]);
+    let n = 0;
+    for (let i = 0; i < good && n < CFG.WASH_POOL; i++) this.pourQueue[n++] = true;
+    for (let i = 0; i < defect && n < CFG.WASH_POOL; i++) this.pourQueue[n++] = false;
+    for (let i = n - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const tmp = this.pourQueue[i]; this.pourQueue[i] = this.pourQueue[j]; this.pourQueue[j] = tmp;
+    }
+    this.pourLen = n;
+    this.batchQuality = quality;
+    this.batchZone = batchZone;
+    this.auto = true;
+    this.pourTimer = 0;
+    this.pouring = true;
+    this.goodRouted = 0; this.defectRouted = 0;
+    AudioSys.splash();
+    return true;
+  },
+
+  activateItem(sinker) {
+    for (let i = 0; i < CFG.WASH_POOL; i++) {
       const it = this.items[i];
       if (it.active) continue;
       it.active = true; it.t = 0; it.sinker = !!sinker; it.mode = 0; it.qpos = 0;
       this.im.setColorAt(i, _color.set(it.sinker ? COL.cherryRipe : COL.cherryGreen));
-      break;
+      this.im.instanceColor.needsUpdate = true;
+      return true;
     }
-    this.im.instanceColor.needsUpdate = true;
+    return false;
   },
 
-  endPour() {
-    BasketSys.reset();
+  onPourArrived(sinker) {
+    if (!this.auto) HutSys.pourInflight--;
+    this.activateItem(sinker);
+  },
+
+  endPour(resetBasket) {
+    if (resetBasket !== false) BasketSys.reset();   // batch picker: jangan sentuh keranjang
     this.pouring = false;
     this.flowing = true;
     this.uiEl.style.display = 'flex';
@@ -1472,8 +1716,8 @@ const WashSys = {
     const d = toGood ? this.GOOD_DOCK : this.DEFECT_DOCK;
     it.fx = this.FORK.x; it.fy = this.WATER_Y + 0.15; it.fz = this.FORK.z;
     it.tx = d.x; it.ty = 0.9; it.tz = d.z;
-    const gate = toGood ? World.gateGood : World.gateDefect;
-    gate.userData.swing = 1;
+    if (toGood) this.st.swingGood = 1; else this.st.swingDefect = 1;
+    World.gateMatrix(this.st, toGood);
     AudioSys.gate();
   },
 
@@ -1487,7 +1731,7 @@ const WashSys = {
     if (it.good) {
       this.goodRouted++;
       _v1.set(it.tx, it.ty, it.tz);
-      _v2.copy(World.dryerRacks[0]); _v2.y = 1.2;
+      _v2.copy(World.dryerRacks[this.st.zi * 2]); _v2.y = 1.2;   // rak zona stasiun ini
       const q = it.sinker ? this.batchQuality : Math.max(0, this.batchQuality - 10);
       if (!it.sinker) {
         Floaters.spawn(it.tx, 1.6, it.tz, t('contaminated'), 'bad');
@@ -1495,7 +1739,7 @@ const WashSys = {
       } else {
         Particles.burst(_v1, COL.water, 4, 1.5);
       }
-      if (!Flyers.spawn(_v1, _v2, 'dryer', q)) DrySys.onBeanArrived(q);
+      if (!Flyers.spawn(_v1, _v2, 'dryer', q, this.batchZone)) DrySys.onBeanArrived(q, this.batchZone);
     } else {
       this.defectRouted++;
       SaveSys.data.defect++;
@@ -1522,34 +1766,43 @@ const WashSys = {
   },
 
   update(dt, now) {
-    // foam selalu mengalir (ambient)
+    // foam selalu mengalir di SEMUA stasiun (ambient, 1 IM bersama)
     this.foamT += dt;
-    const len = 6.5, cx = 6.25;
-    for (let i = 0; i < 10; i++) {
-      const x = cx + len / 2 - ((this.foamT * 1.1 + i * 0.73) % (len + 1));
-      _dummy.position.set(x, 0.64, 9.1 + ((i * 0.37) % 0.5) - 0.25);
-      _dummy.rotation.set(-Math.PI / 2, 0, 0);
-      _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
-      World.washFoam.setMatrixAt(i, _dummy.matrix);
-    }
-    World.washFoam.instanceMatrix.needsUpdate = true;
-    // ayunan pintu air
-    for (const gate of [World.gateGood, World.gateDefect]) {
-      const u = gate.userData;
-      if (u.swing > 0) {
-        u.swing = Math.max(0, u.swing - dt * 2.2);
-        gate.rotation.y = u.baseRy + Math.sin(u.swing * Math.PI) * 0.7;
+    for (let zi = 0; zi < World.stations.length; zi++) {
+      const st = World.stations[zi];
+      for (let i = 0; i < 10; i++) {
+        const x = st.foamCx + st.foamLen / 2 - ((this.foamT * 1.1 + i * 0.73) % (st.foamLen + 1));
+        _dummy.position.set(x, 0.64, st.z + ((i * 0.37) % 0.5) - 0.25);
+        _dummy.rotation.set(-Math.PI / 2, 0, 0);
+        _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+        World.stFoamIM.setMatrixAt(st.foamBase + i, _dummy.matrix);
       }
+      // ayunan pintu air stasiun ini
+      if (st.swingGood > 0) { st.swingGood = Math.max(0, st.swingGood - dt * 2.2); World.gateMatrix(st, true); }
+      if (st.swingDefect > 0) { st.swingDefect = Math.max(0, st.swingDefect - dt * 2.2); World.gateMatrix(st, false); }
     }
-    if (!this.flowing) { World.forkRing.visible = false; return; }
+    World.stFoamIM.instanceMatrix.needsUpdate = true;
+    // Fase 3: pour otomatis picker — aktifkan item bertahap dari antrean
+    if (this.auto && this.pouring) {
+      this.pourTimer += dt;
+      while (this.pourTimer >= 0.07 && this.pourLen > 0) {
+        this.pourTimer -= 0.07;
+        this.activateItem(this.pourQueue[--this.pourLen]);
+      }
+      if (this.pourLen === 0) this.endPour(false);
+    }
+    if (!this.flowing) {
+      if (this._ringOn) { World.ringMatrix(this.st, 0); this._ringOn = false; }
+      return;
+    }
 
     let dirty = false, activeCount = 0;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < CFG.WASH_POOL; i++) {
       const it = this.items[i];
       if (!it.active) continue;
       activeCount++;
       if (it.mode === 0) {
-        it.t += dt / CFG.WASH_FLOW_TIME;
+        it.t += dt / UpgradeSys.flowTime();   // Fase 3: Channel Flow upgrade
         if (it.t >= 1) {
           it.mode = 1; it.t = 1; it.forkT = 0;
           it.qpos = this.waitCount;
@@ -1568,15 +1821,16 @@ const WashSys = {
       dirty = true;
     }
     if (dirty) this.im.instanceMatrix.needsUpdate = true;
-    World.forkRing.visible = this.waitCount > 0;
     if (this.waitCount > 0) {
-      const s = 1 + Math.sin(now * 8) * 0.12;
-      World.forkRing.scale.set(s, s, 1);
+      World.ringMatrix(this.st, 1 + Math.sin(now * 8) * 0.12);
+      this._ringOn = true;
+    } else if (this._ringOn) {
+      World.ringMatrix(this.st, 0); this._ringOn = false;
     }
     if (activeCount === 0) {
       this.flowing = false;
       this.uiEl.style.display = 'none';
-      World.forkRing.visible = false;
+      if (this._ringOn) { World.ringMatrix(this.st, 0); this._ringOn = false; }
       refreshHint(true);
     }
   },
@@ -1602,7 +1856,7 @@ const WashSys = {
         y = it.sinker ? this.WATER_Y - 0.16
           : this.WATER_Y + 0.03 + Math.sin(now * 5 + i * 1.3) * 0.04;
       }
-      _dummy.position.set(x, y, 9.1);
+      _dummy.position.set(x, y, this.st.z);
       _dummy.scale.set(s, s, s);
     }
     _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
@@ -1617,22 +1871,27 @@ const WashSys = {
    ============================================================================ */
 const DrySys = {
   im: null, slots: [],
-  count: 0, qSum: 0,          // hopper: biji kering siap roast
+  count: 0, qSum: 0,          // total hopper (semua zona) — kompat pembaca lama
+  hop: [{ c: 0, q: 0 }, { c: 0, q: 0 }, { c: 0, q: 0 }],   // Fase 3: hopper per zona asal
   dryCol: null,
   init(S) {
     this.dryCol = new Color(COL.beanDry);
-    // hopper persist (stockpile, bukan in-progress)
-    this.count = Math.max(0, Math.floor(SaveSys.data.dryCount || 0));
-    this.qSum = Math.max(0, SaveSys.data.dryQSum || 0);
+    // hopper persist per zona (SaveSys.load sudah migrasi save Fase 2 -> zona 0)
+    for (let i = 0; i < 3; i++) {
+      const e = SaveSys.data.dryZones[i] || { c: 0, q: 0 };
+      this.hop[i] = { c: Math.max(0, Math.floor(e.c || 0)), q: Math.max(0, e.q || 0) };
+    }
+    this.syncTotals();
+    const nSlots = World.dryerRacks.length * 28;   // 6 rak x 28 = 168
     this.im = new InstancedMesh(new SphereGeometry(0.07, 6, 5),
-      new MeshStandardMaterial({ roughness: 0.6, flatShading: true }), 56);
+      new MeshStandardMaterial({ roughness: 0.6, flatShading: true }), nSlots);
     this.im.instanceMatrix.setUsage(DynamicDrawUsage);
     this.im.frustumCulled = false;
     let s = 0;
     for (const rack of World.dryerRacks) {
       for (let gx = 0; gx < 7; gx++) for (let gz = 0; gz < 4; gz++) {
         this.slots.push({
-          active: false, t: 0, quality: 100,
+          active: false, t: 0, quality: 100, rackZone: rack.zone, beanZone: 0,
           x: rack.x - 0.9 + gx * 0.3, y: rack.y + 0.12, z: rack.z - 0.5 + gz * 0.33,
         });
         _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
@@ -1645,44 +1904,80 @@ const DrySys = {
     this.im.instanceColor.needsUpdate = true;
     S.add(this.im);
   },
-  onBeanArrived(quality) {
-    for (let i = 0; i < 56; i++) {
+  syncTotals() {
+    this.count = this.hop[0].c + this.hop[1].c + this.hop[2].c;
+    this.qSum = this.hop[0].q + this.hop[1].q + this.hop[2].q;
+  },
+  addToHop(zone, quality) {
+    this.hop[zone].c++; this.hop[zone].q += quality;
+    this.syncTotals();
+    this.saveHopper();
+  },
+  maxZoneCount() {
+    return Math.max(this.hop[0].c, this.hop[1].c, this.hop[2].c);
+  },
+  // ambil batch roast dari zona dengan stok terbanyak (>= ROAST_MIN_BEANS)
+  takeBatch() {
+    let bi = -1;
+    for (let i = 0; i < 3; i++) {
+      if (this.hop[i].c >= CFG.ROAST_MIN_BEANS && (bi < 0 || this.hop[i].c > this.hop[bi].c)) bi = i;
+    }
+    if (bi < 0) return null;
+    const h = this.hop[bi];
+    const n = Math.min(h.c, CFG.ROAST_MAX_BEANS);
+    const q = h.q / h.c;
+    h.c -= n; h.q -= q * n;
+    if (h.c <= 0) { h.c = 0; h.q = 0; }
+    this.syncTotals();
+    this.saveHopper();
+    return { n: n, q: q, zone: bi };
+  },
+  onBeanArrived(quality, zone) {
+    zone = zone || 0;
+    // utamakan rak di zona asal biji; fallback rak bebas mana pun
+    let pick = -1;
+    for (let i = 0; i < this.slots.length; i++) {
       const sl = this.slots[i];
       if (sl.active) continue;
-      sl.active = true; sl.t = 0; sl.quality = quality;
+      if (sl.rackZone === zone) { pick = i; break; }
+      if (pick < 0) pick = i;
+    }
+    if (pick >= 0) {
+      const sl = this.slots[pick];
+      sl.active = true; sl.t = 0; sl.quality = quality; sl.beanZone = zone;
       _dummy.position.set(sl.x, sl.y, sl.z); _dummy.scale.set(1, 1, 1);
       _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
-      this.im.setMatrixAt(i, _dummy.matrix);
-      this.im.setColorAt(i, _color.set(COL.cherryGreen));
+      this.im.setMatrixAt(pick, _dummy.matrix);
+      this.im.setColorAt(pick, _color.set(COL.cherryGreen));
       this.im.instanceMatrix.needsUpdate = true;
       this.im.instanceColor.needsUpdate = true;
       return;
     }
-    this.count++; this.qSum += quality;   // rak penuh -> langsung hopper
-    this.saveHopper();
+    this.addToHop(zone, quality);   // rak penuh -> langsung hopper
     refreshHint(true);
   },
   saveHopper() {
+    for (let i = 0; i < 3; i++) SaveSys.data.dryZones[i] = { c: this.hop[i].c, q: this.hop[i].q };
     SaveSys.data.dryCount = this.count;
     SaveSys.data.dryQSum = this.qSum;
   },
   update(dt) {
+    const dryT = UpgradeSys.dryTime();   // Fase 3: Dryer Speed upgrade
     let mDirty = false, cDirty = false;
-    for (let i = 0; i < 56; i++) {
+    for (let i = 0; i < this.slots.length; i++) {
       const sl = this.slots[i];
       if (!sl.active) continue;
       sl.t += dt;
-      if (sl.t >= CFG.DRY_TIME) {
+      if (sl.t >= dryT) {
         sl.active = false;
-        this.count++; this.qSum += sl.quality;
-        this.saveHopper();
+        this.addToHop(sl.beanZone, sl.quality);
         _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
         _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
         this.im.setMatrixAt(i, _dummy.matrix);
         mDirty = true;
-        if (this.count === CFG.ROAST_MIN_BEANS) refreshHint(true);
+        refreshHint(true);
       } else {
-        _color.set(COL.cherryGreen).lerp(this.dryCol, sl.t / CFG.DRY_TIME);
+        _color.set(COL.cherryGreen).lerp(this.dryCol, sl.t / dryT);
         this.im.setColorAt(i, _color);
         cDirty = true;
       }
@@ -1702,7 +1997,7 @@ const DrySys = {
    ============================================================================ */
 const RoastSys = {
   active: false,
-  beans: 0, quality: 100, order: 1,
+  beans: 0, quality: 100, order: 1, batchZone: 0,   // Fase 3: zona asal batch (harga karung)
   temp: 25, fuel: 55, progress: 0, scorch: 0, cracked: false,
   bands: [[45, 60], [60, 78], [78, 95]],
   orderKeys: ['order_light', 'order_medium', 'order_dark'],
@@ -1726,18 +2021,15 @@ const RoastSys = {
   },
 
   tryLoad() {
-    if (this.active || DrySys.count < CFG.ROAST_MIN_BEANS) return;
-    const n = Math.min(DrySys.count, CFG.ROAST_MAX_BEANS);
-    const q = DrySys.qSum / DrySys.count;
-    DrySys.count -= n; DrySys.qSum -= q * n;
-    if (DrySys.count <= 0) { DrySys.count = 0; DrySys.qSum = 0; }
-    DrySys.saveHopper();
-    this.start(n, q);
+    if (this.active) return;
+    const b = DrySys.takeBatch();   // Fase 3: batch dari satu zona (stok terbanyak)
+    if (!b) return;
+    this.start(b.n, b.q, b.zone);
   },
 
-  start(n, q) {
+  start(n, q, zone) {
     this.active = true;
-    this.beans = n; this.quality = q;
+    this.beans = n; this.quality = q; this.batchZone = zone || 0;
     this.order = (Math.random() * 3) | 0;
     this.temp = 25; this.fuel = 55; this.progress = 0; this.scorch = 0;
     this.cracked = false; this.crackT = 0; this.shakeT = 0;
@@ -1756,13 +2048,14 @@ const RoastSys = {
     if (!this.active) return;
     const b = this.bands[this.order], p = this.progress;
     const qm = 0.5 + this.quality / 100;
+    const price = ZONES[this.batchZone].price;   // Fase 3: harga ikut zona asal biji
     if (p >= b[0] && p <= b[1]) {
-      const v = CFG.SACK_PRICE * qm * CFG.ROAST_MATCH_MULT;
+      const v = price * qm * CFG.ROAST_MATCH_MULT;
       SackSys.addSack(v, true);
       Floaters.spawn(World.roastDrumPos.x, 3.0, World.roastDrumPos.z, t('roast_match'), 'gold');
       AudioSys.ding();
     } else {
-      const v = CFG.SACK_PRICE * qm * CFG.UNDER_PENALTY;
+      const v = price * qm * CFG.UNDER_PENALTY;
       SackSys.addSack(v, false);
       Floaters.spawn(World.roastDrumPos.x, 3.0, World.roastDrumPos.z, t('under_roast'), '');
       AudioSys.pluck();
@@ -1790,7 +2083,7 @@ const RoastSys = {
 
   update(dt, now) {
     this.loadBtn.style.display =
-      (!this.active && DrySys.count >= CFG.ROAST_MIN_BEANS && SackSys.collectValue <= 0) ? 'block' : 'none';
+      (!this.active && DrySys.maxZoneCount() >= CFG.ROAST_MIN_BEANS && SackSys.collectValue <= 0) ? 'block' : 'none';
     if (!this.active) return;
     // --- fisika panas: temp mengejar equilibrium fuel ---
     const eq = 20 + this.fuel * 2.2;
@@ -1808,13 +2101,14 @@ const RoastSys = {
       this.crackT -= dt;
       if (this.crackT <= 0) document.getElementById('firstcrack-banner').style.display = 'none';
     }
-    // --- progress roast (jalan saat 150-225°C) ---
-    if (this.temp >= 150 && this.temp <= 225) {
-      this.progress += dt * 2.0 * (0.6 + 0.4 * (this.temp - 150) / 75);
+    // --- progress roast (jalan di zona hijau; Fase 3: Drum Stability melebarkannya) ---
+    const gLo = UpgradeSys.greenLo(), gHi = UpgradeSys.greenHi();
+    if (this.temp >= gLo && this.temp <= gHi) {
+      this.progress += dt * 2.0 * (0.6 + 0.4 * (this.temp - gLo) / (gHi - gLo));
     }
-    // --- scorch (zona merah) ---
-    if (this.temp > 225) {
-      this.scorch += dt * (this.temp - 225) / 30;
+    // --- scorch (di atas zona hijau) ---
+    if (this.temp > gHi) {
+      this.scorch += dt * (this.temp - gHi) / 30;
       if (this.scorch >= 1) { this.failBurnt(); return; }
     } else {
       this.scorch = Math.max(0, this.scorch - dt * 0.3);
@@ -2023,9 +2317,332 @@ const SackSys = {
 };
 
 /* ============================================================================
-   FASE 3 — WORKERS (picker), UPGRADES, ZONES 2-3, OFFLINE EARNINGS
-   -> Perluas SaveSys (upgrades, zones, lastSave -> offline calc).
+   20. PICKER NPC — pekerja sewaan (§4.7 Fase 3)
+   Auto selective-pick versi sederhana: hanya cherry matang (state 3), tanpa
+   timing minigame. Angkut maks 12 -> tuang ke wash station zona panennya
+   (WashSys.beginPourBatch — antrean wash yang sama seperti pour pemain,
+   pemain tetap yang me-routing di fork). Jalan terus walau pemain idle.
+   Visual: 1 InstancedMesh kotak bersama (3 picker x 6 bagian) = 1 draw call.
    ============================================================================ */
+const PickerSys = {
+  MAXP: 3, CARRY: 12, SPEED: 3.4, PICK_DT: 0.55,
+  im: null, pickers: [],
+  cols: [0x3E7CB1, 0xC96F2E, 0x7A4FA3],   // warna baju per picker
+  // [x, y, z, sx, sy, sz] per bagian tubuh (lokal, hadap +z)
+  partDef: [
+    [0, 0.25, 0, 0.5, 0.5, 0.24],        // kaki/celana
+    [0, 0.85, 0, 0.55, 0.65, 0.35],      // torso (baju berwarna)
+    [0, 1.45, 0, 0.42, 0.42, 0.42],      // kepala
+    [0, 1.62, 0, 0.95, 0.06, 0.95],      // brim topi jerami
+    [0, 1.78, 0, 0.5, 0.25, 0.5],        // top topi
+    [0, 1.0, -0.42, 0.55, 0.5, 0.3],     // keranjang punggung
+  ],
+  init(S) {
+    this.im = new InstancedMesh(new BoxGeometry(1, 1, 1),
+      new MeshStandardMaterial({ roughness: 0.8, flatShading: true }), this.MAXP * this.partDef.length);
+    this.im.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.im.castShadow = true; this.im.frustumCulled = false;
+    for (let i = 0; i < this.MAXP; i++) {
+      this.paintPicker(i);
+      for (let k = 0; k < this.partDef.length; k++) {
+        _dummy.position.set(0, -99, 0); _dummy.scale.set(0.001, 0.001, 0.001);
+        _dummy.rotation.set(0, 0, 0); _dummy.updateMatrix();
+        this.im.setMatrixAt(i * this.partDef.length + k, _dummy.matrix);
+      }
+    }
+    if (this.im.instanceColor) this.im.instanceColor.needsUpdate = true;
+    S.add(this.im);
+    for (let i = 0; i < this.count(); i++) this.spawn();
+  },
+  count() { return SaveSys.data.upg.picker || 0; },
+  paintPicker(i) {
+    const base = i * this.partDef.length;
+    this.im.setColorAt(base + 0, _color.set(COL.pants));
+    this.im.setColorAt(base + 1, _color.set(this.cols[i]));
+    this.im.setColorAt(base + 2, _color.set(COL.skin));
+    this.im.setColorAt(base + 3, _color.set(COL.straw));
+    this.im.setColorAt(base + 4, _color.set(COL.straw));
+    this.im.setColorAt(base + 5, _color.set(COL.jute));
+  },
+  spawn() {
+    if (this.pickers.length >= this.MAXP) return;
+    const zone = this.bestZone();
+    const st = World.stations[zone];
+    this.pickers.push({
+      x: st.padPos.x + 1.5, z: st.padPos.z - 2.5, face: 0, bob: Math.random() * 6,
+      state: 'seek', carry: 0, pickT: 0, target: null, zone: zone, idleT: 0,
+    });
+  },
+  // zona terbuka dengan cherry matang terbanyak
+  bestZone() {
+    let bi = 0, bc = -1;
+    for (let zi = 0; zi < 3; zi++) {
+      if (!SaveSys.data.zones[zi]) continue;
+      let c = 0;
+      for (const ch of World.cherries) if (ch.zone === zi && ch.state === 3) c++;
+      if (c > bc) { bc = c; bi = zi; }
+    }
+    return bi;
+  },
+  findRipe(p) {
+    let best = -1, bestD = 1e18;
+    for (let i = 0; i < World.cherries.length; i++) {
+      const ch = World.cherries[i];
+      if (ch.zone !== p.zone || ch.state !== 3) continue;
+      let taken = false;
+      for (const o of this.pickers) if (o !== p && o.target === i) { taken = true; break; }
+      if (taken) continue;
+      const dx = ch.pos.x - p.x, dz = ch.pos.z - p.z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best < 0 ? null : best;
+  },
+  moveTo(p, tx, tz, dt, arrive) {
+    const ad = arrive || 0.45;
+    const dx = tx - p.x, dz = tz - p.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d <= ad) return true;
+    const vx = dx / d, vz = dz / d;
+    const step = Math.min(d - ad * 0.5, this.SPEED * dt);
+    p.x += vx * step; p.z += vz * step;
+    const want = Math.atan2(vx, vz);
+    let dd = want - p.face;
+    while (dd > Math.PI) dd -= Math.PI * 2;
+    while (dd < -Math.PI) dd += Math.PI * 2;
+    p.face += dd * Math.min(1, 12 * dt);
+    return (d - step) <= ad;
+  },
+  stepPicker(p, dt, now) {
+    p.bob += dt * 9;
+    if (p.state === 'deliver') {
+      const st = World.stations[p.zone];
+      if (this.moveTo(p, st.padPos.x, st.padPos.z, dt)) {
+        // sampai di pad: tuang ke wash (gagal bila wash sibuk -> tunggu di pad)
+        if (WashSys.beginPourBatch(p.carry, 0, 100, p.zone, st)) {
+          p.carry = 0; p.state = 'seek';
+        }
+      }
+      return;
+    }
+    // state 'seek'
+    if (p.carry >= this.CARRY) { p.state = 'deliver'; return; }
+    if (p.target === null || World.cherries[p.target].state !== 3) {
+      p.target = this.findRipe(p);
+      if (p.target === null) {
+        if (p.carry > 0) { p.state = 'deliver'; return; }
+        // ladang zona ini kosong: tunggu dekat pad; lama-lama pindah zona
+        p.idleT += dt;
+        if (p.idleT > 6) { p.zone = this.bestZone(); p.idleT = 0; }
+        const st = World.stations[p.zone];
+        this.moveTo(p, st.padPos.x - 2, st.padPos.z - 3, dt);
+        return;
+      }
+      p.idleT = 0;
+    }
+    const ch = World.cherries[p.target];
+    if (this.moveTo(p, ch.pos.x, ch.pos.z, dt, 0.8)) {
+      p.pickT += dt;
+      if (p.pickT >= this.PICK_DT) {
+        p.pickT = 0;
+        if (ch.state === 3) {
+          World._setState(ch, 0, now + rand(8, 14));   // sama seperti petik pemain
+          p.carry++;
+          SaveSys.data.stats.picked++;
+          Particles.burst(ch.pos, ZONES[p.zone].ripe, 2, 1.6);
+        }
+        p.target = null;
+        if (p.carry >= this.CARRY) p.state = 'deliver';
+      }
+    } else p.pickT = 0;
+  },
+  writePicker(i) {
+    const p = this.pickers[i];
+    const bobY = Math.abs(Math.sin(p.bob)) * 0.05;
+    const cf = Math.cos(p.face), sf = Math.sin(p.face);
+    for (let k = 0; k < this.partDef.length; k++) {
+      const d = this.partDef[k];
+      _dummy.position.set(
+        p.x + d[0] * cf + d[2] * sf,
+        d[1] + bobY,
+        p.z - d[0] * sf + d[2] * cf);
+      _dummy.rotation.set(0, p.face, 0);
+      _dummy.scale.set(d[3], d[4], d[5]);
+      _dummy.updateMatrix();
+      this.im.setMatrixAt(i * this.partDef.length + k, _dummy.matrix);
+    }
+  },
+  update(dt) {
+    if (!this.pickers.length) return;
+    const now = performance.now() / 1000;
+    for (let i = 0; i < this.pickers.length; i++) {
+      this.stepPicker(this.pickers[i], dt, now);
+      this.writePicker(i);
+    }
+    this.im.instanceMatrix.needsUpdate = true;
+  },
+};
+
+/* ============================================================================
+   21. UPGRADES — modal & efek (§5 Fase 3)
+   Formula biaya WAJIB: Math.floor(BaseCost * Math.pow(1.18, level)).
+   Level 0 untuk semua efek = perilaku Fase 2 persis (tanpa regresi).
+   ============================================================================ */
+const UpgradeSys = {
+  DEFS: [
+    { key: 'pickSpeed', base: 50, max: 5 },
+    { key: 'basketCap', base: 75, max: 5 },
+    { key: 'dryerSpeed', base: 60, max: 5 },
+    { key: 'drumStability', base: 80, max: 5 },
+    { key: 'channelFlow', base: 60, max: 5 },
+    { key: 'picker', base: 150, max: 3 },
+  ],
+  modalEl: null, listEl: null, cashEl: null, open: false,
+
+  lvl(key) { return SaveSys.data.upg[key] || 0; },
+  defOf(key) { for (const d of this.DEFS) if (d.key === key) return d; return null; },
+  costOf(key) {
+    const d = this.defOf(key);
+    return Math.floor(d.base * Math.pow(1.18, this.lvl(key)));   // formula §5
+  },
+  isMax(key) { return this.lvl(key) >= this.defOf(key).max; },
+
+  // --- efek upgrade (dipakai sistem lain) ---
+  pickCycle() { return CFG.PICK_CYCLE * Math.pow(0.92, this.lvl('pickSpeed')); },
+  basketCap() { return CFG.BASKET_CAP + 8 * this.lvl('basketCap'); },
+  dryTime() { return CFG.DRY_TIME * Math.pow(0.85, this.lvl('dryerSpeed')); },
+  flowTime() { return CFG.WASH_FLOW_TIME * Math.pow(0.88, this.lvl('channelFlow')); },
+  greenLo() { return 150 - 3 * this.lvl('drumStability'); },
+  greenHi() { return 225 + 5 * this.lvl('drumStability'); },
+
+  init() {
+    this.modalEl = document.getElementById('upgrade-modal');
+    this.listEl = document.getElementById('upg-list');
+    this.cashEl = document.getElementById('upg-cash');
+    document.getElementById('btn-upgrades').addEventListener('click', () => { AudioSys.click(); this.show(); });
+    document.getElementById('btn-upg-close').addEventListener('click', () => { AudioSys.click(); this.hide(); });
+  },
+  show() { this.open = true; this.modalEl.style.display = 'flex'; this.render(); },
+  hide() { this.open = false; this.modalEl.style.display = 'none'; },
+  render() {
+    this.cashEl.textContent = '$' + SaveSys.data.cash.toFixed(2);
+    let html = '';
+    for (const d of this.DEFS) {
+      const lv = this.lvl(d.key), mx = lv >= d.max;
+      const cost = this.costOf(d.key);
+      const afford = SaveSys.data.cash >= cost;
+      html += '<div class="upg-row">'
+        + '<div class="upg-info"><div class="upg-name">' + t('up_' + d.key)
+        + ' <span class="upg-lvl">' + t('lvl') + ' ' + lv + '/' + d.max + '</span></div>'
+        + '<div class="upg-desc">' + t('up_' + d.key + '_d') + '</div></div>'
+        + (mx ? '<button class="upg-buy max" disabled>' + t('max') + '</button>'
+          : '<button class="upg-buy" data-upg="' + d.key + '"' + (afford ? '' : ' disabled') + '>$' + cost + '</button>')
+        + '</div>';
+    }
+    html += '<div class="upg-zones-title">' + t('zones_title') + '</div>';
+    for (let zi = 1; zi < 3; zi++) {
+      const z = ZONES[zi], owned = !!SaveSys.data.zones[zi];
+      const afford = SaveSys.data.cash >= z.unlock;
+      html += '<div class="upg-row">'
+        + '<div class="upg-info"><div class="upg-name">' + z.name + ' · ' + z.variety + '</div>'
+        + '<div class="upg-desc">$' + z.price + t('per_sack') + '</div></div>'
+        + (owned ? '<button class="upg-buy max" disabled>' + t('owned') + '</button>'
+          : '<button class="upg-buy" data-zone="' + zi + '"' + (afford ? '' : ' disabled') + '>' + t('unlock') + ' $' + z.unlock + '</button>')
+        + '</div>';
+    }
+    this.listEl.innerHTML = html;
+    const ub = this.listEl.querySelectorAll('button[data-upg]');
+    for (const b of ub) b.addEventListener('click', () => this.buy(b.dataset.upg));
+    const zb = this.listEl.querySelectorAll('button[data-zone]');
+    for (const b of zb) b.addEventListener('click', () => this.unlockZone(+b.dataset.zone));
+  },
+  buy(key) {
+    const d = this.defOf(key);
+    if (!d || this.lvl(key) >= d.max) return;
+    const cost = this.costOf(key);
+    if (SaveSys.data.cash < cost) { AudioSys.error(); return; }
+    SaveSys.data.cash -= cost;
+    SaveSys.data.upg[key]++;
+    if (key === 'picker') PickerSys.spawn();
+    AudioSys.upgrade();
+    Hud.dirty = true;
+    SaveSys.save();
+    this.render();
+  },
+  unlockZone(zi) {
+    if (SaveSys.data.zones[zi]) return;
+    const cost = ZONES[zi].unlock;
+    if (SaveSys.data.cash < cost) { AudioSys.error(); return; }
+    SaveSys.data.cash -= cost;
+    SaveSys.data.zones[zi] = true;
+    World.activateZone(zi);
+    AudioSys.upgrade();
+    Floaters.spawn(Player.pos.x, 2.4, Player.pos.z, ZONES[zi].name + '!', 'gold');
+    Hud.dirty = true;
+    SaveSys.save();
+    this.render();
+  },
+};
+
+/* ============================================================================
+   22. OFFLINE EARNINGS (§5 Fase 3)
+   gain = min(elapsed, 8 jam) x rate; rate = picker x 0.20 karung/menit
+   x harga karung zona terbaik yang terbuka / 60 (per detik).
+   Tanpa picker -> tidak ada penghasilan offline (picker = mesin idle-nya).
+   Doubler 2x memakai mock overlay 3 detik (pola §6); SDK asli = Fase 4.
+   ============================================================================ */
+const OfflineSys = {
+  CAP_SEC: 8 * 3600,
+  modalEl: null, amtEl: null, gain: 0,
+  rate() {
+    const pk = SaveSys.data.upg.picker || 0;
+    if (pk <= 0) return 0;
+    let price = ZONES[0].price;
+    for (let i = 0; i < 3; i++) if (SaveSys.data.zones[i]) price = Math.max(price, ZONES[i].price);
+    return pk * 0.20 * price / 60;
+  },
+  compute(nowMs) {
+    const last = SaveSys.data.lastSave || 0;
+    if (!last) return { sec: 0, gain: 0 };
+    const sec = Math.min(Math.max(0, (nowMs - last) / 1000), this.CAP_SEC);
+    return { sec: sec, gain: sec * this.rate() };
+  },
+  check() {
+    const r = this.compute(Date.now());
+    this.gain = r.gain;
+    if (r.sec < 300 || this.gain < 1) return;   // < 5 menit / < $1: tidak usah modal
+    this.modalEl = document.getElementById('offline-modal');
+    this.amtEl = document.getElementById('offline-amt');
+    this.amtEl.textContent = '$' + this.gain.toFixed(2);
+    this.modalEl.style.display = 'flex';
+    document.getElementById('btn-off-collect').addEventListener('click', () => this.collect(1));
+    document.getElementById('btn-off-double').addEventListener('click', () => this.showAd());
+  },
+  collect(mult) {
+    if (this.gain <= 0) return;
+    SaveSys.data.cash += this.gain * mult;
+    this.gain = 0;
+    if (this.modalEl) this.modalEl.style.display = 'none';
+    const ad = document.getElementById('ad-overlay');
+    if (ad) ad.style.display = 'none';
+    AudioSys.cash();
+    Hud.dirty = true;
+    SaveSys.save();
+  },
+  showAd() {
+    // mock ad: hitung mundur 3 detik lalu collect 2x (SDK asli Fase 4)
+    const ad = document.getElementById('ad-overlay');
+    const cnt = document.getElementById('ad-count');
+    ad.style.display = 'flex';
+    let n = 3;
+    cnt.textContent = n;
+    const iv = setInterval(() => {
+      n--;
+      if (n <= 0) { clearInterval(iv); this.collect(2); }
+      else cnt.textContent = n;
+    }, 1000);
+  },
+};
 
 /* ============================================================================
    FASE 4 — SDK CRAZYGAMES v3, ACHIEVEMENTS, SHARE CARD, QA PORTAL
