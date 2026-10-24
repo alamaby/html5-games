@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Alibi Breaker — Level 1: Lampu Perpustakaan</title>
+<!--
+  Alibi Breaker — Level 1 (prototipe lokal, judul kerja, bukan final)
+  Kasus: Lampu Perpustakaan / The Library Lamp — dari DESIGN.md §5.1
+  Single-file HTML5, vanilla JS, tanpa aset eksternal, tanpa SDK portal.
+  SDK CrazyGames v3 ditambahkan pada build portal, bukan pada prototipe
+  lokal ini, supaya file ini bisa dibuka offline tanpa gagal load.
+  Save: localStorage kunci ab_save_v1.
+-->
+<style>
+  :root{--bg:#f4ead8;--card:#fffdf6;--ink:#22302e;--muted:#6b7280;--teal:#14532d;--teal2:#1f7a4d;--gold:#d97706;--line:#e5dcc3;--red:#b91c1c;--green:#15803d}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:16px 14px 32px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  h1{font-size:22px;margin:0;line-height:1.2}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .pill{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 10px;font-size:13px;cursor:pointer}
+  .pill.active{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:14px;box-shadow:0 2px 0 rgba(0,0,0,.04)}
+  h2{font-size:18px;margin:0 0 8px}
+  h3{font-size:15px;margin:16px 0 8px}
+  p{line-height:1.55;margin:8px 0}
+  .meta{font-size:13px;color:var(--muted)}
+  .btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;background:var(--teal);color:#fff;margin-top:12px}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.secondary{background:#fff;color:var(--teal);border:2px solid var(--teal)}
+  .btn.small{width:auto;display:inline-block;padding:10px 14px;font-size:14px;margin-top:8px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:520px){.grid{grid-template-columns:1fr}}
+  .clue,.suspect{border:2px solid var(--line);border-radius:12px;padding:12px;background:#fff;cursor:pointer;text-align:left;font-size:15px}
+  .clue.found{border-color:var(--teal2);background:#ecfdf5}
+  .suspect.selected{border-color:var(--gold);background:#fffbeb;outline:2px solid var(--gold)}
+  .clue .ic,.suspect .ic{font-size:24px}
+  .clue .lb,.suspect .lb{font-weight:700;display:block;margin-top:4px}
+  .clue .st,.suspect .st{font-size:13px;color:var(--muted);display:block;margin-top:2px}
+  .detail{border-left:4px solid var(--gold);background:#fffbeb;padding:12px;border-radius:8px;margin-top:12px}
+  .timeline{position:relative;height:44px;background:#eef2ee;border-radius:999px;margin:12px 0 4px;overflow:hidden}
+  .timeline .window{position:absolute;top:0;bottom:0;background:#fde68a;opacity:.9}
+  .timeline .mark{position:absolute;top:6px;width:32px;height:32px;margin-left:-16px;border-radius:50%;background:var(--teal);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff}
+  .timeline-labels{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+  .chip{display:inline-block;border:2px solid var(--line);border-radius:999px;padding:8px 12px;margin:4px 4px 0 0;background:#fff;cursor:pointer;font-size:14px}
+  .chip.selected{border-color:var(--gold);background:#fffbeb;font-weight:700}
+  .msg{border-radius:12px;padding:12px;margin-top:12px;line-height:1.5}
+  .msg.bad{background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d}
+  .msg.good{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d}
+  .stars{font-size:32px;letter-spacing:4px;color:var(--gold)}
+  .stars .off{color:#d1d5db}
+  .hidden{display:none}
+  ol{line-height:1.6;padding-left:20px}
+  .footer{font-size:12px;color:var(--muted);text-align:center;margin-top:20px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="title">🔍 Alibi Breaker</h1>
+      <div class="sub" id="subtitle">Level 1 — Lampu Perpustakaan</div>
+    </div>
+    <div>
+      <button class="pill active" id="btn-id" type="button">ID</button>
+      <button class="pill" id="btn-en" type="button">EN</button>
+      <button class="pill" id="btn-sound" type="button">🔊</button>
+    </div>
+  </header>
+
+  <!-- BRIEFING -->
+  <section class="card" id="screen-brief">
+    <h2 id="brief-title">Kasus 1: Lampu Perpustakaan</h2>
+    <p class="meta" id="brief-meta">Perpustakaan kota • Ruang baca utama • Ditemukan jam 21.00 • Rentang kejadian 20.50–21.00</p>
+    <p id="brief-text">Pak Raka ditemukan di ruang baca utama jam 21.00. Empat orang ada di gedung malam ini — satu alibi tidak cocok dengan jejaknya.</p>
+    <p class="meta" id="brief-how">Cara main: tap clue untuk mengumpulkan bukti, baca alibi 4 tersangka, lalu tuduh dengan memilih tersangka DAN bukti pematahnya.</p>
+    <p class="meta" id="best-line"></p>
+    <button class="btn" id="btn-start" type="button">Mulai menyelidiki →</button>
+  </section>
+
+  <!-- PLAY -->
+  <section class="card hidden" id="screen-play">
+    <h2 id="play-title">Selidiki adegan</h2>
+    <p class="meta" id="clue-progress">Clue ditemukan: 0 / 5</p>
+
+    <h3 id="clue-heading">🧩 Clue di adegan</h3>
+    <div class="grid" id="clue-grid"></div>
+    <div class="detail hidden" id="clue-detail"></div>
+
+    <h3 id="timeline-heading">🕐 Timeline</h3>
+    <p class="meta" id="timeline-note">Area kuning = rentang kejadian 20.50–21.00. Tanda hijau muncul saat clue waktu ditemukan.</p>
+    <div class="timeline" id="timeline">
+      <div class="window" id="timeline-window"></div>
+    </div>
+    <div class="timeline-labels"><span>20.20</span><span>20.50–21.00</span><span>21.00</span></div>
+
+    <h3 id="suspect-heading">👥 Tersangka dan alibi</h3>
+    <p class="meta" id="suspect-note">Tap kartu untuk memilih tersangka yang akan dituduh.</p>
+    <div class="grid" id="suspect-grid"></div>
+
+    <h3 id="accuse-heading">⚖️ Tuduh</h3>
+    <p class="meta" id="accuse-note">Pilih tersangka, lalu pilih bukti pematah dari clue yang sudah ditemukan.</p>
+    <div id="accuse-clues"></div>
+    <p class="meta" id="accuse-summary"></p>
+    <button class="btn" id="btn-accuse" type="button" disabled>Tuduh</button>
+    <button class="btn secondary small" id="btn-hint" type="button">💡 Minta hint</button>
+    <p class="meta" id="hint-text"></p>
+    <div class="msg bad hidden" id="wrong-box"></div>
+  </section>
+
+  <!-- RESULT -->
+  <section class="card hidden" id="screen-result">
+    <h2 id="result-title">Kasus terpecahkan!</h2>
+    <div class="stars" id="result-stars">★★★</div>
+    <p id="result-text"></p>
+    <h3 id="logic-heading">Rantai logika</h3>
+    <ol id="logic-list"></ol>
+    <button class="btn" id="btn-replay" type="button">Mainkan lagi Kasus 1</button>
+    <button class="btn secondary" id="btn-next" type="button" disabled>Kasus 2 — Segera hadir</button>
+    <p class="meta" id="save-note"></p>
+  </section>
+
+  <p class="footer" id="footer-note">Prototipe Level 1 • Judul kerja, bukan final • Tanpa gore • Save lokal di perangkat ini (ab_save_v1) • SDK portal ditambahkan pada build portal, bukan pada prototipe lokal ini.</p>
+</div>
+
+<script>
+"use strict";
+/* Data Kasus 1 — harus sama persis dengan DESIGN.md §5.1 */
+const CASE = {
+  id: "kasus-01",
+  culprit: "Lina",
+  breakingClue: "akses",
+  suspects: [
+    { id: "Lina", icon: "👩‍🏫", role_id: "Pustakawan senior", role_en: "Senior librarian",
+      alibi_id: "Di ruang arsip 20.30–21.00, tidak keluar sama sekali.",
+      alibi_en: "In the archive room 20:30–21:00, never left at all.",
+      defense_id: "Tidak ada bukti yang membela Lina — log akses justru mematahkan alibinya.",
+      defense_en: "No evidence defends Lina — the access log breaks her alibi instead." },
+    { id: "Bima", icon: "🧑‍🎓", role_id: "Mahasiswa", role_en: "Student",
+      alibi_id: "Di ruang belajar lantai 2, 20.00–21.00.",
+      alibi_en: "In the study room on floor 2, 20:00–21:00.",
+      defense_id: "CCTV lantai 2 merekam Bima jam 20.57 — ia di tempat lain pada rentang kejadian.",
+      defense_en: "Floor 2 CCTV recorded Bima at 20:57 — he was elsewhere during the window." },
+    { id: "Hadi", icon: "👮", role_id: "Satpam", role_en: "Security guard",
+      alibi_id: "Patroli koridor 20.40–21.00.",
+      alibi_en: "Patrolling the corridor 20:40–21:00.",
+      defense_id: "Cap patroli Pak Hadi di koridor utara jam 20.52 — ia di tempat lain pada menit yang sama.",
+      defense_en: "Hadi's patrol stamp in the north corridor at 20:52 — he was elsewhere that same minute." },
+    { id: "Rani", icon: "🚶‍♀️", role_id: "Pengunjung", role_en: "Visitor",
+      alibi_id: "Sudah pulang jam 20.20.",
+      alibi_en: "Already went home at 20:20.",
+      defense_id: "Struk parkir Rani 20.22 dan CCTV gerbang 20.23 — ia sudah pergi sebelum rentang kejadian.",
+      defense_en: "Rani's parking receipt at 20:22 and gate CCTV at 20:23 — she had left before the window." }
+  ],
+  clues: [
+    { id: "akses", icon: "🔑", time: "20:52", minutes: 1252, breaks: "Lina", clears: null, supporting: false,
+      label_id: "Log kartu akses", label_en: "Access card log",
+      detail_id: "Kartu Lina membuka pintu ruang baca jam 20.52 — padahal ia mengaku tidak keluar dari ruang arsip sama sekali.",
+      detail_en: "Lina's card opened the reading room door at 20:52 — even though she claimed she never left the archive room." },
+    { id: "sidik", icon: "🖐️", time: null, minutes: null, breaks: null, clears: null, supporting: true,
+      label_id: "Sidik jari di pintu", label_en: "Fingerprint on the door",
+      detail_id: "Sidik jari Lina ada di gagang pintu ruang baca. Ini mendukung log akses, tapi bukan pematah utama.",
+      detail_en: "Lina's fingerprint is on the reading room door handle. This supports the access log, but it is not the main breaker." },
+    { id: "cctv-bima", icon: "📹", time: "20:57", minutes: 1257, breaks: null, clears: "Bima", supporting: false,
+      label_id: "CCTV lantai 2", label_en: "Floor 2 CCTV",
+      detail_id: "CCTV lantai 2 merekam Bima jam 20.57, di ruang belajar — bukan di ruang baca utama.",
+      detail_en: "Floor 2 CCTV recorded Bima at 20:57, in the study room — not in the main reading room." },
+    { id: "patroli", icon: "📋", time: "20:52", minutes: 1252, breaks: null, clears: "Hadi", supporting: false,
+      label_id: "Cap patroli", label_en: "Patrol stamp",
+      detail_id: "Cap patroli Pak Hadi di koridor utara jam 20.52 — menit yang sama dengan log akses Lina, tapi tempat yang berbeda.",
+      detail_en: "Hadi's patrol stamp in the north corridor at 20:52 — the same minute as Lina's access log, but a different place." },
+    { id: "parkir", icon: "🅿️", time: "20:22", minutes: 1222, breaks: null, clears: "Rani", supporting: false,
+      label_id: "Struk parkir + CCTV gerbang", label_en: "Parking receipt + gate CCTV",
+      detail_id: "Struk parkir Rani jam 20.22 dan CCTV gerbang jam 20.23 — Rani sudah pergi sebelum rentang kejadian 20.50–21.00.",
+      detail_en: "Rani's parking receipt at 20:22 and gate CCTV at 20:23 — Rani had left before the 20:50–21:00 window." }
+  ],
+  hints: [
+    { id: "Satu orang mengaku tidak pernah keluar, tapi ada jejak keluar.",
+      en: "One person claims they never left, but there is a trace of them leaving." },
+    { id: "Cek log pintu.",
+      en: "Check the door log." }
+  ],
+  logic_id: [
+    "Bima gugur: CCTV lantai 2 merekamnya jam 20.57.",
+    "Pak Hadi gugur: cap patroli koridor utara jam 20.52 menempatkannya di tempat lain.",
+    "Rani gugur: struk parkir 20.22 dan CCTV gerbang 20.23 — ia pergi sebelum kejadian.",
+    "Tersisa Lina, dan log kartu akses jam 20.52 mematahkan klaimnya bahwa ia tidak keluar dari ruang arsip."
+  ],
+  logic_en: [
+    "Bima is cleared: floor 2 CCTV recorded him at 20:57.",
+    "Hadi is cleared: the north corridor patrol stamp at 20:52 puts him elsewhere.",
+    "Rani is cleared: parking receipt 20:22 and gate CCTV 20:23 — she left before the incident.",
+    "Only Lina remains, and the access card log at 20:52 breaks her claim that she never left the archive room."
+  ]
+};
+
+const UI = {
+  id: {
+    subtitle: "Level 1 — Lampu Perpustakaan", briefTitle: "Kasus 1: Lampu Perpustakaan",
+    briefMeta: "Perpustakaan kota • Ruang baca utama • Ditemukan jam 21.00 • Rentang kejadian 20.50–21.00",
+    briefText: "Pak Raka ditemukan di ruang baca utama jam 21.00. Empat orang ada di gedung malam ini — satu alibi tidak cocok dengan jejaknya.",
+    briefHow: "Cara main: tap clue untuk mengumpulkan bukti, baca alibi 4 tersangka, lalu tuduh dengan memilih tersangka DAN bukti pematahnya.",
+    start: "Mulai menyelidiki →", playTitle: "Selidiki adegan", clueProgress: "Clue ditemukan: ",
+    clueHeading: "🧩 Clue di adegan", timelineHeading: "🕐 Timeline",
+    timelineNote: "Area kuning = rentang kejadian 20.50–21.00. Tanda hijau muncul saat clue waktu ditemukan.",
+    suspectHeading: "👥 Tersangka dan alibi", suspectNote: "Tap kartu untuk memilih tersangka yang akan dituduh.",
+    accuseHeading: "⚖️ Tuduh", accuseNote: "Pilih tersangka, lalu pilih bukti pematah dari clue yang sudah ditemukan.",
+    accuseBtn: "Tuduh", hintBtn: "💡 Minta hint", found: "Ditemukan ✓", notFound: "Tap untuk memeriksa",
+    selectSuspectFirst: "Pilih tersangka dulu.", selectClueFirst: "Pilih bukti pematah dulu.",
+    resultTitle: "Kasus terpecahkan!", logicHeading: "Rantai logika",
+    resultText: "Pelakunya Lina. Log kartu akses jam 20.52 membuktikan ia keluar dari ruang arsip, bertentangan dengan alibinya.",
+    replay: "Mainkan lagi Kasus 1", next: "Kasus 2 — Segera hadir",
+    best: "Bintang terbaik Kasus 1: ", noBest: "Belum ada bintang — selesaikan Kasus 1 untuk mendapatkannya.",
+    hintUsed: "Hint dipakai: ", noMoreHints: "Hint sudah habis (2/2).",
+    wrongSuspect: "Belum tepat. ", wrongClue: "Tersangkanya benar, tapi bukti itu hanya pendukung, bukan pematah utama. Coba lagi dengan bukti yang mematahkan alibi secara langsung.",
+    saved: "Tersimpan lokal: bintang Kasus 1 = "
+  },
+  en: {
+    subtitle: "Level 1 — The Library Lamp", briefTitle: "Case 1: The Library Lamp",
+    briefMeta: "City library • Main reading room • Found at 21:00 • Incident window 20:50–21:00",
+    briefText: "Mr. Raka was found in the main reading room at 21:00. Four people were in the building tonight — one alibi does not match the trace.",
+    briefHow: "How to play: tap clues to collect evidence, read the 4 suspects' alibis, then accuse by choosing a suspect AND the breaking evidence.",
+    start: "Start investigating →", playTitle: "Investigate the scene", clueProgress: "Clues found: ",
+    clueHeading: "🧩 Clues in the scene", timelineHeading: "🕐 Timeline",
+    timelineNote: "Yellow area = incident window 20:50–21:00. Green marks appear when a timed clue is found.",
+    suspectHeading: "👥 Suspects and alibis", suspectNote: "Tap a card to choose the suspect to accuse.",
+    accuseHeading: "⚖️ Accuse", accuseNote: "Choose a suspect, then choose the breaking evidence from the clues you found.",
+    accuseBtn: "Accuse", hintBtn: "💡 Ask for a hint", found: "Found ✓", notFound: "Tap to examine",
+    selectSuspectFirst: "Choose a suspect first.", selectClueFirst: "Choose the breaking evidence first.",
+    resultTitle: "Case solved!", logicHeading: "Logic chain",
+    resultText: "The culprit is Lina. The access card log at 20:52 proves she left the archive room, contradicting her alibi.",
+    replay: "Replay Case 1", next: "Case 2 — Coming soon",
+    best: "Best stars for Case 1: ", noBest: "No stars yet — solve Case 1 to earn them.",
+    hintUsed: "Hints used: ", noMoreHints: "No hints left (2/2).",
+    wrongSuspect: "Not quite. ", wrongClue: "Right suspect, but that evidence only supports the case — it is not the main breaker. Try again with evidence that directly breaks the alibi.",
+    saved: "Saved locally: Case 1 stars = "
+  }
+};
+
+let lang = "id";
+let soundOn = true;
+let found = new Set();
+let selectedSuspect = null;
+let selectedClue = null;
+let attempts = 0;
+let hintIndex = 0;
+let audioCtx = null;
+
+function t(key){ return UI[lang][key]; }
+function txt(obj){ return lang === "id" ? obj.id : obj.en; }
+function suspectById(id){ return CASE.suspects.find(function(s){ return s.id === id; }); }
+function clueById(id){ return CASE.clues.find(function(c){ return c.id === id; }); }
+
+function beep(freq, dur){
+  if(!soundOn) return;
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine"; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  }catch(e){ /* audio opsional, game tetap jalan */ }
+}
+
+function loadSave(){
+  try{ return JSON.parse(localStorage.getItem("ab_save_v1") || "{}"); }
+  catch(e){ return {}; }
+}
+function saveStars(stars){
+  try{
+    const s = loadSave();
+    if(!s.case1 || stars > s.case1.stars) s.case1 = { stars: stars, solved: true };
+    localStorage.setItem("ab_save_v1", JSON.stringify(s));
+    return s;
+  }catch(e){ return {}; }
+}
+function showBest(){
+  const s = loadSave();
+  const el = document.getElementById("best-line");
+  el.textContent = (s.case1 && s.case1.stars) ? t("best") + "★".repeat(s.case1.stars) + "☆".repeat(3 - s.case1.stars) : t("noBest");
+}
+
+function renderStatic(){
+  document.getElementById("subtitle").textContent = t("subtitle");
+  document.getElementById("brief-title").textContent = t("briefTitle");
+  document.getElementById("brief-meta").textContent = t("briefMeta");
+  document.getElementById("brief-text").textContent = t("briefText");
+  document.getElementById("brief-how").textContent = t("briefHow");
+  document.getElementById("btn-start").textContent = t("start");
+  document.getElementById("play-title").textContent = t("playTitle");
+  document.getElementById("clue-heading").textContent = t("clueHeading");
+  document.getElementById("timeline-heading").textContent = t("timelineHeading");
+  document.getElementById("timeline-note").textContent = t("timelineNote");
+  document.getElementById("suspect-heading").textContent = t("suspectHeading");
+  document.getElementById("suspect-note").textContent = t("suspectNote");
+  document.getElementById("accuse-heading").textContent = t("accuseHeading");
+  document.getElementById("accuse-note").textContent = t("accuseNote");
+  document.getElementById("btn-accuse").textContent = t("accuseBtn");
+  document.getElementById("btn-hint").textContent = t("hintBtn");
+  document.getElementById("result-title").textContent = t("resultTitle");
+  document.getElementById("logic-heading").textContent = t("logicHeading");
+  document.getElementById("result-text").textContent = t("resultText");
+  document.getElementById("btn-replay").textContent = t("replay");
+  document.getElementById("btn-next").textContent = t("next");
+  document.getElementById("btn-id").classList.toggle("active", lang === "id");
+  document.getElementById("btn-en").classList.toggle("active", lang === "en");
+  showBest();
+  renderClues(); renderSuspects(); renderAccuseClues(); updateProgress();
+}
+
+function renderClues(){
+  const grid = document.getElementById("clue-grid");
+  grid.innerHTML = "";
+  CASE.clues.forEach(function(c){
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "clue" + (found.has(c.id) ? " found" : "");
+    b.innerHTML = '<span class="ic">' + c.icon + "</span><span class=\"lb\">" + (lang === "id" ? c.label_id : c.label_en) + "</span><span class=\"st\">" + (found.has(c.id) ? t("found") : t("notFound")) + (c.time ? " • " + c.time : "") + "</span>";
+    b.onclick = function(){
+      found.add(c.id);
+      const d = document.getElementById("clue-detail");
+      d.classList.remove("hidden");
+      d.innerHTML = "<strong>" + (lang === "id" ? c.label_id : c.label_en) + (c.time ? " • " + c.time : "") + "</strong><p>" + (lang === "id" ? c.detail_id : c.detail_en) + "</p>";
+      beep(660, 0.12); renderClues(); renderAccuseClues(); renderTimeline(); updateProgress();
+    };
+    grid.appendChild(b);
+  });
+}
+
+function renderSuspects(){
+  const grid = document.getElementById("suspect-grid");
+  grid.innerHTML = "";
+  CASE.suspects.forEach(function(s){
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "suspect" + (selectedSuspect === s.id ? " selected" : "");
+    b.innerHTML = '<span class="ic">' + s.icon + "</span><span class=\"lb\">" + s.id + " — " + (lang === "id" ? s.role_id : s.role_en) + "</span><span class=\"st\">" + (lang === "id" ? s.alibi_id : s.alibi_en) + "</span>";
+    b.onclick = function(){ selectedSuspect = s.id; beep(520, 0.1); renderSuspects(); updateAccuse(); };
+    grid.appendChild(b);
+  });
+}
+
+function renderAccuseClues(){
+  const box = document.getElementById("accuse-clues");
+  box.innerHTML = "";
+  const foundClues = CASE.clues.filter(function(c){ return found.has(c.id); });
+  if(foundClues.length === 0){
+    box.innerHTML = '<p class="meta">' + (lang === "id" ? "Belum ada clue ditemukan. Tap clue di atas dulu." : "No clues found yet. Tap a clue above first.") + "</p>";
+    return;
+  }
+  foundClues.forEach(function(c){
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip" + (selectedClue === c.id ? " selected" : "");
+    b.textContent = c.icon + " " + (lang === "id" ? c.label_id : c.label_en);
+    b.onclick = function(){ selectedClue = c.id; beep(520, 0.1); renderAccuseClues(); updateAccuse(); };
+    box.appendChild(b);
+  });
+}
+
+function updateProgress(){
+  document.getElementById("clue-progress").textContent = t("clueProgress") + found.size + " / " + CASE.clues.length;
+}
+function updateAccuse(){
+  const btn = document.getElementById("btn-accuse");
+  btn.disabled = !(selectedSuspect && selectedClue);
+  const sum = document.getElementById("accuse-summary");
+  if(!selectedSuspect) sum.textContent = t("selectSuspectFirst");
+  else if(!selectedClue) sum.textContent = t("selectClueFirst") + " (" + (lang === "id" ? "tersangka: " : "suspect: ") + selectedSuspect + ")";
+  else sum.textContent = (lang === "id" ? "Siap menuduh: " : "Ready to accuse: ") + selectedSuspect + " — " + (lang === "id" ? clueById(selectedClue).label_id : clueById(selectedClue).label_en);
+}
+function renderTimeline(){
+  const tl = document.getElementById("timeline");
+  tl.querySelectorAll(".mark").forEach(function(m){ m.remove(); });
+  // Rentang timeline 20:20 (1220) s.d. 21:00 (1260); jendela 20:50-21:00
+  const start = 1220, end = 1260;
+  const win = document.getElementById("timeline-window");
+  win.style.left = ((1250 - start) / (end - start) * 100) + "%";
+  win.style.width = ((1260 - 1250) / (end - start) * 100) + "%";
+  CASE.clues.forEach(function(c){
+    if(c.minutes === null || !found.has(c.id)) return;
+    const m = document.createElement("div");
+    m.className = "mark"; m.textContent = c.icon;
+    m.style.left = ((c.minutes - start) / (end - start) * 100) + "%";
+    m.title = c.time + " — " + (lang === "id" ? c.label_id : c.label_en);
+    tl.appendChild(m);
+  });
+}
+
+function showScreen(id){
+  ["screen-brief", "screen-play", "screen-result"].forEach(function(s){
+    document.getElementById(s).classList.toggle("hidden", s !== id);
+  });
+  window.scrollTo(0, 0);
+}
+function resetCase(){
+  found = new Set(); selectedSuspect = null; selectedClue = null;
+  attempts = 0; hintIndex = 0;
+  document.getElementById("clue-detail").classList.add("hidden");
+  document.getElementById("clue-detail").innerHTML = "";
+  document.getElementById("wrong-box").classList.add("hidden");
+  document.getElementById("hint-text").textContent = "";
+  renderClues(); renderSuspects(); renderAccuseClues(); renderTimeline(); updateProgress(); updateAccuse();
+}
+
+document.getElementById("btn-start").onclick = function(){ beep(700, 0.12); showScreen("screen-play"); };
+document.getElementById("btn-replay").onclick = function(){ resetCase(); showScreen("screen-brief"); };
+document.getElementById("btn-id").onclick = function(){ lang = "id"; renderStatic(); };
+document.getElementById("btn-en").onclick = function(){ lang = "en"; renderStatic(); };
+document.getElementById("btn-sound").onclick = function(){
+  soundOn = !soundOn;
+  document.getElementById("btn-sound").textContent = soundOn ? "🔊" : "🔇";
+  if(soundOn) beep(660, 0.1);
+};
+document.getElementById("btn-hint").onclick = function(){
+  if(hintIndex >= CASE.hints.length){
+    document.getElementById("hint-text").textContent = t("noMoreHints");
+    return;
+  }
+  const h = CASE.hints[hintIndex];
+  hintIndex++;
+  document.getElementById("hint-text").textContent = "💡 " + (lang === "id" ? h.id : h.en) + " (" + t("hintUsed") + hintIndex + "/2)";
+  beep(440, 0.15);
+};
+document.getElementById("btn-accuse").onclick = function(){
+  if(!selectedSuspect || !selectedClue) return;
+  attempts++;
+  const box = document.getElementById("wrong-box");
+  const clue = clueById(selectedClue);
+  if(selectedSuspect === CASE.culprit && selectedClue === CASE.breakingClue){
+    let stars = 1;
+    if(attempts === 1 && hintIndex === 0) stars = 3;
+    else if(hintIndex <= 1 && attempts <= 2) stars = 2;
+    const saved = saveStars(stars);
+    document.getElementById("result-stars").innerHTML = "★".repeat(stars) + '<span class="off">' + "☆".repeat(3 - stars) + "</span>";
+    const logic = lang === "id" ? CASE.logic_id : CASE.logic_en;
+    document.getElementById("logic-list").innerHTML = logic.map(function(x){ return "<li>" + x + "</li>"; }).join("");
+    document.getElementById("save-note").textContent = t("saved") + stars + "★";
+    beep(880, 0.2); setTimeout(function(){ beep(1100, 0.25); }, 180);
+    showScreen("screen-result");
+    return;
+  }
+  box.classList.remove("hidden");
+  if(selectedSuspect === CASE.culprit && clue.supporting){
+    box.textContent = t("wrongClue");
+    beep(220, 0.25);
+  } else {
+    const s = suspectById(selectedSuspect);
+    box.textContent = t("wrongSuspect") + (lang === "id" ? s.defense_id : s.defense_en);
+    beep(220, 0.25);
+  }
+};
+
+renderStatic(); renderTimeline(); updateAccuse();
+</script>
+</body>
+</html>
