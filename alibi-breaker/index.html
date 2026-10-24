@@ -54,6 +54,8 @@
   .hidden{display:none}
   ol{line-height:1.6;padding-left:20px}
   .footer{font-size:12px;color:var(--muted);text-align:center;margin-top:20px;line-height:1.5}
+  .mode-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .seed-input{flex:1;min-width:160px;border:2px solid var(--line);border-radius:12px;padding:11px 12px;font-size:15px;background:#fff}
 </style>
 </head>
 <body>
@@ -76,6 +78,17 @@
     <p class="meta" id="brief-meta">Perpustakaan kota • Ruang baca utama • Ditemukan jam 21.00 • Rentang kejadian 20.50–21.00</p>
     <p id="brief-text">Pak Raka ditemukan di ruang baca utama jam 21.00. Empat orang ada di gedung malam ini — satu alibi tidak cocok dengan jejaknya.</p>
     <p class="meta" id="brief-how">Cara main: tap clue untuk mengumpulkan bukti, baca alibi 4 tersangka, lalu tuduh dengan memilih tersangka DAN bukti pematahnya.</p>
+    <h3 id="mode-heading">Mode main</h3>
+    <div class="mode-row">
+      <button class="pill active" id="btn-mode-original" type="button">Kasus Asli</button>
+      <button class="pill" id="btn-mode-random" type="button">🎲 Acak</button>
+      <button class="pill" id="btn-mode-daily" type="button">📅 Harian</button>
+    </div>
+    <div class="mode-row">
+      <input class="seed-input" id="seed-input" type="text" inputmode="numeric" placeholder="Kode seed, mis. AB-482913" autocomplete="off">
+      <button class="btn secondary small" id="btn-seed" type="button">Pakai seed</button>
+    </div>
+    <p class="meta" id="mode-line"></p>
     <p class="meta" id="best-line"></p>
     <button class="btn" id="btn-start" type="button">Mulai menyelidiki →</button>
   </section>
@@ -83,6 +96,7 @@
   <!-- PLAY -->
   <section class="card hidden" id="screen-play">
     <h2 id="play-title">Selidiki adegan</h2>
+    <p class="meta" id="play-seed-line"></p>
     <p class="meta" id="clue-progress">Clue ditemukan: 0 / 5</p>
 
     <h3 id="clue-heading">🧩 Clue di adegan</h3>
@@ -94,7 +108,7 @@
     <div class="timeline" id="timeline">
       <div class="window" id="timeline-window"></div>
     </div>
-    <div class="timeline-labels"><span>20.20</span><span>20.50–21.00</span><span>21.00</span></div>
+    <div class="timeline-labels"><span id="timeline-start-label">20.20</span><span id="timeline-window-label">20.50–21.00</span><span id="timeline-end-label">21.00</span></div>
 
     <h3 id="suspect-heading">👥 Tersangka dan alibi</h3>
     <p class="meta" id="suspect-note">Tap kartu untuk memilih tersangka yang akan dituduh.</p>
@@ -119,6 +133,7 @@
     <ol id="logic-list"></ol>
     <button class="btn" id="btn-replay" type="button">Mainkan lagi Kasus 1</button>
     <button class="btn secondary" id="btn-next" type="button" disabled>Kasus 2 — Segera hadir</button>
+    <p class="meta" id="result-seed-line"></p>
     <p class="meta" id="save-note"></p>
   </section>
 
@@ -196,6 +211,313 @@ const CASE = {
   ]
 };
 
+/* GENERATOR-START — fungsi murni, tanpa DOM. Di-test oleh tests/test_generator.mjs.
+   Desain lengkap: GENERATOR.md. Seed 0 = CASE asli di atas, persis. */
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function pick(rng, arr){ return arr[Math.floor(rng() * arr.length)]; }
+function pickUnique(rng, pool, n){
+  const rest = pool.slice(), out = [];
+  for(let i = 0; i < n && rest.length; i++){
+    out.push(rest.splice(Math.floor(rng() * rest.length), 1)[0]);
+  }
+  return out;
+}
+function shuffleArr(rng, arr){
+  const a = arr.slice();
+  for(let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+  }
+  return a;
+}
+function fmtTime(minutes){
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+}
+const NAME_POOL = ["Lina", "Bima", "Hadi", "Rani", "Dewi", "Rizal", "Sinta", "Joko", "Maya", "Tono", "Ardi", "Putri", "Fajar", "Intan", "Dimas", "Tari"];
+const VICTIMS = [
+  { first: "Raka", id: "Pak Raka", en: "Mr. Raka" },
+  { first: "Ayu", id: "Bu Ayu", en: "Mrs. Ayu" },
+  { first: "Dani", id: "Pak Dani", en: "Mr. Dani" },
+  { first: "Sari", id: "Bu Sari", en: "Mrs. Sari" }
+];
+const WINDOW_STARTS = [1170, 1190, 1200, 1220, 1250];
+const SKINS = [
+  { id: "perpustakaan", setting_id: "Perpustakaan kota", setting_en: "City library",
+    crimeRoom_id: "Ruang Baca Utama", crimeRoom_en: "Main Reading Room",
+    archiveRoom_id: "Ruang Arsip", archiveRoom_en: "Archive Room",
+    access_id: "Kartu Akses", access_en: "Access Card",
+    victimRole_id: "Penjaga Perpustakaan", victimRole_en: "Library Keeper",
+    culpritRoles: [
+      { role_id: "Pustakawan Senior", role_en: "Senior Librarian", icon: "👩‍🏫" },
+      { role_id: "Asisten Pustakawan", role_en: "Library Assistant", icon: "🧑‍💼" }
+    ],
+    cctvRoles: [
+      { role_id: "Mahasiswa", role_en: "Student", icon: "🧑‍🎓", room_id: "Ruang Belajar Lantai 2", room_en: "Floor 2 Study Room" },
+      { role_id: "Peneliti Tamu", role_en: "Visiting Researcher", icon: "🧑‍🎓", room_id: "Ruang Baca Lantai 2", room_en: "Floor 2 Reading Room" }
+    ],
+    patrolRole: { role_id: "Satpam", role_en: "Security Guard", icon: "👮", area_id: "Koridor", area_en: "Corridor", place_id: "Koridor Utara", place_en: "North Corridor" },
+    leftRoles: [
+      { role_id: "Pengunjung", role_en: "Visitor", icon: "🚶‍♀️", proof_id: "Struk parkir", proof_en: "Parking receipt" },
+      { role_id: "Anggota Perpustakaan", role_en: "Library Member", icon: "🚶‍♀️", proof_id: "Struk parkir", proof_en: "Parking receipt" }
+    ] },
+  { id: "museum", setting_id: "Museum", setting_en: "Museum",
+    crimeRoom_id: "Ruang Pamer A", crimeRoom_en: "Gallery A",
+    archiveRoom_id: "Gudang Koleksi", archiveRoom_en: "Collection Storage",
+    access_id: "Kartu Staf", access_en: "Staff Card",
+    victimRole_id: "Kurator", victimRole_en: "Curator",
+    culpritRoles: [
+      { role_id: "Asisten Kurator", role_en: "Assistant Curator", icon: "🧑‍💼" },
+      { role_id: "Staf Konservasi", role_en: "Conservation Staff", icon: "🧑‍🔬" }
+    ],
+    cctvRoles: [
+      { role_id: "Fotografer", role_en: "Photographer", icon: "📷", room_id: "Galeri B", room_en: "Gallery B" },
+      { role_id: "Pengunjung Pameran", role_en: "Exhibition Visitor", icon: "🚶‍♀️", room_id: "Galeri B", room_en: "Gallery B" }
+    ],
+    patrolRole: { role_id: "Satpam", role_en: "Security Guard", icon: "👮", area_id: "Koridor", area_en: "Corridor", place_id: "Koridor", place_en: "Corridor" },
+    leftRoles: [
+      { role_id: "Pengunjung", role_en: "Visitor", icon: "🚶‍♀️", proof_id: "Tiket keluar", proof_en: "Exit ticket" },
+      { role_id: "Sponsor Pameran", role_en: "Exhibition Sponsor", icon: "🚶‍♀️", proof_id: "Tiket keluar", proof_en: "Exit ticket" }
+    ] },
+  { id: "kantor", setting_id: "Kantor", setting_en: "Office",
+    crimeRoom_id: "Ruang Rapat Utama", crimeRoom_en: "Main Meeting Room",
+    archiveRoom_id: "Ruang Arsip Dokumen", archiveRoom_en: "Document Archive",
+    access_id: "Kartu Karyawan", access_en: "Employee Card",
+    victimRole_id: "Manajer Kantor", victimRole_en: "Office Manager",
+    culpritRoles: [
+      { role_id: "Staf Administrasi", role_en: "Administration Staff", icon: "🧑‍💼" },
+      { role_id: "Asisten Manajer", role_en: "Assistant Manager", icon: "🧑‍💼" }
+    ],
+    cctvRoles: [
+      { role_id: "Karyawan Magang", role_en: "Intern", icon: "🧑‍💼", room_id: "Ruang Kerja Lantai 2", room_en: "Floor 2 Workspace" },
+      { role_id: "Desainer", role_en: "Designer", icon: "🎨", room_id: "Studio", room_en: "Studio" }
+    ],
+    patrolRole: { role_id: "Satpam", role_en: "Security Guard", icon: "👮", area_id: "Koridor", area_en: "Corridor", place_id: "Koridor", place_en: "Corridor" },
+    leftRoles: [
+      { role_id: "Klien", role_en: "Client", icon: "🚶‍♀️", proof_id: "Log resepsionis", proof_en: "Reception log" },
+      { role_id: "Tamu Bisnis", role_en: "Business Guest", icon: "🚶‍♀️", proof_id: "Log resepsionis", proof_en: "Reception log" }
+    ] },
+  { id: "sekolah", setting_id: "Sekolah, laboratorium", setting_en: "School laboratory",
+    crimeRoom_id: "Laboratorium Utama", crimeRoom_en: "Main Laboratory",
+    archiveRoom_id: "Gudang Alat", archiveRoom_en: "Equipment Storage",
+    access_id: "Kartu Lab", access_en: "Lab Card",
+    victimRole_id: "Kepala Laboratorium", victimRole_en: "Laboratory Head",
+    culpritRoles: [
+      { role_id: "Laboran", role_en: "Laboratory Technician", icon: "🧑‍🔬" },
+      { role_id: "Asisten Lab", role_en: "Laboratory Assistant", icon: "🧑‍🔬" }
+    ],
+    cctvRoles: [
+      { role_id: "Siswa", role_en: "Student", icon: "🧑‍🎓", room_id: "Perpustakaan Sekolah", room_en: "School Library" },
+      { role_id: "Guru Tamu", role_en: "Guest Teacher", icon: "🧑‍🏫", room_id: "Ruang Belajar", room_en: "Study Room" }
+    ],
+    patrolRole: { role_id: "Satpam Sekolah", role_en: "School Security Guard", icon: "👮", area_id: "Koridor", area_en: "Corridor", place_id: "Koridor", place_en: "Corridor" },
+    leftRoles: [
+      { role_id: "Orang Tua Murid", role_en: "Parent", icon: "🚶‍♀️", proof_id: "Struk parkir", proof_en: "Parking receipt" },
+      { role_id: "Pengunjung Sekolah", role_en: "School Visitor", icon: "🚶‍♀️", proof_id: "Struk parkir", proof_en: "Parking receipt" }
+    ] }
+];
+function seedCode(seed){
+  if(seed === 0) return "Asli";
+  return "AB-" + String(seed);
+}
+function dailySeedWIB(){
+  try{
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const get = function(t){ return parts.find(function(p){ return p.type === t; }).value; };
+    return parseInt(get("year") + get("month") + get("day"), 10);
+  }catch(e){
+    const d = new Date();
+    return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  }
+}
+function generateCase(seed){
+  const rng = mulberry32(seed);
+  const skin = pick(rng, SKINS);
+  const culpritRole = pick(rng, skin.culpritRoles);
+  const cctvRole = pick(rng, skin.cctvRoles);
+  const leftRole = pick(rng, skin.leftRoles);
+  const names = pickUnique(rng, NAME_POOL, 4);
+  const culpritName = names[0], cctvName = names[1], patrolName = names[2], leftName = names[3];
+  const victimPool = VICTIMS.filter(function(v){ return names.indexOf(v.first) === -1; });
+  const victim = pick(rng, victimPool.length ? victimPool : VICTIMS);
+  const windowStart = pick(rng, WINDOW_STARTS);
+  const windowEnd = windowStart + 10;
+  const breaking = windowStart + 2;
+  const patrolTime = breaking;
+  const cctvTime = windowStart + 7;
+  const leftReceipt = windowStart - 28;
+  const leftGate = leftReceipt + 1;
+  const leftClaim = leftReceipt - 2;
+  const claimStart = windowStart - 20;
+  const timelineStart = leftClaim;
+  const suspects = [
+    { id: culpritName, icon: culpritRole.icon, role_id: culpritRole.role_id, role_en: culpritRole.role_en,
+      alibi_id: "Di " + skin.archiveRoom_id + " " + fmtTime(claimStart) + "–" + fmtTime(windowEnd) + ", tidak keluar sama sekali.",
+      alibi_en: "In " + skin.archiveRoom_en + " " + fmtTime(claimStart) + "–" + fmtTime(windowEnd) + ", never left at all.",
+      defense_id: "Tidak ada bukti yang membela " + culpritName + " — log akses justru mematahkan alibinya.",
+      defense_en: "No evidence defends " + culpritName + " — the access log breaks his/her alibi instead." },
+    { id: cctvName, icon: cctvRole.icon, role_id: cctvRole.role_id, role_en: cctvRole.role_en,
+      alibi_id: "Di " + cctvRole.room_id + " selama rentang kejadian.",
+      alibi_en: "In " + cctvRole.room_en + " during the incident window.",
+      defense_id: "Rekaman CCTV " + cctvRole.room_id + " merekam " + cctvName + " jam " + fmtTime(cctvTime) + " — ia di tempat lain pada rentang kejadian.",
+      defense_en: cctvRole.room_en + " CCTV recorded " + cctvName + " at " + fmtTime(cctvTime) + " — he/she was elsewhere during the window." },
+    { id: patrolName, icon: skin.patrolRole.icon, role_id: skin.patrolRole.role_id, role_en: skin.patrolRole.role_en,
+      alibi_id: "Patroli " + skin.patrolRole.area_id + " selama rentang kejadian.",
+      alibi_en: "Patrolling " + skin.patrolRole.area_en + " during the incident window.",
+      defense_id: "Cap/log " + patrolName + " di " + skin.patrolRole.place_id + " jam " + fmtTime(patrolTime) + " — ia di tempat lain pada menit yang sama.",
+      defense_en: patrolName + "'s log in " + skin.patrolRole.place_en + " at " + fmtTime(patrolTime) + " — he/she was elsewhere that same minute." },
+    { id: leftName, icon: leftRole.icon, role_id: leftRole.role_id, role_en: leftRole.role_en,
+      alibi_id: "Sudah pulang jam " + fmtTime(leftClaim) + ".",
+      alibi_en: "Already went home at " + fmtTime(leftClaim) + ".",
+      defense_id: leftRole.proof_id + " " + leftName + " jam " + fmtTime(leftReceipt) + " dan rekaman gerbang jam " + fmtTime(leftGate) + " — ia sudah pergi sebelum rentang kejadian.",
+      defense_en: leftName + "'s " + leftRole.proof_en + " at " + fmtTime(leftReceipt) + " and gate recording at " + fmtTime(leftGate) + " — he/she had left before the window." }
+  ];
+  const clues = [
+    { id: "akses", icon: "🔑", time: fmtTime(breaking), minutes: breaking, breaks: culpritName, clears: null, supporting: false,
+      label_id: "Log " + skin.access_id, label_en: skin.access_en + " Log",
+      detail_id: skin.access_id + " " + culpritName + " membuka pintu " + skin.crimeRoom_id + " jam " + fmtTime(breaking) + " — padahal ia mengaku tidak keluar dari " + skin.archiveRoom_id + " sama sekali.",
+      detail_en: culpritName + "'s " + skin.access_en + " opened the " + skin.crimeRoom_en + " door at " + fmtTime(breaking) + " — even though he/she claimed never to leave " + skin.archiveRoom_en + "." },
+    { id: "sidik", icon: "🖐️", time: null, minutes: null, breaks: null, clears: null, supporting: true,
+      label_id: "Sidik jari di pintu", label_en: "Fingerprint on the door",
+      detail_id: "Sidik jari " + culpritName + " ada di gagang pintu " + skin.crimeRoom_id + ". Ini mendukung log akses, tapi bukan pematah utama.",
+      detail_en: culpritName + "'s fingerprint is on the " + skin.crimeRoom_en + " door handle. This supports the log, but it is not the main breaker." },
+    { id: "cctv", icon: "📹", time: fmtTime(cctvTime), minutes: cctvTime, breaks: null, clears: cctvName, supporting: false,
+      label_id: "CCTV " + cctvRole.room_id, label_en: cctvRole.room_en + " CCTV",
+      detail_id: "Rekaman CCTV " + cctvRole.room_id + " merekam " + cctvName + " jam " + fmtTime(cctvTime) + ", bukan di " + skin.crimeRoom_id + ".",
+      detail_en: cctvRole.room_en + " CCTV recorded " + cctvName + " at " + fmtTime(cctvTime) + ", not in " + skin.crimeRoom_en + "." },
+    { id: "patroli", icon: "📋", time: fmtTime(patrolTime), minutes: patrolTime, breaks: null, clears: patrolName, supporting: false,
+      label_id: "Cap patroli", label_en: "Patrol stamp",
+      detail_id: "Cap patroli " + patrolName + " di " + skin.patrolRole.place_id + " jam " + fmtTime(patrolTime) + " — menit yang sama dengan log " + skin.access_id + ", tapi tempat yang berbeda.",
+      detail_en: patrolName + "'s patrol stamp in " + skin.patrolRole.place_en + " at " + fmtTime(patrolTime) + " — the same minute as the " + skin.access_en + " log, but a different place." },
+    { id: "parkir", icon: "🅿️", time: fmtTime(leftReceipt), minutes: leftReceipt, breaks: null, clears: leftName, supporting: false,
+      label_id: leftRole.proof_id + " + CCTV gerbang", label_en: leftRole.proof_en + " + Gate CCTV",
+      detail_id: leftRole.proof_id + " " + leftName + " jam " + fmtTime(leftReceipt) + " dan rekaman gerbang jam " + fmtTime(leftGate) + " — " + leftName + " sudah pergi sebelum rentang kejadian " + fmtTime(windowStart) + "–" + fmtTime(windowEnd) + ".",
+      detail_en: leftName + "'s " + leftRole.proof_en + " at " + fmtTime(leftReceipt) + " and gate recording at " + fmtTime(leftGate) + " — " + leftName + " had left before the " + fmtTime(windowStart) + "–" + fmtTime(windowEnd) + " window." }
+  ];
+  const logic_id = [
+    cctvName + " gugur: rekaman CCTV " + cctvRole.room_id + " jam " + fmtTime(cctvTime) + ".",
+    patrolName + " gugur: cap patroli " + skin.patrolRole.place_id + " jam " + fmtTime(patrolTime) + " menempatkannya di tempat lain.",
+    leftName + " gugur: " + leftRole.proof_id + " jam " + fmtTime(leftReceipt) + " dan rekaman gerbang jam " + fmtTime(leftGate) + " — ia pergi sebelum kejadian.",
+    "Tersisa " + culpritName + ", dan log " + skin.access_id + " jam " + fmtTime(breaking) + " mematahkan klaimnya bahwa ia tidak keluar dari " + skin.archiveRoom_id + "."
+  ];
+  const logic_en = [
+    cctvName + " is cleared: " + cctvRole.room_en + " CCTV recorded him/her at " + fmtTime(cctvTime) + ".",
+    patrolName + " is cleared: the " + skin.patrolRole.place_en + " patrol stamp at " + fmtTime(patrolTime) + " puts him/her elsewhere.",
+    leftName + " is cleared: " + leftRole.proof_en + " at " + fmtTime(leftReceipt) + " and gate recording at " + fmtTime(leftGate) + " — he/she left before the incident.",
+    "Only " + culpritName + " remains, and the " + skin.access_en + " log at " + fmtTime(breaking) + " breaks his/her claim that he/she never left " + skin.archiveRoom_en + "."
+  ];
+  return {
+    id: "kasus-01-acac-" + seed,
+    seed: seed, skinId: skin.id, fallback: false,
+    windowStartMinutes: windowStart, windowEndMinutes: windowEnd, timelineStartMinutes: timelineStart, timelineEndMinutes: windowEnd,
+    culprit: culpritName, breakingClue: "akses",
+    title_id: "Kasus Level 1: " + skin.setting_id, title_en: "Level 1 Case: " + skin.setting_en,
+    setting_id: skin.setting_id, setting_en: skin.setting_en,
+    victim_id: victim.id, victim_en: victim.en,
+    victimRole_id: skin.victimRole_id, victimRole_en: skin.victimRole_en,
+    crimeRoom_id: skin.crimeRoom_id, crimeRoom_en: skin.crimeRoom_en,
+    archiveRoom_id: skin.archiveRoom_id, archiveRoom_en: skin.archiveRoom_en,
+    access_id: skin.access_id, access_en: skin.access_en,
+    briefMeta_id: skin.setting_id + " • " + skin.crimeRoom_id + " • Ditemukan jam " + fmtTime(windowEnd) + " • Rentang kejadian " + fmtTime(windowStart) + "–" + fmtTime(windowEnd),
+    briefMeta_en: skin.setting_en + " • " + skin.crimeRoom_en + " • Found at " + fmtTime(windowEnd) + " • Incident window " + fmtTime(windowStart) + "–" + fmtTime(windowEnd),
+    briefText_id: victim.id + ", " + skin.victimRole_id + " ditemukan di " + skin.crimeRoom_id + " jam " + fmtTime(windowEnd) + ". Empat orang ada di gedung malam ini — satu alibi tidak cocok dengan jejaknya.",
+    briefText_en: victim.en + ", " + skin.victimRole_en + " was found in " + skin.crimeRoom_en + " at " + fmtTime(windowEnd) + ". Four people were in the building tonight — one alibi does not match the trace.",
+    result_id: "Pelakunya " + culpritName + ". Log " + skin.access_id + " jam " + fmtTime(breaking) + " membuktikan ia keluar dari " + skin.archiveRoom_id + ", bertentangan dengan alibinya.",
+    result_en: "The culprit is " + culpritName + ". The " + skin.access_en + " log at " + fmtTime(breaking) + " proves he/she left " + skin.archiveRoom_en + ", contradicting his/her alibi.",
+    suspects: shuffleArr(rng, suspects),
+    clues: shuffleArr(rng, clues),
+    hints: [
+      { id: "Satu orang mengaku tidak pernah keluar dari " + skin.archiveRoom_id + ", tapi ada jejak keluar.", en: "One person claims they never left " + skin.archiveRoom_en + ", but there is a trace of them leaving." },
+      { id: "Cek log " + skin.access_id + ".", en: "Check the " + skin.access_en + " log." }
+    ],
+    logic_id: logic_id, logic_en: logic_en
+  };
+}
+function collectStrings(obj, out){
+  if(typeof obj === "string") out.push(obj);
+  else if(Array.isArray(obj)) obj.forEach(function(x){ collectStrings(x, out); });
+  else if(obj && typeof obj === "object") Object.keys(obj).forEach(function(k){ collectStrings(obj[k], out); });
+  return out;
+}
+function validateCase(c){
+  const errors = [];
+  if(!c) return { ok: false, errors: ["case kosong"] };
+  const breaking = c.clues.filter(function(x){ return x.breaks; });
+  if(breaking.length !== 1) errors.push("pematah bukan tepat satu");
+  if(breaking.length === 1 && breaking[0].breaks !== c.culprit) errors.push("pematah tidak mengarah ke pelaku");
+  if(breaking.length === 1 && breaking[0].id !== c.breakingClue) errors.push("breakingClue tidak cocok dengan clue pematah");
+  const supporting = c.clues.filter(function(x){ return x.supporting; });
+  if(supporting.length !== 1) errors.push("pendukung bukan tepat satu");
+  const nonCulprits = c.suspects.filter(function(s){ return s.id !== c.culprit; });
+  if(c.suspects.length !== 4) errors.push("tersangka bukan 4");
+  if(c.clues.length !== 5) errors.push("clue bukan 5");
+  const clearTypes = {};
+  nonCulprits.forEach(function(s){
+    const def = c.clues.filter(function(x){ return x.clears === s.id; });
+    if(def.length !== 1) errors.push("non-pelaku " + s.id + " tidak punya tepat satu pembela");
+    else clearTypes[def[0].id] = true;
+  });
+  if(Object.keys(clearTypes).length !== 3) errors.push("tipe pembela tidak 3 macam");
+  const names = c.suspects.map(function(s){ return s.id; });
+  if(new Set(names).size !== names.length) errors.push("nama tersangka duplikat");
+  if(c.victim_id && names.indexOf(c.victim_id) !== -1) errors.push("nama korban sama dengan tersangka");
+  const skin = SKINS.find(function(s){ return s.id === c.skinId; });
+  if(c.skinId && !skin) errors.push("skin tidak dikenal");
+  if(skin){
+    const culpritSuspect = c.suspects.find(function(s){ return s.id === c.culprit; });
+    const okRole = skin.culpritRoles.some(function(r){ return r.role_id === culpritSuspect.role_id; });
+    if(!okRole) errors.push("peran pelaku tidak ada di daftar pelaku skin");
+  }
+  const ws = c.windowStartMinutes, we = c.windowEndMinutes;
+  if(typeof ws !== "number" || typeof we !== "number" || we - ws !== 10) errors.push("jendela bukan 10 menit");
+  const byId = function(id){ return c.clues.find(function(x){ return x.id === id; }); };
+  if(byId("akses") && !(byId("akses").minutes >= ws && byId("akses").minutes <= we)) errors.push("log pematah di luar jendela");
+  if(byId("patroli") && byId("akses") && byId("patroli").minutes !== byId("akses").minutes) errors.push("patroli tidak sama menit dengan pematah");
+  if(byId("cctv") && !(byId("cctv").minutes >= ws && byId("cctv").minutes <= we)) errors.push("CCTV di luar jendela");
+  if(byId("parkir") && !(byId("parkir").minutes < ws)) errors.push("bukti pergi tidak sebelum jendela");
+  if(c.archiveRoom_id && c.crimeRoom_id && c.archiveRoom_id === c.crimeRoom_id) errors.push("ruang arsip sama dengan ruang kejahatan");
+  const texts = collectStrings(c, []);
+  if(texts.some(function(t){ return t.indexOf("{") !== -1 || t.indexOf("}") !== -1; })) errors.push("placeholder bocor");
+  const emptyCheck = [];
+  c.suspects.forEach(function(s){ ["role_id", "role_en", "alibi_id", "alibi_en", "defense_id", "defense_en"].forEach(function(k){ if(!s[k]) emptyCheck.push("suspect." + k); }); });
+  c.clues.forEach(function(cl){ ["label_id", "label_en", "detail_id", "detail_en"].forEach(function(k){ if(!cl[k]) emptyCheck.push("clue." + k); }); });
+  if(emptyCheck.length) errors.push("field kosong: " + emptyCheck.join(","));
+  if(c.hints){
+    c.hints.forEach(function(h){
+      if(h.id.indexOf(c.culprit) !== -1 || h.en.indexOf(c.culprit) !== -1) errors.push("hint menyebut nama pelaku");
+    });
+  }
+  return { ok: errors.length === 0, errors: errors };
+}
+function originalCaseCopy(){
+  const copy = JSON.parse(JSON.stringify(CASE));
+  copy.seed = 0; copy.skinId = "perpustakaan"; copy.fallback = false;
+  copy.windowStartMinutes = 1250; copy.windowEndMinutes = 1260;
+  copy.timelineStartMinutes = 1220; copy.timelineEndMinutes = 1260;
+  copy.title_id = "Kasus 1: Lampu Perpustakaan"; copy.title_en = "Case 1: The Library Lamp";
+  return copy;
+}
+function buildCase(seed, validatorFn){
+  const validate = validatorFn || validateCase;
+  if(seed === 0) return originalCaseCopy();
+  for(let attempt = 0; attempt < 10; attempt++){
+    const candidate = generateCase(seed + attempt);
+    if(validate(candidate).ok) return candidate;
+  }
+  const fallback = originalCaseCopy();
+  fallback.fallback = true; fallback.seed = seed;
+  return fallback;
+}
+/* GENERATOR-END */
+
 const UI = {
   id: {
     subtitle: "Level 1 — Lampu Perpustakaan", briefTitle: "Kasus 1: Lampu Perpustakaan",
@@ -215,7 +537,11 @@ const UI = {
     best: "Bintang terbaik Kasus 1: ", noBest: "Belum ada bintang — selesaikan Kasus 1 untuk mendapatkannya.",
     hintUsed: "Hint dipakai: ", noMoreHints: "Hint sudah habis (2/2).",
     wrongSuspect: "Belum tepat. ", wrongClue: "Tersangkanya benar, tapi bukti itu hanya pendukung, bukan pematah utama. Coba lagi dengan bukti yang mematahkan alibi secara langsung.",
-    saved: "Tersimpan lokal: bintang Kasus 1 = "
+    saved: "Tersimpan lokal: bintang Kasus 1 = ",
+    modeHeading: "Mode main", modeOriginal: "Kasus Asli", modeRandom: "🎲 Acak", modeDaily: "📅 Harian", useSeed: "Pakai seed",
+    seedPlaceholder: "Kode seed, mis. AB-482913", bestRandom: " • Acak terbaik: ", bestDaily: " • Harian: ",
+    playSeed: "Kode seed: ", invalidSeed: "Seed tidak valid, dipakai mode Acak.",
+    fallbackNote: " (fallback ke kasus asli karena generator gagal validasi)"
   },
   en: {
     subtitle: "Level 1 — The Library Lamp", briefTitle: "Case 1: The Library Lamp",
@@ -235,12 +561,19 @@ const UI = {
     best: "Best stars for Case 1: ", noBest: "No stars yet — solve Case 1 to earn them.",
     hintUsed: "Hints used: ", noMoreHints: "No hints left (2/2).",
     wrongSuspect: "Not quite. ", wrongClue: "Right suspect, but that evidence only supports the case — it is not the main breaker. Try again with evidence that directly breaks the alibi.",
-    saved: "Saved locally: Case 1 stars = "
+    saved: "Saved locally: Case 1 stars = ",
+    modeHeading: "Game mode", modeOriginal: "Original Case", modeRandom: "🎲 Random", modeDaily: "📅 Daily", useSeed: "Use seed",
+    seedPlaceholder: "Seed code, e.g. AB-482913", bestRandom: " • Random best: ", bestDaily: " • Daily: ",
+    playSeed: "Seed code: ", invalidSeed: "Invalid seed, using Random mode instead.",
+    fallbackNote: " (fallback to original case because generator failed validation)"
   }
 };
 
 let lang = "id";
 let soundOn = true;
+let activeCase = CASE;
+let currentMode = "original";
+let currentSeed = 0;
 let found = new Set();
 let selectedSuspect = null;
 let selectedClue = null;
@@ -250,8 +583,20 @@ let audioCtx = null;
 
 function t(key){ return UI[lang][key]; }
 function txt(obj){ return lang === "id" ? obj.id : obj.en; }
-function suspectById(id){ return CASE.suspects.find(function(s){ return s.id === id; }); }
-function clueById(id){ return CASE.clues.find(function(c){ return c.id === id; }); }
+function suspectById(id){ return activeCase.suspects.find(function(s){ return s.id === id; }); }
+function clueById(id){ return activeCase.clues.find(function(c){ return c.id === id; }); }
+function activeWindow(){
+  return {
+    start: activeCase.windowStartMinutes !== undefined ? activeCase.windowStartMinutes : 1250,
+    end: activeCase.windowEndMinutes !== undefined ? activeCase.windowEndMinutes : 1260,
+    timelineStart: activeCase.timelineStartMinutes !== undefined ? activeCase.timelineStartMinutes : 1220,
+    timelineEnd: activeCase.timelineEndMinutes !== undefined ? activeCase.timelineEndMinutes : 1260
+  };
+}
+function activeBrief(fieldId, fieldEn, fallbackKey){
+  if(activeCase[fieldId] !== undefined) return lang === "id" ? activeCase[fieldId] : activeCase[fieldEn];
+  return t(fallbackKey);
+}
 
 function beep(freq, dur){
   if(!soundOn) return;
@@ -273,7 +618,16 @@ function loadSave(){
 function saveStars(stars){
   try{
     const s = loadSave();
-    if(!s.case1 || stars > s.case1.stars) s.case1 = { stars: stars, solved: true };
+    if(currentMode === "original"){
+      if(!s.case1 || stars > s.case1.stars) s.case1 = { stars: stars, solved: true };
+    } else if(currentMode === "daily"){
+      const key = "daily-" + currentSeed;
+      if(!s[key] || stars > s[key].stars) s[key] = { stars: stars, solved: true, seed: currentSeed };
+      s.dailyDate = currentSeed;
+    } else {
+      if(!s.randomBest || stars > s.randomBest.stars) s.randomBest = { stars: stars, solved: true, seed: currentSeed };
+    }
+    s.lastSeed = currentSeed; s.lastMode = currentMode;
     localStorage.setItem("ab_save_v1", JSON.stringify(s));
     return s;
   }catch(e){ return {}; }
@@ -281,20 +635,58 @@ function saveStars(stars){
 function showBest(){
   const s = loadSave();
   const el = document.getElementById("best-line");
-  el.textContent = (s.case1 && s.case1.stars) ? t("best") + "★".repeat(s.case1.stars) + "☆".repeat(3 - s.case1.stars) : t("noBest");
+  let text = (s.case1 && s.case1.stars) ? t("best") + "★".repeat(s.case1.stars) + "☆".repeat(3 - s.case1.stars) : t("noBest");
+  if(s.randomBest && s.randomBest.stars) text += t("bestRandom") + "★".repeat(s.randomBest.stars) + "☆".repeat(3 - s.randomBest.stars);
+  if(s.dailyDate){
+    const dk = "daily-" + s.dailyDate;
+    if(s[dk] && s[dk].stars) text += t("bestDaily") + "★".repeat(s[dk].stars) + "☆".repeat(3 - s[dk].stars);
+  }
+  el.textContent = text;
+}
+function updateModeLine(){
+  const el = document.getElementById("mode-line");
+  if(currentMode === "original") el.textContent = lang === "id" ? "Mode: Kasus Asli (seed 0, kasus Lina asli)." : "Mode: Original Case (seed 0, original Lina case).";
+  else if(currentMode === "daily") el.textContent = (lang === "id" ? "Mode: Harian, seed tanggal WIB " : "Mode: Daily, WIB date seed ") + currentSeed + " (" + seedCode(currentSeed) + ").";
+  else if(currentMode === "seed") el.textContent = (lang === "id" ? "Mode: Seed " : "Mode: Seed ") + seedCode(currentSeed) + ".";
+  else el.textContent = lang === "id" ? "Mode: Acak — tekan tombol Acak lagi untuk kasus baru." : "Mode: Random — press Random again for a new case.";
+}
+function setMode(mode){
+  currentMode = mode;
+  if(mode === "original") currentSeed = 0;
+  if(mode === "daily") currentSeed = dailySeedWIB();
+  if(mode === "random") currentSeed = 100000 + Math.floor(Math.random() * 900000);
+  activeCase = buildCase(currentSeed);
+  ["original", "random", "daily"].forEach(function(m){
+    const b = document.getElementById("btn-mode-" + m);
+    if(b) b.classList.toggle("active", currentMode === m);
+  });
+  // Seed mode tidak punya tombol pill sendiri; pilih seed akan mengaktifkan mode seed.
+  updateModeLine();
 }
 
 function renderStatic(){
-  document.getElementById("subtitle").textContent = t("subtitle");
-  document.getElementById("brief-title").textContent = t("briefTitle");
-  document.getElementById("brief-meta").textContent = t("briefMeta");
-  document.getElementById("brief-text").textContent = t("briefText");
+  const w = activeWindow();
+  document.getElementById("subtitle").textContent = currentMode === "original" ? t("subtitle") : "Level 1 — " + (lang === "id" ? activeCase.setting_id : activeCase.setting_en) + " • " + seedCode(currentSeed);
+  document.getElementById("brief-title").textContent = activeBrief("title_id", "title_en", "briefTitle");
+  document.getElementById("brief-meta").textContent = activeBrief("briefMeta_id", "briefMeta_en", "briefMeta");
+  document.getElementById("brief-text").textContent = activeBrief("briefText_id", "briefText_en", "briefText");
   document.getElementById("brief-how").textContent = t("briefHow");
+  document.getElementById("mode-heading").textContent = t("modeHeading");
+  document.getElementById("btn-mode-original").textContent = t("modeOriginal");
+  document.getElementById("btn-mode-random").textContent = t("modeRandom");
+  document.getElementById("btn-mode-daily").textContent = t("modeDaily");
+  document.getElementById("btn-seed").textContent = t("useSeed");
+  document.getElementById("seed-input").placeholder = t("seedPlaceholder");
+  document.getElementById("play-seed-line").textContent = t("playSeed") + seedCode(currentSeed) + (activeCase.fallback ? t("fallbackNote") : "");
+  document.getElementById("result-seed-line").textContent = t("playSeed") + seedCode(currentSeed);
+  document.getElementById("timeline-start-label").textContent = fmtTime(w.timelineStart);
+  document.getElementById("timeline-window-label").textContent = fmtTime(w.start) + "–" + fmtTime(w.end);
+  document.getElementById("timeline-end-label").textContent = fmtTime(w.timelineEnd);
   document.getElementById("btn-start").textContent = t("start");
   document.getElementById("play-title").textContent = t("playTitle");
   document.getElementById("clue-heading").textContent = t("clueHeading");
   document.getElementById("timeline-heading").textContent = t("timelineHeading");
-  document.getElementById("timeline-note").textContent = t("timelineNote");
+  document.getElementById("timeline-note").textContent = lang === "id" ? "Area kuning = rentang kejadian " + fmtTime(w.start) + "–" + fmtTime(w.end) + ". Tanda hijau muncul saat clue waktu ditemukan." : "Yellow area = incident window " + fmtTime(w.start) + "–" + fmtTime(w.end) + ". Green marks appear when a timed clue is found.";
   document.getElementById("suspect-heading").textContent = t("suspectHeading");
   document.getElementById("suspect-note").textContent = t("suspectNote");
   document.getElementById("accuse-heading").textContent = t("accuseHeading");
@@ -303,7 +695,8 @@ function renderStatic(){
   document.getElementById("btn-hint").textContent = t("hintBtn");
   document.getElementById("result-title").textContent = t("resultTitle");
   document.getElementById("logic-heading").textContent = t("logicHeading");
-  document.getElementById("result-text").textContent = t("resultText");
+  document.getElementById("result-text").textContent = activeBrief("result_id", "result_en", "resultText");
+  updateModeLine();
   document.getElementById("btn-replay").textContent = t("replay");
   document.getElementById("btn-next").textContent = t("next");
   document.getElementById("btn-id").classList.toggle("active", lang === "id");
@@ -315,7 +708,7 @@ function renderStatic(){
 function renderClues(){
   const grid = document.getElementById("clue-grid");
   grid.innerHTML = "";
-  CASE.clues.forEach(function(c){
+  activeCase.clues.forEach(function(c){
     const b = document.createElement("button");
     b.type = "button"; b.className = "clue" + (found.has(c.id) ? " found" : "");
     b.innerHTML = '<span class="ic">' + c.icon + "</span><span class=\"lb\">" + (lang === "id" ? c.label_id : c.label_en) + "</span><span class=\"st\">" + (found.has(c.id) ? t("found") : t("notFound")) + (c.time ? " • " + c.time : "") + "</span>";
@@ -333,7 +726,7 @@ function renderClues(){
 function renderSuspects(){
   const grid = document.getElementById("suspect-grid");
   grid.innerHTML = "";
-  CASE.suspects.forEach(function(s){
+  activeCase.suspects.forEach(function(s){
     const b = document.createElement("button");
     b.type = "button"; b.className = "suspect" + (selectedSuspect === s.id ? " selected" : "");
     b.innerHTML = '<span class="ic">' + s.icon + "</span><span class=\"lb\">" + s.id + " — " + (lang === "id" ? s.role_id : s.role_en) + "</span><span class=\"st\">" + (lang === "id" ? s.alibi_id : s.alibi_en) + "</span>";
@@ -345,7 +738,7 @@ function renderSuspects(){
 function renderAccuseClues(){
   const box = document.getElementById("accuse-clues");
   box.innerHTML = "";
-  const foundClues = CASE.clues.filter(function(c){ return found.has(c.id); });
+  const foundClues = activeCase.clues.filter(function(c){ return found.has(c.id); });
   if(foundClues.length === 0){
     box.innerHTML = '<p class="meta">' + (lang === "id" ? "Belum ada clue ditemukan. Tap clue di atas dulu." : "No clues found yet. Tap a clue above first.") + "</p>";
     return;
@@ -360,7 +753,7 @@ function renderAccuseClues(){
 }
 
 function updateProgress(){
-  document.getElementById("clue-progress").textContent = t("clueProgress") + found.size + " / " + CASE.clues.length;
+  document.getElementById("clue-progress").textContent = t("clueProgress") + found.size + " / " + activeCase.clues.length;
 }
 function updateAccuse(){
   const btn = document.getElementById("btn-accuse");
@@ -373,12 +766,12 @@ function updateAccuse(){
 function renderTimeline(){
   const tl = document.getElementById("timeline");
   tl.querySelectorAll(".mark").forEach(function(m){ m.remove(); });
-  // Rentang timeline 20:20 (1220) s.d. 21:00 (1260); jendela 20:50-21:00
-  const start = 1220, end = 1260;
+  const w = activeWindow();
+  const start = w.timelineStart, end = w.timelineEnd;
   const win = document.getElementById("timeline-window");
-  win.style.left = ((1250 - start) / (end - start) * 100) + "%";
-  win.style.width = ((1260 - 1250) / (end - start) * 100) + "%";
-  CASE.clues.forEach(function(c){
+  win.style.left = ((w.start - start) / (end - start) * 100) + "%";
+  win.style.width = ((w.end - w.start) / (end - start) * 100) + "%";
+  activeCase.clues.forEach(function(c){
     if(c.minutes === null || !found.has(c.id)) return;
     const m = document.createElement("div");
     m.className = "mark"; m.textContent = c.icon;
@@ -404,7 +797,26 @@ function resetCase(){
   renderClues(); renderSuspects(); renderAccuseClues(); renderTimeline(); updateProgress(); updateAccuse();
 }
 
-document.getElementById("btn-start").onclick = function(){ beep(700, 0.12); showScreen("screen-play"); };
+function startCurrentCase(){
+  // Kasus sudah dipilih saat mode/seed dipilih (setMode / btn-seed),
+  // supaya briefing yang dibaca pemain sama persis dengan kasus yang dimainkan.
+  // Untuk kasus Acak baru, tekan tombol Acak lagi di layar briefing.
+  if(currentMode === "daily") { currentSeed = dailySeedWIB(); activeCase = buildCase(currentSeed); }
+  resetCase(); renderStatic(); renderTimeline(); updateAccuse();
+  beep(700, 0.12); showScreen("screen-play");
+}
+document.getElementById("btn-start").onclick = function(){ startCurrentCase(); };
+document.getElementById("btn-mode-original").onclick = function(){ setMode("original"); renderStatic(); };
+document.getElementById("btn-mode-random").onclick = function(){ setMode("random"); renderStatic(); };
+document.getElementById("btn-mode-daily").onclick = function(){ setMode("daily"); renderStatic(); };
+document.getElementById("btn-seed").onclick = function(){
+  const raw = document.getElementById("seed-input").value.replace(/[^0-9]/g, "");
+  if(!raw){ document.getElementById("mode-line").textContent = t("invalidSeed"); setMode("random"); renderStatic(); return; }
+  currentMode = "seed"; currentSeed = parseInt(raw, 10);
+  activeCase = buildCase(currentSeed);
+  ["original", "random", "daily"].forEach(function(m){ document.getElementById("btn-mode-" + m).classList.remove("active"); });
+  updateModeLine(); renderStatic();
+};
 document.getElementById("btn-replay").onclick = function(){ resetCase(); showScreen("screen-brief"); };
 document.getElementById("btn-id").onclick = function(){ lang = "id"; renderStatic(); };
 document.getElementById("btn-en").onclick = function(){ lang = "en"; renderStatic(); };
@@ -414,11 +826,11 @@ document.getElementById("btn-sound").onclick = function(){
   if(soundOn) beep(660, 0.1);
 };
 document.getElementById("btn-hint").onclick = function(){
-  if(hintIndex >= CASE.hints.length){
+  if(hintIndex >= activeCase.hints.length){
     document.getElementById("hint-text").textContent = t("noMoreHints");
     return;
   }
-  const h = CASE.hints[hintIndex];
+  const h = activeCase.hints[hintIndex];
   hintIndex++;
   document.getElementById("hint-text").textContent = "💡 " + (lang === "id" ? h.id : h.en) + " (" + t("hintUsed") + hintIndex + "/2)";
   beep(440, 0.15);
@@ -428,13 +840,13 @@ document.getElementById("btn-accuse").onclick = function(){
   attempts++;
   const box = document.getElementById("wrong-box");
   const clue = clueById(selectedClue);
-  if(selectedSuspect === CASE.culprit && selectedClue === CASE.breakingClue){
+  if(selectedSuspect === activeCase.culprit && selectedClue === activeCase.breakingClue){
     let stars = 1;
     if(attempts === 1 && hintIndex === 0) stars = 3;
     else if(hintIndex <= 1 && attempts <= 2) stars = 2;
     const saved = saveStars(stars);
     document.getElementById("result-stars").innerHTML = "★".repeat(stars) + '<span class="off">' + "☆".repeat(3 - stars) + "</span>";
-    const logic = lang === "id" ? CASE.logic_id : CASE.logic_en;
+    const logic = lang === "id" ? activeCase.logic_id : activeCase.logic_en;
     document.getElementById("logic-list").innerHTML = logic.map(function(x){ return "<li>" + x + "</li>"; }).join("");
     document.getElementById("save-note").textContent = t("saved") + stars + "★";
     beep(880, 0.2); setTimeout(function(){ beep(1100, 0.25); }, 180);
@@ -442,7 +854,7 @@ document.getElementById("btn-accuse").onclick = function(){
     return;
   }
   box.classList.remove("hidden");
-  if(selectedSuspect === CASE.culprit && clue.supporting){
+  if(selectedSuspect === activeCase.culprit && clue.supporting){
     box.textContent = t("wrongClue");
     beep(220, 0.25);
   } else {

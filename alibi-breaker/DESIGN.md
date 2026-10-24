@@ -1,8 +1,9 @@
 # Alibi Breaker — Dokumen Desain Lengkap
 
-> **Status:** Level 1 dibangun secara lokal (24 Oktober 2026) di `index.html`
-> di folder ini — belum di-push ke GitHub, belum ada submission ke portal
-> mana pun. Kasus 2–15 belum dibangun.
+> **Status:** Level 1 dibangun dan di-push ke GitHub (24 Oktober 2026,
+> commit `5579e5d9c9f2c92df73c65fdcecd12d7ba2c0590` di `main`, hanya 3 file
+> `alibi-breaker/` — perubahan lokal lain di repo tidak ikut di-push).
+> Belum ada submission ke portal mana pun. Kasus 2–15 belum dibangun.
 > **Judul kerja (bukan final):** *Alibi Breaker* / *Jejak Terakhir* / *Kasus 3 Menit*.
 > Keputusan judul final tetap di tangan Alam.
 > **Tanggal desain:** 24 Oktober 2026
