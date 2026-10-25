@@ -144,6 +144,11 @@
     <p class="meta" id="brief-meta">Perpustakaan kota • Ruang baca utama • Ditemukan jam 21.00 • Rentang kejadian 20.50–21.00</p>
     <p id="brief-text">Pak Raka ditemukan di ruang baca utama jam 21.00. Empat orang ada di gedung malam ini — satu alibi tidak cocok dengan jejaknya.</p>
     <p class="meta" id="brief-how">Cara main: tap clue untuk mengumpulkan bukti, baca alibi 4 tersangka, lalu tuduh dengan memilih tersangka DAN bukti pematahnya.</p>
+    <h3 id="case-heading">Pilih kasus</h3>
+    <div class="mode-row" id="case-row">
+      <button class="pill active" id="btn-case-1" type="button">Kasus 1: Lampu Perpustakaan</button>
+      <button class="pill" id="btn-case-2" type="button" disabled>Kasus 2 🔒 — Selesaikan Kasus 1 dulu</button>
+    </div>
     <h3 id="mode-heading">Mode main</h3>
     <div class="mode-row">
       <button class="pill active" id="btn-mode-original" type="button">Kasus Asli</button>
@@ -294,6 +299,95 @@ const CASE = {
     "Hadi is cleared: the north corridor patrol stamp at 20:52 puts him elsewhere.",
     "Rani is cleared: parking receipt 20:22 and gate CCTV 20:23 — she left before the incident.",
     "Only Lina remains, and the access card log at 20:52 breaks her claim that she never left the archive room."
+  ]
+};
+
+/* Data Kasus 2 — harus sama persis dengan DESIGN.md §5.2.
+   Beda dari Kasus 1: tuduhan butuh 2 bukti pematah (breakingClues),
+   bukan 1. CCTV kasir yang kosong saja lemah; jejak sepatu saja tidak
+   membuktikan waktu. Baru gabungan keduanya mematahkan alibi Maya. */
+const CASE2 = {
+  id: "kasus-02",
+  culprit: "Maya",
+  breakingClues: ["cctv-kosong", "sepatu-kunci"],
+  skinId: "kafe",
+  windowStartMinutes: 1200, windowEndMinutes: 1215,
+  timelineStartMinutes: 1160, timelineEndMinutes: 1215,
+  title_id: "Kasus 2: Kasir yang Tak Seimbang", title_en: "Case 2: The Unbalanced Cashier",
+  setting_id: "Kafe Kopi Senja", setting_en: "Kafe Kopi Senja",
+  briefMeta_id: "Kafe Kopi Senja • Gudang belakang • Ditemukan setelah tutup • Rentang kejadian 20.00–20.15",
+  briefMeta_en: "Kafe Kopi Senja • Back warehouse • Found after closing • Incident window 20:00–20:15",
+  briefText_id: "Pak Dani, pemilik kafe, ditemukan di gudang setelah tutup. Kasir mengaku tidak pernah meninggalkan kasir — tapi rekaman kasir punya celah.",
+  briefText_en: "Pak Dani, the cafe owner, was found in the warehouse after closing. The cashier claims she never left the register — but the register recording has a gap.",
+  result_id: "Pelakunya Maya. CCTV kasir yang kosong 19.50–20.05 dan jejak sol sepatunya di gudang membuktikan ia meninggalkan kasir menuju gudang pada waktu kejadian, bertentangan dengan alibinya.",
+  result_en: "The culprit is Maya. The blank cashier CCTV 19:50–20:05 and her shoe print in the warehouse prove she left the register for the warehouse during the window, contradicting her alibi.",
+  suspects: [
+    { id: "Sinta", icon: "👩‍🍳", role_id: "Barista", role_en: "Barista",
+      alibi_id: "Di dapur 19.30–20.15.",
+      alibi_en: "In the kitchen 19:30–20:15.",
+      defense_id: "CCTV dapur merekam Sinta jam 20.07 — ia di dapur pada rentang kejadian.",
+      defense_en: "Kitchen CCTV recorded Sinta at 20:07 — she was in the kitchen during the window." },
+    { id: "Joko", icon: "🚚", role_id: "Pemasok kopi", role_en: "Coffee supplier",
+      alibi_id: "Bongkar barang di gudang 19.20–19.50, lalu pulang.",
+      alibi_en: "Unloaded goods in the warehouse 19:20–19:50, then went home.",
+      defense_id: "Nota Joko ditandatangani Sinta 19.40 dan gerbang truk keluar 19.52 — ia sudah pergi sebelum rentang kejadian.",
+      defense_en: "Joko's delivery note was signed by Sinta at 19:40 and the truck gate exited at 19:52 — he had left before the window." },
+    { id: "Maya", icon: "💵", role_id: "Kasir", role_en: "Cashier",
+      alibi_id: "Di kasir menghitung uang 19.45–20.15, tidak pernah meninggalkan kasir.",
+      alibi_en: "At the register counting money 19:45–20:15, never left the register.",
+      defense_id: "Tidak ada bukti yang membela Maya — gabungan CCTV kosong dan jejak sepatu justru mematahkan alibinya.",
+      defense_en: "No evidence defends Maya — the blank CCTV plus the shoe print break her alibi instead." },
+    { id: "Tono", icon: "☕", role_id: "Pelanggan tetap", role_en: "Regular customer",
+      alibi_id: "Di meja pojok, lalu pulang.",
+      alibi_en: "At the corner table, then went home.",
+      defense_id: "Struk kopi Tono 19.50 dan kamera depan merekamnya keluar 19.56 — ia sudah pergi sebelum rentang kejadian.",
+      defense_en: "Tono's coffee receipt at 19:50 and the front camera recorded him leaving at 19:56 — he had left before the window." }
+  ],
+  clues: [
+    { id: "cctv-dapur", icon: "📹", time: "20:07", minutes: 1207, breaks: null, clears: "Sinta", supporting: false,
+      label_id: "CCTV dapur", label_en: "Kitchen CCTV",
+      detail_id: "CCTV dapur merekam Sinta jam 20.07, sedang bekerja di dapur — bukan di gudang.",
+      detail_en: "Kitchen CCTV recorded Sinta at 20:07, working in the kitchen — not in the warehouse." },
+    { id: "nota-joko", icon: "🧾", time: "19:52", minutes: 1192, breaks: null, clears: "Joko", supporting: false,
+      label_id: "Nota Joko + gerbang truk", label_en: "Joko's note + truck gate",
+      detail_id: "Nota Joko ditandatangani Sinta jam 19.40, dan gerbang truk keluar jam 19.52 — Joko sudah pergi sebelum rentang kejadian 20.00–20.15.",
+      detail_en: "Joko's note was signed by Sinta at 19:40, and the truck gate exited at 19:52 — Joko had left before the 20:00–20:15 window." },
+    { id: "struk-tono", icon: "🧾", time: "19:56", minutes: 1196, breaks: null, clears: "Tono", supporting: false,
+      label_id: "Struk kopi + kamera depan", label_en: "Coffee receipt + front camera",
+      detail_id: "Struk kopi Tono jam 19.50 dan kamera depan merekamnya keluar jam 19.56 — Tono sudah pergi sebelum rentang kejadian.",
+      detail_en: "Tono's coffee receipt at 19:50 and the front camera recorded him leaving at 19:56 — Tono had left before the window." },
+    { id: "cctv-kosong", icon: "📹", time: "19:50–20:05", minutes: 1190, breaks: "Maya", clears: null, supporting: false, breakerPart: true,
+      label_id: "CCTV kasir kosong", label_en: "Blank cashier CCTV",
+      detail_id: "CCTV kasir kosong/mati 19.50–20.05 — Maya 'menghilang' tepat di tengah rentang kejadian. Sendirian, ini lemah: CCTV bisa saja mati sendiri.",
+      detail_en: "Cashier CCTV is blank/dead 19:50–20:05 — Maya 'disappears' right in the middle of the window. Alone, this is weak: a camera can fail on its own." },
+    { id: "sepatu-kunci", icon: "👟", time: null, minutes: null, breaks: "Maya", clears: null, supporting: false, breakerPart: true,
+      label_id: "Jejak sepatu + daftar kunci", label_en: "Shoe print + key list",
+      detail_id: "Jejak sol sepatu kasir di lantai gudang yang berdebu, dan daftar kunci malam itu hanya dipegang korban dan Maya. Ini menempatkan Maya di gudang — gabungkan dengan celah CCTV untuk membuktikan waktunya.",
+      detail_en: "A cashier shoe print on the dusty warehouse floor, and the night key list held only by the victim and Maya. This puts Maya in the warehouse — combine it with the CCTV gap to prove the timing." },
+    { id: "sidik-sinta", icon: "🖐️", time: null, minutes: null, breaks: null, clears: null, supporting: false, redHerring: true,
+      label_id: "Sidik Sinta di pintu gudang", label_en: "Sinta's fingerprint on the warehouse door",
+      detail_id: "Sidik Sinta ada di pintu gudang — tapi log stok menunjukkan Sinta mengambil susu dari gudang jam 18.30. Sidik itu wajar dan bukan dari malam kejadian.",
+      detail_en: "Sinta's fingerprint is on the warehouse door — but the stock log shows Sinta fetched milk from the warehouse at 18:30. That print is ordinary and not from the incident night." }
+  ],
+  hints: [
+    { id: "Siapa yang jejaknya hilang di tengah waktu kejadian?",
+      en: "Whose trace disappears in the middle of the incident window?" },
+    { id: "Jejak sepatu di gudang cocok dengan sepatu siapa?",
+      en: "Whose shoes match the shoe print in the warehouse?" }
+  ],
+  logic_id: [
+    "Sinta gugur: CCTV dapur merekamnya jam 20.07.",
+    "Joko gugur: nota 19.40 dan gerbang truk keluar 19.52 — ia pergi sebelum kejadian.",
+    "Tono gugur: struk kopi 19.50 dan kamera depan keluar 19.56 — ia pergi sebelum kejadian.",
+    "Tersisa Maya, dan gabungan CCTV kasir kosong 19.50–20.05 + jejak sol sepatu di gudang (kunci malam hanya dipegang korban dan Maya) mematahkan klaimnya bahwa ia tidak meninggalkan kasir.",
+    "Sidik Sinta di pintu gudang bukan bukti malam kejadian: log stok menunjukkan Sinta mengambil susu dari gudang jam 18.30."
+  ],
+  logic_en: [
+    "Sinta is cleared: kitchen CCTV recorded her at 20:07.",
+    "Joko is cleared: note at 19:40 and truck gate exit at 19:52 — he left before the incident.",
+    "Tono is cleared: coffee receipt at 19:50 and front camera exit at 19:56 — he left before the incident.",
+    "Only Maya remains, and the combination of blank cashier CCTV 19:50–20:05 + the shoe print in the warehouse (night keys held only by the victim and Maya) breaks her claim that she never left the register.",
+    "Sinta's fingerprint on the warehouse door is not incident-night evidence: the stock log shows Sinta fetched milk from the warehouse at 18:30."
   ]
 };
 
@@ -625,6 +719,17 @@ const UI = {
     wrongSuspect: "Belum tepat. ", wrongClue: "Tersangkanya benar, tapi bukti itu hanya pendukung, bukan pematah utama. Coba lagi dengan bukti yang mematahkan alibi secara langsung.",
     saved: "Tersimpan lokal: bintang Kasus 1 = ",
     tabClues: "Petunjuk", tabTimeline: "Timeline", tabSuspects: "Kesaksian", tabAccuse: "Tuduh",
+    caseHeading: "Pilih kasus", case1Btn: "Kasus 1: Lampu Perpustakaan",
+    case2Btn: "Kasus 2: Kasir yang Tak Seimbang", case2Locked: "Kasus 2 🔒 — Selesaikan Kasus 1 dulu",
+    accuseNote2: "Pilih tersangka, lalu pilih 2 bukti pematah dari clue yang sudah ditemukan.",
+    selectCluesFirst: "Pilih 2 bukti pematah dulu.",
+    wrongWeak: "Belum cukup. CCTV kasir yang kosong saja belum membuktikan apa-apa — CCTV bisa mati sendiri. Gabungkan dengan bukti yang menempatkan Maya di gudang.",
+    wrongPartial: "Belum lengkap. Jejak sepatu membuktikan Maya pernah ke gudang, tapi belum membuktikan ia meninggalkan kasir pada waktu kejadian. Gabungkan dengan celah CCTV kasir.",
+    wrongCombo: "Kombinasi ini belum mematahkan alibi Maya. Cari bukti yang menempatkannya di gudang pada rentang kejadian.",
+    best2: "Bintang terbaik Kasus 2: ", noBest2: "Belum ada bintang — selesaikan Kasus 2 untuk mendapatkannya.",
+    saved2: "Tersimpan lokal: bintang Kasus 2 = ",
+    replay2: "Mainkan lagi Kasus 2", next3: "Kasus 3 — Segera hadir",
+    handcrafted: "Kasus buatan tangan • Tanpa seed", toCase2: "Lanjut ke Kasus 2 →",
     footer: "Prototipe Level 1 • Judul kerja, bukan final • Tanpa gore • Save lokal di perangkat ini (ab_save_v1) • SDK portal ditambahkan pada build portal, bukan pada prototipe lokal ini.",
     modeHeading: "Mode main", modeOriginal: "Kasus Asli", modeRandom: "🎲 Acak", modeDaily: "📅 Harian", useSeed: "Pakai seed",
     seedPlaceholder: "Kode seed, mis. AB-482913", bestRandom: " • Acak terbaik: ", bestDaily: " • Harian: ",
@@ -651,6 +756,17 @@ const UI = {
     wrongSuspect: "Not quite. ", wrongClue: "Right suspect, but that evidence only supports the case — it is not the main breaker. Try again with evidence that directly breaks the alibi.",
     saved: "Saved locally: Case 1 stars = ",
     tabClues: "Clues", tabTimeline: "Timeline", tabSuspects: "Testimonies", tabAccuse: "Accuse",
+    caseHeading: "Choose a case", case1Btn: "Case 1: The Library Lamp",
+    case2Btn: "Case 2: The Unbalanced Cashier", case2Locked: "Case 2 🔒 — Solve Case 1 first",
+    accuseNote2: "Choose a suspect, then choose 2 breaking clues from the clues you found.",
+    selectCluesFirst: "Choose 2 breaking clues first.",
+    wrongWeak: "Not enough. A blank cashier CCTV alone proves nothing — a camera can fail on its own. Combine it with evidence that puts Maya in the warehouse.",
+    wrongPartial: "Not complete. The shoe print proves Maya was in the warehouse, but not that she left the register during the window. Combine it with the cashier CCTV gap.",
+    wrongCombo: "This combination does not break Maya's alibi. Find evidence that puts her in the warehouse during the window.",
+    best2: "Best stars for Case 2: ", noBest2: "No stars yet — solve Case 2 to earn them.",
+    saved2: "Saved locally: Case 2 stars = ",
+    replay2: "Replay Case 2", next3: "Case 3 — Coming soon",
+    handcrafted: "Handcrafted case • No seed", toCase2: "Continue to Case 2 →",
     footer: "Level 1 prototype • Working title, not final • No gore • Local save on this device (ab_save_v1) • Portal SDK is added on the portal build, not on this local prototype.",
     modeHeading: "Game mode", modeOriginal: "Original Case", modeRandom: "🎲 Random", modeDaily: "📅 Daily", useSeed: "Use seed",
     seedPlaceholder: "Seed code, e.g. AB-482913", bestRandom: " • Random best: ", bestDaily: " • Daily: ",
@@ -662,11 +778,15 @@ const UI = {
 let lang = "id";
 let soundOn = true;
 let activeCase = CASE;
+let activeCaseId = "kasus-01";
+let case1Mode = "original";
+let case1Seed = 0;
 let currentMode = "original";
 let currentSeed = 0;
 let found = new Set();
 let selectedSuspect = null;
 let selectedClue = null;
+let selectedClues = [];
 let attempts = 0;
 let hintIndex = 0;
 let audioCtx = null;
@@ -677,6 +797,24 @@ function t(key){ return UI[lang][key]; }
 function txt(obj){ return lang === "id" ? obj.id : obj.en; }
 function suspectById(id){ return activeCase.suspects.find(function(s){ return s.id === id; }); }
 function clueById(id){ return activeCase.clues.find(function(c){ return c.id === id; }); }
+function requiredBreakers(){ return activeCase.breakingClues ? activeCase.breakingClues.slice() : [activeCase.breakingClue]; }
+function selectedBreakerIds(){ return requiredBreakers().length > 1 ? selectedClues.slice() : (selectedClue ? [selectedClue] : []); }
+function accuseReady(){
+  // Kasus 1: tuduh hanya saat 1 bukti dipilih. Kasus 2: tuduh boleh
+  // dicoba dengan 1 bukti (supaya pesan "belum cukup" bisa muncul),
+  // tapi hanya gabungan 2 bukti yang benar yang menyelesaikan kasus.
+  if(requiredBreakers().length > 1) return !!selectedSuspect && selectedBreakerIds().length >= 1;
+  return !!selectedSuspect && selectedBreakerIds().length === 1;
+}
+function sameSet(a, b){ return a.length === b.length && a.every(function(x){ return b.indexOf(x) !== -1; }); }
+function isCase2Unlocked(){
+  try{
+    const s = JSON.parse(localStorage.getItem("ab_save_v1") || "{}");
+    if(s.case1 && s.case1.stars) return true;
+    if(s.randomBest && s.randomBest.stars) return true;
+    return Object.keys(s).some(function(k){ return k.indexOf("daily-") === 0 && s[k] && s[k].stars; });
+  }catch(e){ return false; }
+}
 function activeWindow(){
   return {
     start: activeCase.windowStartMinutes !== undefined ? activeCase.windowStartMinutes : 1250,
@@ -700,7 +838,13 @@ function iconSVG(clueId){
     cctv: '<rect x="2" y="8" width="14" height="8" rx="2"/><path d="M16 11l6-3v8l-6-3"/><circle cx="9" cy="12" r="2"/>',
     "cctv-bima": '<rect x="2" y="8" width="14" height="8" rx="2"/><path d="M16 11l6-3v8l-6-3"/><circle cx="9" cy="12" r="2"/>',
     patroli: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v4h6V3"/><path d="M8 13l3 3 5-6"/>',
-    parkir: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M13 6v12" stroke-dasharray="2 2"/><text x="8" y="15" font-size="10" font-weight="700" fill="currentColor" stroke="none">P</text>'
+    parkir: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M13 6v12" stroke-dasharray="2 2"/><text x="8" y="15" font-size="10" font-weight="700" fill="currentColor" stroke="none">P</text>',
+    "cctv-dapur": '<rect x="2" y="8" width="14" height="8" rx="2"/><path d="M16 11l6-3v8l-6-3"/><circle cx="9" cy="12" r="2"/>',
+    "nota-joko": '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/>',
+    "struk-tono": '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/>',
+    "cctv-kosong": '<rect x="2" y="8" width="14" height="8" rx="2"/><path d="M16 11l6-3v8l-6-3"/><path d="M4 4l16 16"/>',
+    "sepatu-kunci": '<ellipse cx="9" cy="18" rx="5" ry="3"/><ellipse cx="9" cy="11" rx="4" ry="5"/><circle cx="18" cy="7" r="3"/><path d="M21 7h-2v5"/>',
+    "sidik-sinta": '<path d="M5 13a7 7 0 0 1 14 0"/><path d="M8 13a4 4 0 0 1 8 0"/><path d="M11 13a1 1 0 0 1 2 0"/><path d="M12 17v4"/>'
   }[clueId] || '<circle cx="12" cy="12" r="8"/>';
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
 }
@@ -736,7 +880,16 @@ function sceneSVG(skinId){
       '<rect x="550" y="30" width="170" height="10" fill="#92400e"/><rect x="562" y="40" width="14" height="40" fill="#d97706"/><rect x="584" y="40" width="14" height="30" fill="#14532d"/><rect x="606" y="40" width="14" height="44" fill="#be185d"/><rect x="628" y="40" width="14" height="34" fill="#0e7490"/><rect x="650" y="40" width="14" height="40" fill="#7c3aed"/><rect x="672" y="40" width="14" height="30" fill="#b45309"/>' +
       '<rect x="280" y="104" width="200" height="14" fill="#475569"/><rect x="300" y="118" width="12" height="34" fill="#475569"/><rect x="448" y="118" width="12" height="34" fill="#475569"/>' +
       '<path d="M340 74h24l10 30h-44z" fill="#e2e8f0" opacity=".85"/><circle cx="352" cy="90" r="8" fill="#0e7490"/>' +
-      '<path d="M410 74h24l10 30h-44z" fill="#e2e8f0" opacity=".85"/><circle cx="422" cy="90" r="8" fill="#be185d"/>'
+      '<path d="M410 74h24l10 30h-44z" fill="#e2e8f0" opacity=".85"/><circle cx="422" cy="90" r="8" fill="#be185d"/>',
+    kafe: '<rect width="760" height="170" fill="#0f2537"/><rect y="118" width="760" height="52" fill="#334155"/>' +
+      '<rect x="40" y="104" width="300" height="14" fill="#92400e"/><rect x="60" y="118" width="12" height="34" fill="#92400e"/><rect x="308" y="118" width="12" height="34" fill="#92400e"/>' +
+      '<rect x="70" y="78" width="26" height="26" fill="#e2e8f0"/><rect x="70" y="70" width="26" height="8" fill="#475569"/>' +
+      '<rect x="120" y="78" width="26" height="26" fill="#e2e8f0"/><rect x="120" y="70" width="26" height="8" fill="#475569"/>' +
+      '<rect x="170" y="82" width="40" height="22" fill="#d97706"/><rect x="178" y="74" width="24" height="8" fill="#92400e"/>' +
+      '<rect x="240" y="76" width="60" height="28" fill="#1e293b" stroke="#94a3b8" stroke-width="3"/><circle cx="270" cy="90" r="6" fill="#fde68a"/>' +
+      '<rect x="560" y="30" width="140" height="88" fill="#7c2d12" stroke="#451a03" stroke-width="3"/><rect x="590" y="48" width="80" height="52" fill="#1e293b"/><circle cx="630" cy="74" r="14" fill="#fde68a" opacity=".85"/>' +
+      '<rect x="600" y="20" width="60" height="10" fill="#d97706"/><text x="630" y="16" font-size="10" fill="#fde68a" text-anchor="middle" font-weight="700">' + (lang === "en" ? "WAREHOUSE" : "GUDANG") + '</text>' +
+      '<circle cx="460" cy="140" r="14" fill="#14532d"/><circle cx="460" cy="116" r="9" fill="#1f7a4d"/>'
   };
   return '<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg">' + (scenes[skinId] || scenes.perpustakaan) + "</svg>";
 }
@@ -769,7 +922,9 @@ function loadSave(){
 function saveStars(stars){
   try{
     const s = loadSave();
-    if(currentMode === "original"){
+    if(activeCaseId === "kasus-02"){
+      if(!s.case2 || stars > s.case2.stars) s.case2 = { stars: stars, solved: true };
+    } else if(currentMode === "original"){
       if(!s.case1 || stars > s.case1.stars) s.case1 = { stars: stars, solved: true };
     } else if(currentMode === "daily"){
       const key = "daily-" + currentSeed;
@@ -786,6 +941,10 @@ function saveStars(stars){
 function showBest(){
   const s = loadSave();
   const el = document.getElementById("best-line");
+  if(activeCaseId === "kasus-02"){
+    el.textContent = (s.case2 && s.case2.stars) ? t("best2") + "★".repeat(s.case2.stars) + "☆".repeat(3 - s.case2.stars) : t("noBest2");
+    return;
+  }
   let text = (s.case1 && s.case1.stars) ? t("best") + "★".repeat(s.case1.stars) + "☆".repeat(3 - s.case1.stars) : t("noBest");
   if(s.randomBest && s.randomBest.stars) text += t("bestRandom") + "★".repeat(s.randomBest.stars) + "☆".repeat(3 - s.randomBest.stars);
   if(s.dailyDate){
@@ -803,10 +962,12 @@ function updateModeLine(){
 }
 function setMode(mode){
   lastSolvedStars = 0;
-  currentMode = mode;
+  activeCaseId = "kasus-01";
+  currentMode = mode; case1Mode = mode;
   if(mode === "original") currentSeed = 0;
   if(mode === "daily") currentSeed = dailySeedWIB();
   if(mode === "random") currentSeed = 100000 + Math.floor(Math.random() * 900000);
+  case1Seed = currentSeed;
   activeCase = buildCase(currentSeed);
   ["original", "random", "daily"].forEach(function(m){
     const b = document.getElementById("btn-mode-" + m);
@@ -823,7 +984,7 @@ function renderResultTexts(){
   if(!lastSolvedStars) return;
   const logic = lang === "id" ? activeCase.logic_id : activeCase.logic_en;
   document.getElementById("logic-list").innerHTML = logic.map(function(x){ return "<li>" + x + "</li>"; }).join("");
-  document.getElementById("save-note").textContent = t("saved") + lastSolvedStars + "★";
+  document.getElementById("save-note").textContent = (activeCaseId === "kasus-02" ? t("saved2") : t("saved")) + lastSolvedStars + "★";
 }
 
 function setTab(tab){
@@ -842,12 +1003,30 @@ function updateTabBadges(){
   const ab = document.getElementById("badge-accuse");
   if(cb) cb.textContent = found.size + " / " + activeCase.clues.length;
   if(sb) sb.textContent = selectedSuspect ? "✓" : "";
-  if(ab) ab.textContent = (selectedSuspect && selectedClue) ? "✓" : (selectedSuspect || selectedClue ? "1/2" : "");
+  if(requiredBreakers().length > 1){
+    const total = 1 + requiredBreakers().length;
+    const got = (selectedSuspect ? 1 : 0) + selectedClues.length;
+    if(ab) ab.textContent = (selectedSuspect && selectedClues.length === requiredBreakers().length) ? "✓" : (got ? got + "/" + total : "");
+  } else if(ab) ab.textContent = (selectedSuspect && selectedClue) ? "✓" : (selectedSuspect || selectedClue ? "1/2" : "");
 }
 
 function renderStatic(){
   const w = activeWindow();
-  document.getElementById("subtitle").textContent = currentMode === "original" ? t("subtitle") : "Level 1 — " + (lang === "id" ? activeCase.setting_id : activeCase.setting_en) + " • " + seedCode(currentSeed);
+  document.getElementById("subtitle").textContent = activeCaseId === "kasus-02" ? (lang === "id" ? activeCase.title_id : activeCase.title_en) : (currentMode === "original" ? t("subtitle") : "Level 1 — " + (lang === "id" ? activeCase.setting_id : activeCase.setting_en) + " • " + seedCode(currentSeed));
+  document.getElementById("case-heading").textContent = t("caseHeading");
+  document.getElementById("btn-case-1").textContent = t("case1Btn");
+  const unlocked2 = isCase2Unlocked();
+  const b2 = document.getElementById("btn-case-2");
+  b2.textContent = unlocked2 ? t("case2Btn") : t("case2Locked");
+  b2.disabled = !unlocked2;
+  document.getElementById("btn-case-1").classList.toggle("active", activeCaseId === "kasus-01");
+  b2.classList.toggle("active", activeCaseId === "kasus-02");
+  const showModes = activeCaseId === "kasus-01";
+  document.getElementById("mode-heading").style.display = showModes ? "" : "none";
+  document.getElementById("mode-line").style.display = showModes ? "" : "none";
+  document.querySelectorAll("#screen-brief .mode-row").forEach(function(row){
+    if(row.id !== "case-row") row.style.display = showModes ? "" : "none";
+  });
   document.getElementById("brief-title").textContent = activeBrief("title_id", "title_en", "briefTitle");
   document.getElementById("brief-meta").textContent = activeBrief("briefMeta_id", "briefMeta_en", "briefMeta");
   document.getElementById("brief-text").textContent = activeBrief("briefText_id", "briefText_en", "briefText");
@@ -858,8 +1037,8 @@ function renderStatic(){
   document.getElementById("btn-mode-daily").textContent = t("modeDaily");
   document.getElementById("btn-seed").textContent = t("useSeed");
   document.getElementById("seed-input").placeholder = t("seedPlaceholder");
-  document.getElementById("play-seed-line").textContent = t("playSeed") + seedCode(currentSeed) + (activeCase.fallback ? t("fallbackNote") : "");
-  document.getElementById("result-seed-line").textContent = t("playSeed") + seedCode(currentSeed);
+  document.getElementById("play-seed-line").textContent = activeCaseId === "kasus-02" ? t("handcrafted") : t("playSeed") + seedCode(currentSeed) + (activeCase.fallback ? t("fallbackNote") : "");
+  document.getElementById("result-seed-line").textContent = activeCaseId === "kasus-02" ? t("handcrafted") : t("playSeed") + seedCode(currentSeed);
   document.getElementById("timeline-start-label").textContent = fmtTime(w.timelineStart);
   document.getElementById("timeline-window-label").textContent = fmtTime(w.start) + "–" + fmtTime(w.end);
   document.getElementById("timeline-end-label").textContent = fmtTime(w.timelineEnd);
@@ -875,15 +1054,17 @@ function renderStatic(){
   document.getElementById("suspect-heading").textContent = t("suspectHeading");
   document.getElementById("suspect-note").textContent = t("suspectNote");
   document.getElementById("accuse-heading").textContent = t("accuseHeading");
-  document.getElementById("accuse-note").textContent = t("accuseNote");
+  document.getElementById("accuse-note").textContent = requiredBreakers().length > 1 ? t("accuseNote2") : t("accuseNote");
   document.getElementById("btn-accuse").textContent = t("accuseBtn");
   document.getElementById("btn-hint").textContent = t("hintBtn");
   document.getElementById("result-title").textContent = t("resultTitle");
   document.getElementById("logic-heading").textContent = t("logicHeading");
   document.getElementById("result-text").textContent = activeBrief("result_id", "result_en", "resultText");
   updateModeLine();
-  document.getElementById("btn-replay").textContent = t("replay");
-  document.getElementById("btn-next").textContent = t("next");
+  document.getElementById("btn-replay").textContent = activeCaseId === "kasus-02" ? t("replay2") : t("replay");
+  const nextBtn = document.getElementById("btn-next");
+  if(activeCaseId === "kasus-02"){ nextBtn.textContent = t("next3"); nextBtn.disabled = true; nextBtn.onclick = null; }
+  else { nextBtn.textContent = isCase2Unlocked() ? t("toCase2") : t("next"); nextBtn.disabled = !isCase2Unlocked(); nextBtn.onclick = function(){ selectCase2(); showScreen("screen-brief"); }; }
   document.getElementById("btn-id").classList.toggle("active", lang === "id");
   document.getElementById("btn-en").classList.toggle("active", lang === "en");
   renderScene();
@@ -930,11 +1111,21 @@ function renderAccuseClues(){
     box.innerHTML = '<p class="meta">' + (lang === "id" ? "Belum ada clue ditemukan. Tap clue di atas dulu." : "No clues found yet. Tap a clue above first.") + "</p>";
     return;
   }
+  const multi = requiredBreakers().length > 1;
   foundClues.forEach(function(c){
     const b = document.createElement("button");
-    b.type = "button"; b.className = "chip" + (selectedClue === c.id ? " selected" : "");
+    const isSel = multi ? selectedClues.indexOf(c.id) !== -1 : selectedClue === c.id;
+    b.type = "button"; b.className = "chip" + (isSel ? " selected" : "");
     b.innerHTML = iconSVG(c.id) + " " + (lang === "id" ? c.label_id : c.label_en);
-    b.onclick = function(){ selectedClue = c.id; beep(520, 0.1); renderAccuseClues(); updateAccuse(); };
+    b.onclick = function(){
+      if(multi){
+        const at = selectedClues.indexOf(c.id);
+        if(at !== -1) selectedClues.splice(at, 1);
+        else if(selectedClues.length < requiredBreakers().length) selectedClues.push(c.id);
+        else return;
+      } else selectedClue = c.id;
+      beep(520, 0.1); renderAccuseClues(); updateAccuse();
+    };
     box.appendChild(b);
   });
 }
@@ -945,11 +1136,13 @@ function updateProgress(){
 }
 function updateAccuse(){
   const btn = document.getElementById("btn-accuse");
-  btn.disabled = !(selectedSuspect && selectedClue);
+  btn.disabled = !accuseReady();
   const sum = document.getElementById("accuse-summary");
+  const sel = selectedBreakerIds();
   if(!selectedSuspect) sum.textContent = t("selectSuspectFirst");
-  else if(!selectedClue) sum.textContent = t("selectClueFirst") + " (" + (lang === "id" ? "tersangka: " : "suspect: ") + selectedSuspect + ")";
-  else sum.textContent = (lang === "id" ? "Siap menuduh: " : "Ready to accuse: ") + selectedSuspect + " — " + (lang === "id" ? clueById(selectedClue).label_id : clueById(selectedClue).label_en);
+  else if(sel.length === 0) sum.textContent = (requiredBreakers().length > 1 ? t("selectCluesFirst") : t("selectClueFirst")) + " (" + (lang === "id" ? "tersangka: " : "suspect: ") + selectedSuspect + ")";
+  else if(sel.length < requiredBreakers().length) sum.textContent = (lang === "id" ? "Pilih bukti pematah (" : "Choose breaking clues (") + sel.length + "/" + requiredBreakers().length + ") — " + selectedSuspect + " — " + sel.map(function(id){ return lang === "id" ? clueById(id).label_id : clueById(id).label_en; }).join(" + ");
+  else sum.textContent = (lang === "id" ? "Siap menuduh: " : "Ready to accuse: ") + selectedSuspect + " — " + sel.map(function(id){ return lang === "id" ? clueById(id).label_id : clueById(id).label_en; }).join(" + ");
   updateTabBadges();
 }
 function renderTimeline(){
@@ -981,7 +1174,7 @@ function showScreen(id){
   window.scrollTo(0, 0);
 }
 function resetCase(){
-  found = new Set(); selectedSuspect = null; selectedClue = null;
+  found = new Set(); selectedSuspect = null; selectedClue = null; selectedClues = [];
   attempts = 0; hintIndex = 0;
   document.getElementById("clue-detail").classList.add("hidden");
   document.getElementById("clue-detail").innerHTML = "";
@@ -994,11 +1187,22 @@ function startCurrentCase(){
   // Kasus sudah dipilih saat mode/seed dipilih (setMode / btn-seed),
   // supaya briefing yang dibaca pemain sama persis dengan kasus yang dimainkan.
   // Untuk kasus Acak baru, tekan tombol Acak lagi di layar briefing.
-  if(currentMode === "daily") { currentSeed = dailySeedWIB(); activeCase = buildCase(currentSeed); }
+  if(activeCaseId === "kasus-01" && currentMode === "daily") { currentSeed = dailySeedWIB(); activeCase = buildCase(currentSeed); }
   lastSolvedStars = 0;
   resetCase(); renderStatic(); setTab("clues"); renderTimeline(); updateAccuse();
   beep(700, 0.12); showScreen("screen-play");
 }
+function selectCase1(){
+  case1Mode = currentMode; case1Seed = currentSeed;
+  activeCaseId = "kasus-01"; currentMode = case1Mode; currentSeed = case1Seed;
+  activeCase = buildCase(currentSeed); lastSolvedStars = 0; renderStatic();
+}
+function selectCase2(){
+  if(!isCase2Unlocked()) return;
+  activeCaseId = "kasus-02"; activeCase = CASE2; lastSolvedStars = 0; renderStatic();
+}
+document.getElementById("btn-case-1").onclick = function(){ selectCase1(); };
+document.getElementById("btn-case-2").onclick = function(){ selectCase2(); };
 document.getElementById("btn-start").onclick = function(){ startCurrentCase(); };
 ["clues", "timeline", "suspects", "accuse"].forEach(function(t){
   document.getElementById("btn-tab-" + t).onclick = function(){ setTab(t); };
@@ -1009,8 +1213,8 @@ document.getElementById("btn-mode-daily").onclick = function(){ setMode("daily")
 document.getElementById("btn-seed").onclick = function(){
   const raw = document.getElementById("seed-input").value.replace(/[^0-9]/g, "");
   if(!raw){ document.getElementById("mode-line").textContent = t("invalidSeed"); setMode("random"); renderStatic(); return; }
-  currentMode = "seed"; currentSeed = parseInt(raw, 10);
-  lastSolvedStars = 0;
+  currentMode = "seed"; currentSeed = parseInt(raw, 10); case1Mode = "seed"; case1Seed = currentSeed;
+  lastSolvedStars = 0; activeCaseId = "kasus-01";
   activeCase = buildCase(currentSeed);
   ["original", "random", "daily"].forEach(function(m){ document.getElementById("btn-mode-" + m).classList.remove("active"); });
   updateModeLine(); renderStatic();
@@ -1034,11 +1238,12 @@ document.getElementById("btn-hint").onclick = function(){
   beep(440, 0.15);
 };
 document.getElementById("btn-accuse").onclick = function(){
-  if(!selectedSuspect || !selectedClue) return;
+  if(!accuseReady()) return;
   attempts++;
   const box = document.getElementById("wrong-box");
-  const clue = clueById(selectedClue);
-  if(selectedSuspect === activeCase.culprit && selectedClue === activeCase.breakingClue){
+  const sel = selectedBreakerIds();
+  const req = requiredBreakers();
+  if(selectedSuspect === activeCase.culprit && sameSet(sel, req)){
     let stars = 1;
     if(attempts === 1 && hintIndex === 0) stars = 3;
     else if(hintIndex <= 1 && attempts <= 2) stars = 2;
@@ -1048,7 +1253,7 @@ document.getElementById("btn-accuse").onclick = function(){
     starsEl.innerHTML = "★".repeat(stars) + '<span class="off">' + "☆".repeat(3 - stars) + "</span>";
     const logic = lang === "id" ? activeCase.logic_id : activeCase.logic_en;
     document.getElementById("logic-list").innerHTML = logic.map(function(x){ return "<li>" + x + "</li>"; }).join("");
-    document.getElementById("save-note").textContent = t("saved") + stars + "★";
+    document.getElementById("save-note").textContent = (activeCaseId === "kasus-02" ? t("saved2") : t("saved")) + stars + "★";
     beep(880, 0.2); setTimeout(function(){ beep(1100, 0.25); }, 180);
     showScreen("screen-result");
     // Pop dipicu SETELAH layar hasil tampil, supaya animasinya terlihat,
@@ -1057,7 +1262,12 @@ document.getElementById("btn-accuse").onclick = function(){
     return;
   }
   box.classList.remove("hidden");
-  if(selectedSuspect === activeCase.culprit && clue.supporting){
+  if(selectedSuspect === activeCase.culprit && req.length > 1){
+    if(sel.length === 1 && sel[0] === "cctv-kosong") box.textContent = t("wrongWeak");
+    else if(sel.length === 1 && sel[0] === "sepatu-kunci") box.textContent = t("wrongPartial");
+    else box.textContent = t("wrongCombo");
+    beep(220, 0.25);
+  } else if(selectedSuspect === activeCase.culprit && sel.length === 1 && clueById(sel[0]).supporting){
     box.textContent = t("wrongClue");
     beep(220, 0.25);
   } else {
