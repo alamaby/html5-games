@@ -28,6 +28,21 @@
   .scene svg{display:block;width:100%;height:auto}
   .scene-compact svg{max-height:110px}
   .case-file{border-top:6px solid var(--gold)}
+  /* NOTEBOOK — kertas bergaris + jilid spiral (CSS saja, tanpa gambar). */
+  .notebook{position:relative;padding-left:30px;background-color:#fffdf6;background-image:linear-gradient(90deg,transparent 0,transparent 22px,rgba(217,119,6,.28) 22px,rgba(217,119,6,.28) 24px,transparent 24px),repeating-linear-gradient(transparent 0,transparent 27px,rgba(20,83,45,.08) 27px,rgba(20,83,45,.08) 28px)}
+  .notebook::before{content:"";position:absolute;left:8px;top:12px;bottom:12px;width:8px;background-image:radial-gradient(circle at 4px 6px,#94a3b8 3px,transparent 4px);background-size:8px 28px;background-repeat:repeat-y}
+  .tabs{display:flex;gap:6px;margin-top:12px;border-bottom:2px solid var(--line)}
+  .tab{flex:1 1 0;min-height:44px;border:2px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:#f4ead8;padding:10px 6px;font-weight:700;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+  .tab[data-tab="clues"]{border-top:4px solid #d97706}
+  .tab[data-tab="timeline"]{border-top:4px solid #0e7490}
+  .tab[data-tab="suspects"]{border-top:4px solid #7c3aed}
+  .tab[data-tab="accuse"]{border-top:4px solid #b91c1c}
+  .tab.active{background:#fffdf6;transform:translateY(2px);box-shadow:0 -2px 6px rgba(0,0,0,.06)}
+  .tab-badge{background:var(--teal);color:#fff;border-radius:999px;padding:1px 7px;font-size:12px;min-width:20px;text-align:center}
+  .tab-badge:empty{display:none}
+  .tab-panel{padding-top:2px}
+  .hint-bar{margin-top:14px;border-top:2px dashed var(--line);padding-top:4px}
+  .hint-bar .meta{margin-top:6px}
   .btn,.clue,.suspect,.chip,.pill{transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease}
   .btn:active,.clue:active,.suspect:active{transform:translateY(1px)}
   .clue:hover,.suspect:hover{border-color:var(--teal2);box-shadow:0 4px 12px rgba(20,83,45,.12)}
@@ -53,6 +68,8 @@
     header>div:last-child{display:flex;gap:6px;flex-wrap:wrap}
     h1{font-size:20px}
     .card{padding:14px}
+    .notebook{padding-left:26px}
+    .tab{font-size:13px;padding:8px 4px}
     .mode-row{gap:6px}
   }
   @media(orientation:landscape) and (max-height:500px){
@@ -142,36 +159,55 @@
     <button class="btn" id="btn-start" type="button">Mulai menyelidiki →</button>
   </section>
 
-  <!-- PLAY -->
-  <section class="card hidden" id="screen-play">
+  <!-- PLAY — buku catatan: tab bookmark, panel hanya disembunyikan,
+       state (clue ditemukan, tersangka/bukti terpilih) tidak di-reset. -->
+  <section class="card notebook hidden" id="screen-play">
     <div class="scene scene-compact" id="scene-play" aria-hidden="true"></div>
     <h2 id="play-title">Selidiki adegan</h2>
     <p class="meta" id="play-seed-line"></p>
     <p class="meta" id="clue-progress">Clue ditemukan: 0 / 5</p>
 
-    <h3 id="clue-heading">🧩 Clue di adegan</h3>
-    <div class="grid" id="clue-grid"></div>
-    <div class="detail hidden" id="clue-detail"></div>
-
-    <h3 id="timeline-heading">🕐 Timeline</h3>
-    <p class="meta" id="timeline-note">Area kuning = rentang kejadian 20.50–21.00. Tanda hijau muncul saat clue waktu ditemukan.</p>
-    <div class="timeline" id="timeline">
-      <div class="window" id="timeline-window"></div>
+    <div class="tabs" role="tablist" aria-label="Bagian buku catatan">
+      <button class="tab active" id="btn-tab-clues" type="button" role="tab" aria-selected="true" data-tab="clues"><span class="tab-label" id="tab-label-clues">Petunjuk</span><span class="tab-badge" id="badge-clues"></span></button>
+      <button class="tab" id="btn-tab-timeline" type="button" role="tab" aria-selected="false" data-tab="timeline"><span class="tab-label" id="tab-label-timeline">Timeline</span><span class="tab-badge" id="badge-timeline"></span></button>
+      <button class="tab" id="btn-tab-suspects" type="button" role="tab" aria-selected="false" data-tab="suspects"><span class="tab-label" id="tab-label-suspects">Kesaksian</span><span class="tab-badge" id="badge-suspects"></span></button>
+      <button class="tab" id="btn-tab-accuse" type="button" role="tab" aria-selected="false" data-tab="accuse"><span class="tab-label" id="tab-label-accuse">Tuduh</span><span class="tab-badge" id="badge-accuse"></span></button>
     </div>
-    <div class="timeline-labels"><span id="timeline-start-label">20.20</span><span id="timeline-window-label">20.50–21.00</span><span id="timeline-end-label">21.00</span></div>
 
-    <h3 id="suspect-heading">👥 Tersangka dan alibi</h3>
-    <p class="meta" id="suspect-note">Tap kartu untuk memilih tersangka yang akan dituduh.</p>
-    <div class="grid" id="suspect-grid"></div>
+    <div class="tab-panel" id="panel-clues" role="tabpanel">
+      <h3 id="clue-heading">🧩 Clue di adegan</h3>
+      <div class="grid" id="clue-grid"></div>
+      <div class="detail hidden" id="clue-detail"></div>
+    </div>
 
-    <h3 id="accuse-heading">⚖️ Tuduh</h3>
-    <p class="meta" id="accuse-note">Pilih tersangka, lalu pilih bukti pematah dari clue yang sudah ditemukan.</p>
-    <div id="accuse-clues"></div>
-    <p class="meta" id="accuse-summary"></p>
-    <button class="btn" id="btn-accuse" type="button" disabled>Tuduh</button>
-    <button class="btn secondary small" id="btn-hint" type="button">💡 Minta hint</button>
-    <p class="meta" id="hint-text"></p>
-    <div class="msg bad hidden" id="wrong-box"></div>
+    <div class="tab-panel hidden" id="panel-timeline" role="tabpanel">
+      <h3 id="timeline-heading">🕐 Timeline</h3>
+      <p class="meta" id="timeline-note">Area kuning = rentang kejadian 20.50–21.00. Tanda hijau muncul saat clue waktu ditemukan.</p>
+      <div class="timeline" id="timeline">
+        <div class="window" id="timeline-window"></div>
+      </div>
+      <div class="timeline-labels"><span id="timeline-start-label">20.20</span><span id="timeline-window-label">20.50–21.00</span><span id="timeline-end-label">21.00</span></div>
+    </div>
+
+    <div class="tab-panel hidden" id="panel-suspects" role="tabpanel">
+      <h3 id="suspect-heading">👥 Tersangka dan alibi</h3>
+      <p class="meta" id="suspect-note">Tap kartu untuk memilih tersangka yang akan dituduh.</p>
+      <div class="grid" id="suspect-grid"></div>
+    </div>
+
+    <div class="tab-panel hidden" id="panel-accuse" role="tabpanel">
+      <h3 id="accuse-heading">⚖️ Tuduh</h3>
+      <p class="meta" id="accuse-note">Pilih tersangka, lalu pilih bukti pematah dari clue yang sudah ditemukan.</p>
+      <div id="accuse-clues"></div>
+      <p class="meta" id="accuse-summary"></p>
+      <button class="btn" id="btn-accuse" type="button" disabled>Tuduh</button>
+      <div class="msg bad hidden" id="wrong-box"></div>
+    </div>
+
+    <div class="hint-bar">
+      <button class="btn secondary small" id="btn-hint" type="button">💡 Minta hint</button>
+      <p class="meta" id="hint-text"></p>
+    </div>
   </section>
 
   <!-- RESULT -->
@@ -588,6 +624,7 @@ const UI = {
     hintUsed: "Hint dipakai: ", noMoreHints: "Hint sudah habis (2/2).",
     wrongSuspect: "Belum tepat. ", wrongClue: "Tersangkanya benar, tapi bukti itu hanya pendukung, bukan pematah utama. Coba lagi dengan bukti yang mematahkan alibi secara langsung.",
     saved: "Tersimpan lokal: bintang Kasus 1 = ",
+    tabClues: "Petunjuk", tabTimeline: "Timeline", tabSuspects: "Kesaksian", tabAccuse: "Tuduh",
     footer: "Prototipe Level 1 • Judul kerja, bukan final • Tanpa gore • Save lokal di perangkat ini (ab_save_v1) • SDK portal ditambahkan pada build portal, bukan pada prototipe lokal ini.",
     modeHeading: "Mode main", modeOriginal: "Kasus Asli", modeRandom: "🎲 Acak", modeDaily: "📅 Harian", useSeed: "Pakai seed",
     seedPlaceholder: "Kode seed, mis. AB-482913", bestRandom: " • Acak terbaik: ", bestDaily: " • Harian: ",
@@ -613,6 +650,7 @@ const UI = {
     hintUsed: "Hints used: ", noMoreHints: "No hints left (2/2).",
     wrongSuspect: "Not quite. ", wrongClue: "Right suspect, but that evidence only supports the case — it is not the main breaker. Try again with evidence that directly breaks the alibi.",
     saved: "Saved locally: Case 1 stars = ",
+    tabClues: "Clues", tabTimeline: "Timeline", tabSuspects: "Testimonies", tabAccuse: "Accuse",
     footer: "Level 1 prototype • Working title, not final • No gore • Local save on this device (ab_save_v1) • Portal SDK is added on the portal build, not on this local prototype.",
     modeHeading: "Game mode", modeOriginal: "Original Case", modeRandom: "🎲 Random", modeDaily: "📅 Daily", useSeed: "Use seed",
     seedPlaceholder: "Seed code, e.g. AB-482913", bestRandom: " • Random best: ", bestDaily: " • Daily: ",
@@ -633,6 +671,7 @@ let attempts = 0;
 let hintIndex = 0;
 let audioCtx = null;
 let lastSolvedStars = 0;
+let activeTab = "clues";
 
 function t(key){ return UI[lang][key]; }
 function txt(obj){ return lang === "id" ? obj.id : obj.en; }
@@ -787,6 +826,25 @@ function renderResultTexts(){
   document.getElementById("save-note").textContent = t("saved") + lastSolvedStars + "★";
 }
 
+function setTab(tab){
+  activeTab = tab;
+  ["clues", "timeline", "suspects", "accuse"].forEach(function(t){
+    const panel = document.getElementById("panel-" + t);
+    const btn = document.getElementById("btn-tab-" + t);
+    if(panel) panel.classList.toggle("hidden", t !== tab);
+    if(btn){ btn.classList.toggle("active", t === tab); btn.setAttribute("aria-selected", t === tab ? "true" : "false"); }
+  });
+  if(tab === "timeline") renderTimeline();
+}
+function updateTabBadges(){
+  const cb = document.getElementById("badge-clues");
+  const sb = document.getElementById("badge-suspects");
+  const ab = document.getElementById("badge-accuse");
+  if(cb) cb.textContent = found.size + " / " + activeCase.clues.length;
+  if(sb) sb.textContent = selectedSuspect ? "✓" : "";
+  if(ab) ab.textContent = (selectedSuspect && selectedClue) ? "✓" : (selectedSuspect || selectedClue ? "1/2" : "");
+}
+
 function renderStatic(){
   const w = activeWindow();
   document.getElementById("subtitle").textContent = currentMode === "original" ? t("subtitle") : "Level 1 — " + (lang === "id" ? activeCase.setting_id : activeCase.setting_en) + " • " + seedCode(currentSeed);
@@ -806,6 +864,10 @@ function renderStatic(){
   document.getElementById("timeline-window-label").textContent = fmtTime(w.start) + "–" + fmtTime(w.end);
   document.getElementById("timeline-end-label").textContent = fmtTime(w.timelineEnd);
   document.getElementById("btn-start").textContent = t("start");
+  document.getElementById("tab-label-clues").textContent = t("tabClues");
+  document.getElementById("tab-label-timeline").textContent = t("tabTimeline");
+  document.getElementById("tab-label-suspects").textContent = t("tabSuspects");
+  document.getElementById("tab-label-accuse").textContent = t("tabAccuse");
   document.getElementById("play-title").textContent = t("playTitle");
   document.getElementById("clue-heading").textContent = t("clueHeading");
   document.getElementById("timeline-heading").textContent = t("timelineHeading");
@@ -879,6 +941,7 @@ function renderAccuseClues(){
 
 function updateProgress(){
   document.getElementById("clue-progress").textContent = t("clueProgress") + found.size + " / " + activeCase.clues.length;
+  updateTabBadges();
 }
 function updateAccuse(){
   const btn = document.getElementById("btn-accuse");
@@ -887,6 +950,7 @@ function updateAccuse(){
   if(!selectedSuspect) sum.textContent = t("selectSuspectFirst");
   else if(!selectedClue) sum.textContent = t("selectClueFirst") + " (" + (lang === "id" ? "tersangka: " : "suspect: ") + selectedSuspect + ")";
   else sum.textContent = (lang === "id" ? "Siap menuduh: " : "Ready to accuse: ") + selectedSuspect + " — " + (lang === "id" ? clueById(selectedClue).label_id : clueById(selectedClue).label_en);
+  updateTabBadges();
 }
 function renderTimeline(){
   const tl = document.getElementById("timeline");
@@ -932,10 +996,13 @@ function startCurrentCase(){
   // Untuk kasus Acak baru, tekan tombol Acak lagi di layar briefing.
   if(currentMode === "daily") { currentSeed = dailySeedWIB(); activeCase = buildCase(currentSeed); }
   lastSolvedStars = 0;
-  resetCase(); renderStatic(); renderTimeline(); updateAccuse();
+  resetCase(); renderStatic(); setTab("clues"); renderTimeline(); updateAccuse();
   beep(700, 0.12); showScreen("screen-play");
 }
 document.getElementById("btn-start").onclick = function(){ startCurrentCase(); };
+["clues", "timeline", "suspects", "accuse"].forEach(function(t){
+  document.getElementById("btn-tab-" + t).onclick = function(){ setTab(t); };
+});
 document.getElementById("btn-mode-original").onclick = function(){ setMode("original"); renderStatic(); };
 document.getElementById("btn-mode-random").onclick = function(){ setMode("random"); renderStatic(); };
 document.getElementById("btn-mode-daily").onclick = function(){ setMode("daily"); renderStatic(); };
