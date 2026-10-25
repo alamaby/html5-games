@@ -39,7 +39,7 @@
   .timeline .mark svg{width:20px;height:20px}
   .chip svg{width:18px;height:18px;vertical-align:-4px}
   @keyframes starPop{0%{transform:scale(.6)}60%{transform:scale(1.15)}100%{transform:scale(1)}}
-  .stars.pop{animation:starPop .45s ease}
+  .stars.pop{animation:starPop .7s ease}
   @media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
   /* RESPONSIVE — target tap, landscape pendek, dan zoom. Logika tidak diubah. */
   button,.btn,.clue,.suspect,.chip,.pill{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
@@ -588,6 +588,7 @@ const UI = {
     hintUsed: "Hint dipakai: ", noMoreHints: "Hint sudah habis (2/2).",
     wrongSuspect: "Belum tepat. ", wrongClue: "Tersangkanya benar, tapi bukti itu hanya pendukung, bukan pematah utama. Coba lagi dengan bukti yang mematahkan alibi secara langsung.",
     saved: "Tersimpan lokal: bintang Kasus 1 = ",
+    footer: "Prototipe Level 1 • Judul kerja, bukan final • Tanpa gore • Save lokal di perangkat ini (ab_save_v1) • SDK portal ditambahkan pada build portal, bukan pada prototipe lokal ini.",
     modeHeading: "Mode main", modeOriginal: "Kasus Asli", modeRandom: "🎲 Acak", modeDaily: "📅 Harian", useSeed: "Pakai seed",
     seedPlaceholder: "Kode seed, mis. AB-482913", bestRandom: " • Acak terbaik: ", bestDaily: " • Harian: ",
     playSeed: "Kode seed: ", invalidSeed: "Seed tidak valid, dipakai mode Acak.",
@@ -612,6 +613,7 @@ const UI = {
     hintUsed: "Hints used: ", noMoreHints: "No hints left (2/2).",
     wrongSuspect: "Not quite. ", wrongClue: "Right suspect, but that evidence only supports the case — it is not the main breaker. Try again with evidence that directly breaks the alibi.",
     saved: "Saved locally: Case 1 stars = ",
+    footer: "Level 1 prototype • Working title, not final • No gore • Local save on this device (ab_save_v1) • Portal SDK is added on the portal build, not on this local prototype.",
     modeHeading: "Game mode", modeOriginal: "Original Case", modeRandom: "🎲 Random", modeDaily: "📅 Daily", useSeed: "Use seed",
     seedPlaceholder: "Seed code, e.g. AB-482913", bestRandom: " • Random best: ", bestDaily: " • Daily: ",
     playSeed: "Seed code: ", invalidSeed: "Invalid seed, using Random mode instead.",
@@ -630,6 +632,7 @@ let selectedClue = null;
 let attempts = 0;
 let hintIndex = 0;
 let audioCtx = null;
+let lastSolvedStars = 0;
 
 function t(key){ return UI[lang][key]; }
 function txt(obj){ return lang === "id" ? obj.id : obj.en; }
@@ -662,11 +665,11 @@ function iconSVG(clueId){
   }[clueId] || '<circle cx="12" cy="12" r="8"/>';
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
 }
-function avatarSVG(name){
+function avatarSVG(name, index){
+  // Warna berdasarkan urutan tersangka di kasus (0-3), bukan hash nama,
+  // supaya keempat tersangka di satu kasus selalu berbeda warnanya.
   const palette = ["#14532d", "#7c3aed", "#b45309", "#0e7490", "#be185d", "#365314"];
-  let h = 0;
-  for(let i = 0; i < name.length; i++) h += name.charCodeAt(i);
-  const bg = palette[h % palette.length];
+  const bg = palette[(index || 0) % palette.length];
   return '<svg viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="28" fill="' + bg + '"/><circle cx="28" cy="23" r="9" fill="#ffe1b8"/><path d="M11 52a17 13 0 0 1 34 0z" fill="#fffdf6"/><circle cx="28" cy="23" r="9" fill="none" stroke="#fffdf6" stroke-width="2" opacity=".5"/></svg>';
 }
 function sceneSVG(skinId){
@@ -760,6 +763,7 @@ function updateModeLine(){
   else el.textContent = lang === "id" ? "Mode: Acak — tekan tombol Acak lagi untuk kasus baru." : "Mode: Random — press Random again for a new case.";
 }
 function setMode(mode){
+  lastSolvedStars = 0;
   currentMode = mode;
   if(mode === "original") currentSeed = 0;
   if(mode === "daily") currentSeed = dailySeedWIB();
@@ -771,6 +775,16 @@ function setMode(mode){
   });
   // Seed mode tidak punya tombol pill sendiri; pilih seed akan mengaktifkan mode seed.
   updateModeLine();
+}
+
+function renderResultTexts(){
+  // Dipanggil dari renderStatic supaya ganti bahasa di layar hasil ikut
+  // menerjemahkan rantai logika dan baris tersimpan, bukan hanya judul.
+  document.getElementById("footer-note").textContent = t("footer");
+  if(!lastSolvedStars) return;
+  const logic = lang === "id" ? activeCase.logic_id : activeCase.logic_en;
+  document.getElementById("logic-list").innerHTML = logic.map(function(x){ return "<li>" + x + "</li>"; }).join("");
+  document.getElementById("save-note").textContent = t("saved") + lastSolvedStars + "★";
 }
 
 function renderStatic(){
@@ -812,6 +826,7 @@ function renderStatic(){
   document.getElementById("btn-en").classList.toggle("active", lang === "en");
   renderScene();
   showBest();
+  renderResultTexts();
   renderClues(); renderSuspects(); renderAccuseClues(); updateProgress();
 }
 
@@ -836,10 +851,10 @@ function renderClues(){
 function renderSuspects(){
   const grid = document.getElementById("suspect-grid");
   grid.innerHTML = "";
-  activeCase.suspects.forEach(function(s){
+  activeCase.suspects.forEach(function(s, idx){
     const b = document.createElement("button");
     b.type = "button"; b.className = "suspect" + (selectedSuspect === s.id ? " selected" : "");
-    b.innerHTML = '<span class="ic">' + avatarSVG(s.id) + "</span><span class=\"lb\">" + s.id + " — " + (lang === "id" ? s.role_id : s.role_en) + "</span><span class=\"st\">" + (lang === "id" ? s.alibi_id : s.alibi_en) + "</span>";
+    b.innerHTML = '<span class="ic">' + avatarSVG(s.id, idx) + "</span><span class=\"lb\">" + s.id + " — " + (lang === "id" ? s.role_id : s.role_en) + "</span><span class=\"st\">" + (lang === "id" ? s.alibi_id : s.alibi_en) + "</span>";
     b.onclick = function(){ selectedSuspect = s.id; beep(520, 0.1); renderSuspects(); updateAccuse(); };
     grid.appendChild(b);
   });
@@ -916,6 +931,7 @@ function startCurrentCase(){
   // supaya briefing yang dibaca pemain sama persis dengan kasus yang dimainkan.
   // Untuk kasus Acak baru, tekan tombol Acak lagi di layar briefing.
   if(currentMode === "daily") { currentSeed = dailySeedWIB(); activeCase = buildCase(currentSeed); }
+  lastSolvedStars = 0;
   resetCase(); renderStatic(); renderTimeline(); updateAccuse();
   beep(700, 0.12); showScreen("screen-play");
 }
@@ -927,11 +943,12 @@ document.getElementById("btn-seed").onclick = function(){
   const raw = document.getElementById("seed-input").value.replace(/[^0-9]/g, "");
   if(!raw){ document.getElementById("mode-line").textContent = t("invalidSeed"); setMode("random"); renderStatic(); return; }
   currentMode = "seed"; currentSeed = parseInt(raw, 10);
+  lastSolvedStars = 0;
   activeCase = buildCase(currentSeed);
   ["original", "random", "daily"].forEach(function(m){ document.getElementById("btn-mode-" + m).classList.remove("active"); });
   updateModeLine(); renderStatic();
 };
-document.getElementById("btn-replay").onclick = function(){ resetCase(); showScreen("screen-brief"); };
+document.getElementById("btn-replay").onclick = function(){ resetCase(); showBest(); showScreen("screen-brief"); };
 document.getElementById("btn-id").onclick = function(){ lang = "id"; renderStatic(); };
 document.getElementById("btn-en").onclick = function(){ lang = "en"; renderStatic(); };
 document.getElementById("btn-sound").onclick = function(){
@@ -959,14 +976,17 @@ document.getElementById("btn-accuse").onclick = function(){
     if(attempts === 1 && hintIndex === 0) stars = 3;
     else if(hintIndex <= 1 && attempts <= 2) stars = 2;
     const saved = saveStars(stars);
+    lastSolvedStars = stars;
     const starsEl = document.getElementById("result-stars");
     starsEl.innerHTML = "★".repeat(stars) + '<span class="off">' + "☆".repeat(3 - stars) + "</span>";
-    starsEl.classList.remove("pop"); void starsEl.offsetWidth; starsEl.classList.add("pop");
     const logic = lang === "id" ? activeCase.logic_id : activeCase.logic_en;
     document.getElementById("logic-list").innerHTML = logic.map(function(x){ return "<li>" + x + "</li>"; }).join("");
     document.getElementById("save-note").textContent = t("saved") + stars + "★";
     beep(880, 0.2); setTimeout(function(){ beep(1100, 0.25); }, 180);
     showScreen("screen-result");
+    // Pop dipicu SETELAH layar hasil tampil, supaya animasinya terlihat,
+    // bukan dimulai saat layarnya masih tersembunyi.
+    starsEl.classList.remove("pop"); void starsEl.offsetWidth; starsEl.classList.add("pop");
     return;
   }
   box.classList.remove("hidden");
