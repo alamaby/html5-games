@@ -166,5 +166,68 @@ function quiet(st) { st.spawnT = 9999; }
   ok('finish event fired', st.events.some((e) => e.t === 'finish'));
 }
 
+// Fuel: drains per metre, nitro burns double, braking sips, empty = crawl
+{
+  function runWith(flag, seconds) {
+    const st = TR.createGame(); quiet(st);
+    if (flag === 'nitro') TR.setNitro(st, true);
+    if (flag === 'brake') TR.setBrake(st, true);
+    for (let i = 0; i < seconds * 60; i++) TR.step(st, 1 / 60);
+    return st;
+  }
+  const normal = runWith('normal', 10);
+  const nitro = runWith('nitro', 10);
+  const brake = runWith('brake', 10);
+  ok('fuel drains over distance', normal.fuel < 100 && normal.fuel > 90);
+  ok('nitro drains more than normal', nitro.fuel < normal.fuel);
+  ok('braking drains less than normal', brake.fuel > normal.fuel);
+  ok('fuel low warning fires', normal.fuel <= 100); // flag path covered below
+  const low = TR.createGame(); quiet(low);
+  low.fuel = 20; low.fuelLow = false;
+  TR.step(low, 1 / 60);
+  ok('fuelLow event at 25%', low.events.some((e) => e.t === 'fuelLow'));
+  const empty = TR.createGame(); quiet(empty);
+  empty.fuel = 0;
+  TR.step(empty, 1 / 60);
+  eq('empty tank crawls at 8 m/s', empty.speed, 8);
+}
+
+// Fuel pickup: same lane collects +30 and +25 bonus; rest refills fuel
+{
+  const st = TR.createGame(); quiet(st);
+  st.fuel = 50;
+  st.pickups.push({ lane: 1, s: st.dist + 6, x: 0, taken: false });
+  for (let i = 0; i < 60; i++) TR.step(st, 1 / 60);
+  eq('pickup collected', st.pickups.length, 0);
+  ok('pickup refills fuel', st.fuel > 50);
+  ok('pickup pays bonus', st.bonus >= 25);
+  ok('fuel event fired', st.events.some((e) => e.t === 'fuel'));
+
+  const st2 = TR.createGame(); quiet(st2);
+  st2.dist = TR.REST_AT - 100;
+  TR.step(st2, 1 / 60);
+  st2.fuel = 20; st2.hp = 1;
+  ok('rest accepted with low fuel', TR.tryRest(st2));
+  eq('rest refills fuel to full', st2.fuel, st2.maxFuel);
+  eq('rest heals to max HP', st2.hp, st2.maxHp);
+}
+
+// Upgrades: handling / brake / armor / tank, clamped to max level
+{
+  const up = TR.createGame({ upgrades: { handling: 3, brake: 3, armor: 2, tank: 2 } });
+  eq('handling lvl3 move time', up.moveTime, 0.13);
+  eq('brake lvl3 factor', up.brakeFactor, 0.34);
+  eq('armor lvl2 max HP', up.maxHp, 5);
+  eq('armor lvl2 HP', up.hp, 5);
+  eq('tank lvl2 max fuel', up.maxFuel, 140);
+  eq('tank lvl2 fuel', up.fuel, 140);
+  const over = TR.createGame({ upgrades: { handling: 99, brake: 99, armor: 99, tank: 99 } });
+  eq('levels clamped to 3', over.upgrades.handling, 3);
+  eq('armor clamped HP', over.maxHp, 6);
+  const def = TR.createGame();
+  eq('no upgrades = defaults', def.moveTime, 0.22);
+  eq('no upgrades brake', def.brakeFactor, 0.55);
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -29,19 +29,42 @@ const TR = {
   PLAYER_MOVE_TIME: 0.22,  // seconds for the player to snap to a new lane
   MAX_HP: 3,
   CRASH_INVULN: 2.0,
+  // Fuel: litres-equivalent points, drained per metre travelled.
+  FUEL_DRAIN: 0.022,        // normal driving
+  FUEL_DRAIN_NITRO: 0.045,  // nitro burns roughly double
+  FUEL_DRAIN_BRAKE: 0.012,  // coasting/braking sips fuel
+  FUEL_PICKUP: 30,
+  FUEL_LIMP_SPEED: 8,       // crawl speed on an empty tank (not instant death)
+  UPGRADE_COSTS: [60, 120, 200, 300], // per level 1..3, same for every track
+  UPGRADE_MAX: 3,
 
   createGame(opts) {
     const o = opts || {};
     const mode = TR.ROUTES[o.mode] ? o.mode : 'short';
     const route = TR.ROUTES[mode];
+    const up = o.upgrades || {};
+    const lvl = (v) => Math.max(0, Math.min(TR.UPGRADE_MAX, Math.floor(v || 0)));
+    const upgrades = { handling: lvl(up.handling), brake: lvl(up.brake), armor: lvl(up.armor), tank: lvl(up.tank) };
+    const maxHp = TR.MAX_HP + upgrades.armor;
+    const maxFuel = 100 + upgrades.tank * 20;
     return {
       status: 'play', // play | finished | over
       mode,
       routeLen: route.len,
+      upgrades,
+      moveTime: Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03),
+      brakeFactor: 0.55 - upgrades.brake * 0.07,
       time: 0,
       dist: 0,
       speed: 20,
-      hp: TR.MAX_HP,
+      hp: maxHp,
+      maxHp,
+      fuel: maxFuel,
+      maxFuel,
+      pickups: [],
+      nextPickupAt: 700 + Math.random() * 300,
+      fuelLow: false,
+      fuelCritical: false,
       score: 0,
       bonus: 0,
       combo: 0,
@@ -100,7 +123,8 @@ const TR = {
     const stop = TR.openRestStop(st);
     if (!stop) return false;
     stop.state = 'used';
-    st.hp = TR.MAX_HP;
+    st.hp = st.maxHp;
+    st.fuel = st.maxFuel;
     st.bonus += 250;
     st.invuln = Math.max(st.invuln, 3);
     // Clear traffic just ahead so leaving the rest area is never an instant crash.
@@ -176,19 +200,36 @@ const TR = {
 
     // Speed: base rises with distance, brake slows, nitro boosts.
     let speed = TR.baseSpeed(st.dist);
-    if (st.brake) speed *= 0.55;
-    if (st.nitroOn && st.nitro > 0) {
+    const nitroActive = st.nitroOn && st.nitro > 0;
+    if (st.brake) speed *= st.brakeFactor;
+    if (nitroActive) {
       speed += 10;
       st.nitro = Math.max(0, st.nitro - 25 * dt);
     }
     if (st.crashT > 0) speed = Math.min(speed, 12);
+    if (st.fuel <= 0) speed = Math.min(speed, TR.FUEL_LIMP_SPEED); // empty tank: crawl, not instant death
     st.speed = speed;
-    st.dist += speed * dt;
+    const travelled = speed * dt;
+    st.dist += travelled;
+
+    // Fuel: drained per metre; nitro burns double, braking sips.
+    if (st.fuel > 0) {
+      const rate = nitroActive ? TR.FUEL_DRAIN_NITRO : (st.brake ? TR.FUEL_DRAIN_BRAKE : TR.FUEL_DRAIN);
+      st.fuel = Math.max(0, st.fuel - travelled * rate);
+    }
+    if (!st.fuelLow && st.fuel <= st.maxFuel * 0.25) {
+      st.fuelLow = true;
+      st.events.push({ t: 'fuelLow', fuel: st.fuel });
+    }
+    if (!st.fuelCritical && st.fuel <= st.maxFuel * 0.10) {
+      st.fuelCritical = true;
+      st.events.push({ t: 'fuelCritical', fuel: st.fuel });
+    }
 
     // Player lane snap.
     const p = st.player;
     if (p.moveT < 1) {
-      p.moveT = Math.min(1, p.moveT + dt / TR.PLAYER_MOVE_TIME);
+      p.moveT = Math.min(1, p.moveT + dt / st.moveTime);
       const e = 1 - Math.pow(1 - p.moveT, 2);
       p.x = p.startX + (TR.LANES[p.targetLane] - p.startX) * e;
       if (p.moveT >= 1) p.lane = p.targetLane;
@@ -221,6 +262,21 @@ const TR = {
     if (st.spawnT <= 0) {
       TR.spawnVehicle(st);
       st.spawnT = TR.spawnInterval(st.dist) * (0.8 + Math.random() * 0.4);
+    }
+
+    // Fuel pickup spawner: never on top of a car in the same lane.
+    if (st.dist >= st.nextPickupAt) {
+      const startLane = Math.floor(Math.random() * 3);
+      for (let k = 0; k < 3; k++) {
+        const lane = (startLane + k) % 3;
+        const s = st.dist + 180 + Math.random() * 60;
+        const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25);
+        if (!blocked) {
+          st.pickups.push({ lane, s, x: TR.LANES[lane], taken: false });
+          break;
+        }
+      }
+      st.nextPickupAt = st.dist + 900 + Math.random() * 600;
     }
 
     // Traffic update, lane changes, collisions, overtakes.
@@ -279,6 +335,19 @@ const TR = {
       }
     }
     st.traffic = st.traffic.filter((v) => (v.s - st.dist) > -30);
+
+    // Fuel pickup collection: same lane, close gap.
+    for (const pk of st.pickups) {
+      if (pk.taken) continue;
+      const gap = pk.s - st.dist;
+      if (Math.abs(gap) < 4 && Math.abs(st.player.x - pk.x) < 1.7) {
+        pk.taken = true;
+        st.fuel = Math.min(st.maxFuel, st.fuel + TR.FUEL_PICKUP);
+        st.bonus += 25;
+        st.events.push({ t: 'fuel', fuel: st.fuel });
+      }
+    }
+    st.pickups = st.pickups.filter((pk) => !pk.taken && (pk.s - st.dist) > -30);
 
     st.score = Math.floor(st.dist) + st.bonus;
 

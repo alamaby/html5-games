@@ -44,6 +44,16 @@
   #dist { font-size:14px; color:#ffd76a; text-shadow:0 2px 8px rgba(0,0,0,.6); }
   #prog { height:8px; background:rgba(255,255,255,.18); border-radius:99px; margin-top:8px; overflow:hidden; }
   #progFill { height:100%; width:0%; background:linear-gradient(90deg,#ffd76a,#ff7a1a); border-radius:99px; }
+  #fuelBar { height:8px; background:rgba(255,255,255,.18); border-radius:99px; margin-top:6px; overflow:hidden; }
+  #fuelFill { height:100%; width:100%; background:#ffb020; border-radius:99px; }
+  .shop { width:100%; max-width:340px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09);
+          border-radius:12px; padding:12px 14px; margin-bottom:18px; text-align:left; }
+  .shophead { font-size:13px; letter-spacing:1px; color:#ffd76a; font-weight:800; margin-bottom:6px; }
+  .shoprow { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; font-size:13px; }
+  .shoprow .lvl { color:#ffd76a; letter-spacing:2px; }
+  .shopbuy { background:#ffd76a; color:#111; border:0; border-radius:10px; padding:8px 12px; font-weight:800; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .shopbuy:disabled { background:rgba(255,255,255,.12); color:rgba(255,255,255,.4); }
+  #shopMsg { min-height:18px; font-size:12px; color:#7dff9a; margin-top:4px; }
   #sign { text-align:center; margin-top:8px; font-size:15px; font-weight:800; color:#7dff9a;
           text-shadow:0 2px 8px rgba(0,0,0,.7); min-height:22px; }
   #toast { position:fixed; top:110px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(20,26,52,.94);
@@ -94,6 +104,7 @@
   <div class="hudrow"><span id="hp">♥♥♥</span><span id="score">0</span><span id="speed">0 km/h</span></div>
   <div class="hudrow"><span id="dist"></span><span id="comboLabel"></span></div>
   <div id="prog"><div id="progFill"></div></div>
+  <div id="fuelBar"><div id="fuelFill"></div></div>
   <div id="sign"></div>
 </div>
 <div id="toast"></div>
@@ -124,7 +135,7 @@
   <div class="howto">
     <div class="hrow" data-i18n="how1">◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat</div>
     <div class="hrow" data-i18n="how2">⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.</div>
-    <div class="hrow" data-i18n="how3">♥ 3x tabrakan = mogok. Mampir rest area untuk pulih penuh (+250).</div>
+    <div class="hrow" data-i18n="how3">♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).</div>
     <div class="hrow" data-i18n="how4">Salip mepet = combo + nitro. REM untuk manuver sempit.</div>
   </div>
   <div class="best" id="bestLine"></div>
@@ -133,6 +144,11 @@
     <button class="bigbtn modebtn" data-mode="short" data-i18n="modeShort">RUTE 5 KM</button>
     <button class="bigbtn modebtn" data-mode="long" data-i18n="modeLong">RUTE 10 KM</button>
     <button class="bigbtn modebtn" data-mode="endless" data-i18n="modeEndless">ENDLESS</button>
+  </div>
+  <div class="shop">
+    <div class="shophead"><span data-i18n="shopTitle">UPGRADE</span> · <span id="coinLine"></span></div>
+    <div id="shopList"></div>
+    <div id="shopMsg"></div>
   </div>
 </div>
 
@@ -177,19 +193,42 @@ const TR = {
   PLAYER_MOVE_TIME: 0.22,  // seconds for the player to snap to a new lane
   MAX_HP: 3,
   CRASH_INVULN: 2.0,
+  // Fuel: litres-equivalent points, drained per metre travelled.
+  FUEL_DRAIN: 0.022,        // normal driving
+  FUEL_DRAIN_NITRO: 0.045,  // nitro burns roughly double
+  FUEL_DRAIN_BRAKE: 0.012,  // coasting/braking sips fuel
+  FUEL_PICKUP: 30,
+  FUEL_LIMP_SPEED: 8,       // crawl speed on an empty tank (not instant death)
+  UPGRADE_COSTS: [60, 120, 200, 300], // per level 1..3, same for every track
+  UPGRADE_MAX: 3,
 
   createGame(opts) {
     const o = opts || {};
     const mode = TR.ROUTES[o.mode] ? o.mode : 'short';
     const route = TR.ROUTES[mode];
+    const up = o.upgrades || {};
+    const lvl = (v) => Math.max(0, Math.min(TR.UPGRADE_MAX, Math.floor(v || 0)));
+    const upgrades = { handling: lvl(up.handling), brake: lvl(up.brake), armor: lvl(up.armor), tank: lvl(up.tank) };
+    const maxHp = TR.MAX_HP + upgrades.armor;
+    const maxFuel = 100 + upgrades.tank * 20;
     return {
       status: 'play', // play | finished | over
       mode,
       routeLen: route.len,
+      upgrades,
+      moveTime: Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03),
+      brakeFactor: 0.55 - upgrades.brake * 0.07,
       time: 0,
       dist: 0,
       speed: 20,
-      hp: TR.MAX_HP,
+      hp: maxHp,
+      maxHp,
+      fuel: maxFuel,
+      maxFuel,
+      pickups: [],
+      nextPickupAt: 700 + Math.random() * 300,
+      fuelLow: false,
+      fuelCritical: false,
       score: 0,
       bonus: 0,
       combo: 0,
@@ -248,7 +287,8 @@ const TR = {
     const stop = TR.openRestStop(st);
     if (!stop) return false;
     stop.state = 'used';
-    st.hp = TR.MAX_HP;
+    st.hp = st.maxHp;
+    st.fuel = st.maxFuel;
     st.bonus += 250;
     st.invuln = Math.max(st.invuln, 3);
     // Clear traffic just ahead so leaving the rest area is never an instant crash.
@@ -324,19 +364,36 @@ const TR = {
 
     // Speed: base rises with distance, brake slows, nitro boosts.
     let speed = TR.baseSpeed(st.dist);
-    if (st.brake) speed *= 0.55;
-    if (st.nitroOn && st.nitro > 0) {
+    const nitroActive = st.nitroOn && st.nitro > 0;
+    if (st.brake) speed *= st.brakeFactor;
+    if (nitroActive) {
       speed += 10;
       st.nitro = Math.max(0, st.nitro - 25 * dt);
     }
     if (st.crashT > 0) speed = Math.min(speed, 12);
+    if (st.fuel <= 0) speed = Math.min(speed, TR.FUEL_LIMP_SPEED); // empty tank: crawl, not instant death
     st.speed = speed;
-    st.dist += speed * dt;
+    const travelled = speed * dt;
+    st.dist += travelled;
+
+    // Fuel: drained per metre; nitro burns double, braking sips.
+    if (st.fuel > 0) {
+      const rate = nitroActive ? TR.FUEL_DRAIN_NITRO : (st.brake ? TR.FUEL_DRAIN_BRAKE : TR.FUEL_DRAIN);
+      st.fuel = Math.max(0, st.fuel - travelled * rate);
+    }
+    if (!st.fuelLow && st.fuel <= st.maxFuel * 0.25) {
+      st.fuelLow = true;
+      st.events.push({ t: 'fuelLow', fuel: st.fuel });
+    }
+    if (!st.fuelCritical && st.fuel <= st.maxFuel * 0.10) {
+      st.fuelCritical = true;
+      st.events.push({ t: 'fuelCritical', fuel: st.fuel });
+    }
 
     // Player lane snap.
     const p = st.player;
     if (p.moveT < 1) {
-      p.moveT = Math.min(1, p.moveT + dt / TR.PLAYER_MOVE_TIME);
+      p.moveT = Math.min(1, p.moveT + dt / st.moveTime);
       const e = 1 - Math.pow(1 - p.moveT, 2);
       p.x = p.startX + (TR.LANES[p.targetLane] - p.startX) * e;
       if (p.moveT >= 1) p.lane = p.targetLane;
@@ -369,6 +426,21 @@ const TR = {
     if (st.spawnT <= 0) {
       TR.spawnVehicle(st);
       st.spawnT = TR.spawnInterval(st.dist) * (0.8 + Math.random() * 0.4);
+    }
+
+    // Fuel pickup spawner: never on top of a car in the same lane.
+    if (st.dist >= st.nextPickupAt) {
+      const startLane = Math.floor(Math.random() * 3);
+      for (let k = 0; k < 3; k++) {
+        const lane = (startLane + k) % 3;
+        const s = st.dist + 180 + Math.random() * 60;
+        const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25);
+        if (!blocked) {
+          st.pickups.push({ lane, s, x: TR.LANES[lane], taken: false });
+          break;
+        }
+      }
+      st.nextPickupAt = st.dist + 900 + Math.random() * 600;
     }
 
     // Traffic update, lane changes, collisions, overtakes.
@@ -427,6 +499,19 @@ const TR = {
       }
     }
     st.traffic = st.traffic.filter((v) => (v.s - st.dist) > -30);
+
+    // Fuel pickup collection: same lane, close gap.
+    for (const pk of st.pickups) {
+      if (pk.taken) continue;
+      const gap = pk.s - st.dist;
+      if (Math.abs(gap) < 4 && Math.abs(st.player.x - pk.x) < 1.7) {
+        pk.taken = true;
+        st.fuel = Math.min(st.maxFuel, st.fuel + TR.FUEL_PICKUP);
+        st.bonus += 25;
+        st.events.push({ t: 'fuel', fuel: st.fuel });
+      }
+    }
+    st.pickups = st.pickups.filter((pk) => !pk.taken && (pk.s - st.dist) > -30);
 
     st.score = Math.floor(st.dist) + st.bonus;
 
@@ -493,7 +578,10 @@ const I18N = {
     tagline: 'Selesaikan rute tol, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit — atau melaju tanpa finis di Endless.',
     how1: '◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat',
     how2: '⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.',
-    how3: '♥ 3x tabrakan = mogok. Mampir rest area untuk pulih penuh (+250).',
+    how3: '♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).',
+    shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
+    bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
+    fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
     how4: 'Salip mepet = combo + nitro. REM untuk manuver sempit.',
     start: '▶ MULAI', again: '↻ MAIN LAGI', brake: 'REM',
     modePick: 'Pilih rute:', modeShort: 'RUTE 5 KM', modeLong: 'RUTE 10 KM', modeEndless: 'ENDLESS',
@@ -514,7 +602,10 @@ const I18N = {
     tagline: 'Finish a toll route, decide whether to stop at the rest area or chase the time bonus, and reach the exit — or drive with no finish in Endless.',
     how1: '◀ ▶ / swipe: change lane — dodge slower traffic',
     how2: '⚠️ Blinking indicator = that car is about to change lane. Never block every lane.',
-    how3: '♥ 3 crashes = breakdown. Stop at the rest area to fully recover (+250).',
+    how3: '♥ 3 HP, empty tank = crawl. Rest area: full HP + full fuel (+250).',
+    shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
+    bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
+    fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
     how4: 'Close overtake = combo + nitro. BRAKE for tight gaps.',
     start: '▶ START', again: '↻ PLAY AGAIN', brake: 'BRAKE',
     modePick: 'Pick a route:', modeShort: 'ROUTE 5 KM', modeLong: 'ROUTE 10 KM', modeEndless: 'ENDLESS',
@@ -539,6 +630,63 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
   $('langBtn').textContent = lang === 'id' ? 'EN' : 'ID';
   updateBestLine();
+  renderShop();
+}
+
+// ---------- upgrades + coins (localStorage, no server) ----------
+const UPGRADE_DEFS = [
+  { key: 'handling', id: 'Handling', en: 'Handling', descId: 'Pindah jalur lebih cepat', descEn: 'Faster lane change' },
+  { key: 'brake', id: 'Rem', en: 'Brakes', descId: 'Rem lebih pakem', descEn: 'Stronger braking' },
+  { key: 'armor', id: 'Armor', en: 'Armor', descId: '+1 HP', descEn: '+1 HP' },
+  { key: 'tank', id: 'Tangki', en: 'Tank', descId: '+20 bensin maks', descEn: '+20 max fuel' },
+];
+function clampLvl(v) { return Math.max(0, Math.min(TR.UPGRADE_MAX, Math.floor(v || 0))); }
+function loadUpgrades() {
+  try {
+    const u = JSON.parse(localStorage.getItem('tr_upgrades_v1') || '{}');
+    return { handling: clampLvl(u.handling), brake: clampLvl(u.brake), armor: clampLvl(u.armor), tank: clampLvl(u.tank) };
+  } catch (e) { return { handling: 0, brake: 0, armor: 0, tank: 0 }; }
+}
+function saveUpgrades(u) { try { localStorage.setItem('tr_upgrades_v1', JSON.stringify(u)); } catch (e) {} }
+function loadCoins() { try { return parseInt(localStorage.getItem('tr_coins') || '0', 10) || 0; } catch (e) { return 0; } }
+function saveCoins(n) { try { localStorage.setItem('tr_coins', String(n)); } catch (e) {} }
+function renderShop() {
+  const ups = loadUpgrades(), coins = loadCoins();
+  const coinEl = $('coinLine');
+  if (coinEl) coinEl.textContent = t('coins') + ': ' + coins.toLocaleString('id-ID');
+  const list = $('shopList');
+  if (!list) return;
+  list.innerHTML = UPGRADE_DEFS.map((d) => {
+    const lvl = ups[d.key];
+    const maxed = lvl >= TR.UPGRADE_MAX;
+    const cost = maxed ? 0 : TR.UPGRADE_COSTS[lvl];
+    const name = lang === 'id' ? d.id : d.en;
+    const desc = lang === 'id' ? d.descId : d.descEn;
+    return '<div class="shoprow"><span><b>' + name + '</b> — ' + desc +
+      ' <span class="lvl">' + '●'.repeat(lvl) + '○'.repeat(TR.UPGRADE_MAX - lvl) + '</span></span>' +
+      '<button class="shopbuy" data-buy="' + d.key + '"' + (maxed ? ' disabled' : '') + '>' +
+      (maxed ? t('shopMax') : t('buy') + ' ' + cost) + '</button></div>';
+  }).join('');
+  list.querySelectorAll('[data-buy]').forEach((btn) => {
+    btn.addEventListener('click', () => buyUpgrade(btn.dataset.buy));
+  });
+}
+function buyUpgrade(key) {
+  const ups = loadUpgrades();
+  let coins = loadCoins();
+  const lvl = ups[key];
+  if (lvl >= TR.UPGRADE_MAX) return;
+  const cost = TR.UPGRADE_COSTS[lvl];
+  if (coins < cost) {
+    const msg = $('shopMsg'); if (msg) msg.textContent = t('shopNeed');
+    beep(200, 0.15, 'square', 0.15);
+    return;
+  }
+  coins -= cost; ups[key] = lvl + 1;
+  saveCoins(coins); saveUpgrades(ups);
+  renderShop();
+  const msg = $('shopMsg'); if (msg) msg.textContent = t('bought');
+  beep(880, 0.12, 'sine', 0.2); setTimeout(() => beep(1174, 0.15, 'sine', 0.2), 120);
 }
 function bestScore() { try { return parseInt(localStorage.getItem('tr_best_score') || '0', 10) || 0; } catch (e) { return 0; } }
 function updateBestLine() {
@@ -611,6 +759,7 @@ function comboPop(msg) {
 // ---------- THREE scene ----------
 let renderer, scene, camera, playerMesh;
 const trafficMeshes = new Map(); // vehicle object -> group
+const pickupMeshes = new Map(); // pickup object -> group
 const dashes = [], posts = [], trees = [];
 let restGroup = null, exitGroup = null;
 
@@ -759,10 +908,29 @@ function syncTrafficMeshes() {
     sig.right.visible = blinking && toRight;
   }
 }
+function syncPickups() {
+  const alive = new Set(st.pickups);
+  for (const [pk, mesh] of pickupMeshes) {
+    if (!alive.has(pk)) { scene.remove(mesh); pickupMeshes.delete(pk); }
+  }
+  for (const pk of st.pickups) {
+    let mesh = pickupMeshes.get(pk);
+    if (!mesh) {
+      mesh = new THREE.Group();
+      mesh.add(box(0.9, 0.7, 0.5, 0xffc21a, 0, 0.55, 0));
+      mesh.add(box(0.4, 0.25, 0.3, 0xd92b2b, 0, 1.0, 0));
+      scene.add(mesh); pickupMeshes.set(pk, mesh);
+    }
+    const gap = pk.s - st.dist;
+    mesh.position.set(pk.x, 0, -gap);
+    mesh.visible = gap > -25 && gap < 190;
+    mesh.rotation.y = st.time * 2;
+  }
+}
 
 // ---------- HUD / overlays ----------
 function updateHUD() {
-  $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, TR.MAX_HP - st.hp));
+  $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, st.maxHp - st.hp));
   $('score').textContent = st.score.toLocaleString('id-ID');
   $('speed').textContent = Math.round(st.speed * 3.6) + ' km/h';
   const endless = st.mode === 'endless';
@@ -776,6 +944,8 @@ function updateHUD() {
     $('progFill').style.width = Math.min(100, (st.dist / st.routeLen) * 100) + '%';
   }
   $('nitroFill').style.width = Math.round(st.nitro) + '%';
+  $('fuelFill').style.width = Math.round((st.fuel / st.maxFuel) * 100) + '%';
+  $('fuelFill').style.background = (st.fuel / st.maxFuel) < 0.25 ? '#ff3d5e' : '#ffb020';
   $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
   const nextRest = TR.nextRestStop(st);
   const restGap = nextRest ? nextRest.at - st.dist : Infinity;
@@ -801,6 +971,12 @@ function handleEvents() {
       toast(t('restDone')); beep(660, 0.15, 'sine', 0.2); setTimeout(() => beep(880, 0.2, 'sine', 0.2), 160);
     } else if (e.t === 'restMissed') {
       toast(t('restMissed'));
+    } else if (e.t === 'fuel') {
+      toast(t('fuelPlus')); beep(880, 0.12, 'sine', 0.2);
+    } else if (e.t === 'fuelLow') {
+      toast(t('fuelLow')); beep(300, 0.2, 'square', 0.18);
+    } else if (e.t === 'fuelCritical') {
+      toast(t('fuelCrit')); beep(220, 0.25, 'square', 0.2);
     } else if (e.t === 'finish' || e.t === 'over') {
       endGame(e.t === 'finish');
     }
@@ -814,20 +990,27 @@ function endGame(finished) {
   $('endTitle').textContent = finished ? t('finish') : t('over');
   const isNewBest = st.score > bestScore();
   if (isNewBest) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
+  const coinsEarned = Math.floor(st.score / 50) + (finished ? 50 : 0);
+  const coinsTotal = loadCoins() + coinsEarned;
+  saveCoins(coinsTotal);
   $('endStats').innerHTML =
     '<b>' + t('score') + ':</b> ' + st.score.toLocaleString('id-ID') +
     (isNewBest ? ' ★' : '') + '<br><b>' + t('dist') + ':</b> ' +
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
-    '<br><b>HP:</b> ' + st.hp + '/' + TR.MAX_HP;
+    '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
+    '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')';
   $('endOverlay').classList.remove('hidden');
   updateBestLine();
+  renderShop();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
 function startGame(mode) {
   currentMode = TR.ROUTES[mode] ? mode : 'short';
   for (const mesh of trafficMeshes.values()) scene.remove(mesh);
   trafficMeshes.clear();
-  st = TR.createGame({ mode: currentMode });
+  for (const mesh of pickupMeshes.values()) scene.remove(mesh);
+  pickupMeshes.clear();
+  st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades() });
   running = true;
   $('startOverlay').classList.add('hidden');
   $('endOverlay').classList.add('hidden');
@@ -916,6 +1099,7 @@ function loop(now) {
     playerMesh.rotation.y = (TR.LANES[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
+    syncPickups();
     const shake = st.crashT > 0 ? (Math.random() - 0.5) * 0.3 : 0;
     camera.position.set(st.player.x * 0.5 + shake, 5.4, 9);
     camera.lookAt(st.player.x * 0.65, 0.8, -12);

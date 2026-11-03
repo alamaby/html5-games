@@ -44,6 +44,16 @@
   #dist { font-size:14px; color:#ffd76a; text-shadow:0 2px 8px rgba(0,0,0,.6); }
   #prog { height:8px; background:rgba(255,255,255,.18); border-radius:99px; margin-top:8px; overflow:hidden; }
   #progFill { height:100%; width:0%; background:linear-gradient(90deg,#ffd76a,#ff7a1a); border-radius:99px; }
+  #fuelBar { height:8px; background:rgba(255,255,255,.18); border-radius:99px; margin-top:6px; overflow:hidden; }
+  #fuelFill { height:100%; width:100%; background:#ffb020; border-radius:99px; }
+  .shop { width:100%; max-width:340px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09);
+          border-radius:12px; padding:12px 14px; margin-bottom:18px; text-align:left; }
+  .shophead { font-size:13px; letter-spacing:1px; color:#ffd76a; font-weight:800; margin-bottom:6px; }
+  .shoprow { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; font-size:13px; }
+  .shoprow .lvl { color:#ffd76a; letter-spacing:2px; }
+  .shopbuy { background:#ffd76a; color:#111; border:0; border-radius:10px; padding:8px 12px; font-weight:800; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .shopbuy:disabled { background:rgba(255,255,255,.12); color:rgba(255,255,255,.4); }
+  #shopMsg { min-height:18px; font-size:12px; color:#7dff9a; margin-top:4px; }
   #sign { text-align:center; margin-top:8px; font-size:15px; font-weight:800; color:#7dff9a;
           text-shadow:0 2px 8px rgba(0,0,0,.7); min-height:22px; }
   #toast { position:fixed; top:110px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(20,26,52,.94);
@@ -94,6 +104,7 @@
   <div class="hudrow"><span id="hp">♥♥♥</span><span id="score">0</span><span id="speed">0 km/h</span></div>
   <div class="hudrow"><span id="dist"></span><span id="comboLabel"></span></div>
   <div id="prog"><div id="progFill"></div></div>
+  <div id="fuelBar"><div id="fuelFill"></div></div>
   <div id="sign"></div>
 </div>
 <div id="toast"></div>
@@ -124,7 +135,7 @@
   <div class="howto">
     <div class="hrow" data-i18n="how1">◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat</div>
     <div class="hrow" data-i18n="how2">⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.</div>
-    <div class="hrow" data-i18n="how3">♥ 3x tabrakan = mogok. Mampir rest area untuk pulih penuh (+250).</div>
+    <div class="hrow" data-i18n="how3">♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).</div>
     <div class="hrow" data-i18n="how4">Salip mepet = combo + nitro. REM untuk manuver sempit.</div>
   </div>
   <div class="best" id="bestLine"></div>
@@ -133,6 +144,11 @@
     <button class="bigbtn modebtn" data-mode="short" data-i18n="modeShort">RUTE 5 KM</button>
     <button class="bigbtn modebtn" data-mode="long" data-i18n="modeLong">RUTE 10 KM</button>
     <button class="bigbtn modebtn" data-mode="endless" data-i18n="modeEndless">ENDLESS</button>
+  </div>
+  <div class="shop">
+    <div class="shophead"><span data-i18n="shopTitle">UPGRADE</span> · <span id="coinLine"></span></div>
+    <div id="shopList"></div>
+    <div id="shopMsg"></div>
   </div>
 </div>
 
