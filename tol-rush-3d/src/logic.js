@@ -14,13 +14,17 @@
 'use strict';
 
 const TR = {
-  LANES: [-3.4, 0, 3.4],
+  LANES: [-3.4, 0, 3.4], // default 3-lane layout, kept for callers/tests
+  // Lane-centre x per lane count (spacing stays 3.4 m, road stays centred).
+  LANE_X: { 2: [-1.7, 1.7], 3: [-3.4, 0, 3.4], 4: [-5.1, -1.7, 1.7, 5.1] },
+  SEGMENT_WARN: 300, // gantry/HUD warning this far before a lane-count change
   ROUTE_LEN: 5000, // default (short) route, kept for callers/tests
   REST_AT: 2500,   // default (short) route rest area, kept for callers/tests
   ROUTES: {
-    short: { len: 5000, rests: [2500] },
-    long: { len: 10000, rests: [3000, 6500] },
-    endless: { len: Infinity, rests: [2500], restEvery: 3500 },
+    // segments: lane count from `at` (metres) until the next segment line
+    short: { len: 5000, rests: [2500], segments: [{ at: 0, lanes: 3 }, { at: 1500, lanes: 4 }, { at: 3000, lanes: 2 }, { at: 4000, lanes: 3 }] },
+    long: { len: 10000, rests: [3000, 6500], segments: [{ at: 0, lanes: 3 }, { at: 2000, lanes: 4 }, { at: 4500, lanes: 3 }, { at: 6000, lanes: 2 }, { at: 8000, lanes: 4 }] },
+    endless: { len: Infinity, rests: [2500], restEvery: 3500, segments: [{ at: 0, lanes: 3 }] },
   },
   REST_OPEN_BEFORE: 300,   // window opens 300 m before the rest area
   REST_CLOSE_AFTER: 150,   // window closes 150 m after it
@@ -61,6 +65,11 @@ const TR = {
       mode,
       condition,
       sightRange,
+      segments: route.segments.map((s) => ({ at: s.at, lanes: s.lanes })),
+      laneCount: route.segments[0].lanes,
+      laneXs: TR.LANE_X[route.segments[0].lanes],
+      laneChangedDist: -1e9,
+      warnedSegmentAt: null,
       routeLen: route.len,
       upgrades,
       moveTime,
@@ -103,6 +112,20 @@ const TR = {
     return st.restStops.find((s) => s.state === 'upcoming' || s.state === 'open') || null;
   },
 
+  // Lane count at a distance (last segment line at or before it).
+  laneCountAt(st, dist) {
+    let lanes = st.segments[0].lanes;
+    for (const seg of st.segments) {
+      if (dist >= seg.at) lanes = seg.lanes; else break;
+    }
+    return lanes;
+  },
+
+  // The next lane-count change ahead of the player, or null.
+  nextSegmentChange(st) {
+    return st.segments.find((seg) => seg.at > st.dist) || null;
+  },
+
   baseSpeed(dist) {
     return 20 + Math.min(12, dist / 400);
   },
@@ -117,7 +140,7 @@ const TR = {
     if (st.status !== 'play') return false;
     const p = st.player;
     if (p.moveT < 1) return false; // already snapping; input is short (0.22 s)
-    const next = Math.max(0, Math.min(2, p.targetLane + dir));
+    const next = Math.max(0, Math.min(st.laneCount - 1, p.targetLane + dir));
     if (next === p.targetLane) return false;
     p.startX = p.x;
     p.targetLane = next;
@@ -144,8 +167,9 @@ const TR = {
     return true;
   },
 
-  // Wall rule shared by spawns and lane changes: at position s, are the two
-  // lanes other than `lane` both occupied within `win` metres?
+  // Wall rule shared by spawns and lane changes: at position s, are ALL
+  // lanes other than `lane` occupied within 25 metres? (2 lanes: the other
+  // lane alone is a wall; 4 lanes: all three others must be blocked.)
   wallAt(st, s, lane, exclude) {
     const occupied = new Set();
     for (const v of st.traffic) {
@@ -154,11 +178,11 @@ const TR = {
       // A car mid-change also occupies its target lane for fairness purposes.
       if (v.moving && Math.abs(v.s - s) <= 25 && v.targetLane !== lane) occupied.add(v.targetLane);
     }
-    return occupied.size >= 2;
+    return occupied.size >= st.laneCount - 1;
   },
 
   canChangeLane(st, v, target) {
-    if (target < 0 || target > 2 || target === v.lane) return false;
+    if (target < 0 || target > st.laneCount - 1 || target === v.lane) return false;
     for (const o of st.traffic) {
       if (o === v) continue;
       if (o.lane === target && Math.abs(o.s - v.s) < 45) return false;
@@ -176,7 +200,7 @@ const TR = {
   // vehicle, or null when a fairness rule blocks the spawn.
   spawnVehicle(st, opts) {
     const o = opts || {};
-    const lane = o.lane !== undefined ? o.lane : Math.floor(Math.random() * 3);
+    const lane = o.lane !== undefined ? o.lane : Math.floor(Math.random() * st.laneCount);
     const gapAhead = o.gapAhead !== undefined ? o.gapAhead : 180 + Math.random() * 80;
     const s = st.dist + gapAhead;
     for (const v of st.traffic) {
@@ -191,7 +215,7 @@ const TR = {
       : (kind === 'bus' ? 13 + Math.random() * 3 : 14 + Math.random() * 5));
     const v = {
       kind, lane, targetLane: lane, s, speed, len,
-      x: TR.LANES[lane], startX: TR.LANES[lane], moveT: 1, moving: false,
+      x: st.laneXs[lane], startX: st.laneXs[lane], moveT: 1, moving: false,
       signalT: 0, changeCd: 2 + Math.random() * 4, passed: false,
       color: o.color !== undefined ? o.color : Math.floor(Math.random() * 360),
     };
@@ -237,12 +261,44 @@ const TR = {
       st.events.push({ t: 'fuelCritical', fuel: st.fuel });
     }
 
+    // Lane-count segments: warn 300 m ahead, then switch at the segment line.
+    // The warning was computed from the previous step's segments, which for
+    // endless already extend 3000 m ahead, so the next change is always known.
+    const nextSeg = TR.nextSegmentChange(st);
+    if (nextSeg && nextSeg.at - st.dist <= TR.SEGMENT_WARN && st.warnedSegmentAt !== nextSeg.at) {
+      st.warnedSegmentAt = nextSeg.at;
+      st.events.push({ t: 'lanesAhead', lanes: nextSeg.lanes, at: nextSeg.at });
+    }
+    const newCount = TR.laneCountAt(st, st.dist);
+    if (newCount !== st.laneCount) {
+      st.laneCount = newCount;
+      st.laneXs = TR.LANE_X[newCount];
+      st.laneChangedDist = st.dist;
+      // Clamp the player into the new road (the 300 m warning is the fair
+      // chance to move first; this is only the safety net).
+      if (st.player.lane >= newCount || st.player.targetLane >= newCount) {
+        st.player.lane = st.player.targetLane = newCount - 1;
+        st.player.x = st.laneXs[newCount - 1];
+        st.player.moveT = 1;
+      }
+      // Drop traffic in lanes that no longer exist; re-seat the rest on the
+      // new lane centres (mid-change moves are cancelled at the line).
+      st.traffic = st.traffic.filter((v) => v.lane < newCount && v.targetLane < newCount);
+      for (const v of st.traffic) {
+        v.x = v.startX = st.laneXs[v.lane];
+        v.targetLane = v.lane; v.moveT = 1; v.moving = false; v.signalT = 0;
+      }
+      st.pickups = st.pickups.filter((pk) => pk.lane < newCount);
+      for (const pk of st.pickups) pk.x = st.laneXs[pk.lane];
+      st.events.push({ t: 'lanesChanged', lanes: newCount });
+    }
+
     // Player lane snap.
     const p = st.player;
     if (p.moveT < 1) {
       p.moveT = Math.min(1, p.moveT + dt / st.moveTime);
       const e = 1 - Math.pow(1 - p.moveT, 2);
-      p.x = p.startX + (TR.LANES[p.targetLane] - p.startX) * e;
+      p.x = p.startX + (st.laneXs[p.targetLane] - p.startX) * e;
       if (p.moveT >= 1) p.lane = p.targetLane;
     }
 
@@ -266,6 +322,13 @@ const TR = {
         last = { at: last.at + every, state: 'upcoming' };
         st.restStops.push(last);
       }
+      // Endless lane cycle: 3 -> 4 -> 2 -> 3 ... every 2000 m.
+      const cycle = [4, 2, 3];
+      let lastSeg = st.segments[st.segments.length - 1];
+      while (lastSeg.at < st.dist + 3000) {
+        lastSeg = { at: lastSeg.at + 2000, lanes: cycle[(st.segments.length - 1) % 3] };
+        st.segments.push(lastSeg);
+      }
     }
 
     // Spawner.
@@ -277,13 +340,13 @@ const TR = {
 
     // Fuel pickup spawner: never on top of a car in the same lane.
     if (st.dist >= st.nextPickupAt) {
-      const startLane = Math.floor(Math.random() * 3);
-      for (let k = 0; k < 3; k++) {
-        const lane = (startLane + k) % 3;
+      const startLane = Math.floor(Math.random() * st.laneCount);
+      for (let k = 0; k < st.laneCount; k++) {
+        const lane = (startLane + k) % st.laneCount;
         const s = st.dist + 180 + Math.random() * 60;
         const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25);
         if (!blocked) {
-          st.pickups.push({ lane, s, x: TR.LANES[lane], taken: false });
+          st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false });
           break;
         }
       }
@@ -300,7 +363,7 @@ const TR = {
       } else if (v.moving) {
         v.moveT = Math.min(1, v.moveT + dt / TR.LANE_MOVE_TIME);
         const e = v.moveT * v.moveT * (3 - 2 * v.moveT);
-        v.x = v.startX + (TR.LANES[v.targetLane] - v.startX) * e;
+        v.x = v.startX + (st.laneXs[v.targetLane] - v.startX) * e;
         if (v.moveT >= 1) { v.lane = v.targetLane; v.moving = false; }
       } else if ((v.kind === 'sedan') && st.status === 'play') {
         // Only sedans change lanes, and only after signalling.

@@ -115,7 +115,7 @@
 
 <div id="hud" class="hidden">
   <div class="hudrow"><span id="hp">♥♥♥</span><span id="score">0</span><span id="speed">0 km/h</span></div>
-  <div class="hudrow"><span id="dist"></span><span id="comboLabel"></span></div>
+  <div class="hudrow"><span id="dist"></span><span id="laneLabel"></span><span id="comboLabel"></span></div>
   <div id="prog"><div id="progFill"></div></div>
   <div id="fuelBar"><div id="fuelFill"></div></div>
   <button id="menuBtn" data-i18n="menu">MENU</button>
@@ -143,7 +143,7 @@
 </div>
 
 <div class="overlay" id="startOverlay">
-  <div class="kicker">HTML5 • THREE.JS • 3 JALUR</div>
+  <div class="kicker">HTML5 • THREE.JS • TOL 3D</div>
   <h1 class="title">TOL RUSH 3D</h1>
   <p class="subtitle" data-i18n="tagline">Selesaikan rute tol, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit — atau melaju tanpa finis di Endless.</p>
   <div class="howto">
@@ -210,13 +210,17 @@
 'use strict';
 
 const TR = {
-  LANES: [-3.4, 0, 3.4],
+  LANES: [-3.4, 0, 3.4], // default 3-lane layout, kept for callers/tests
+  // Lane-centre x per lane count (spacing stays 3.4 m, road stays centred).
+  LANE_X: { 2: [-1.7, 1.7], 3: [-3.4, 0, 3.4], 4: [-5.1, -1.7, 1.7, 5.1] },
+  SEGMENT_WARN: 300, // gantry/HUD warning this far before a lane-count change
   ROUTE_LEN: 5000, // default (short) route, kept for callers/tests
   REST_AT: 2500,   // default (short) route rest area, kept for callers/tests
   ROUTES: {
-    short: { len: 5000, rests: [2500] },
-    long: { len: 10000, rests: [3000, 6500] },
-    endless: { len: Infinity, rests: [2500], restEvery: 3500 },
+    // segments: lane count from `at` (metres) until the next segment line
+    short: { len: 5000, rests: [2500], segments: [{ at: 0, lanes: 3 }, { at: 1500, lanes: 4 }, { at: 3000, lanes: 2 }, { at: 4000, lanes: 3 }] },
+    long: { len: 10000, rests: [3000, 6500], segments: [{ at: 0, lanes: 3 }, { at: 2000, lanes: 4 }, { at: 4500, lanes: 3 }, { at: 6000, lanes: 2 }, { at: 8000, lanes: 4 }] },
+    endless: { len: Infinity, rests: [2500], restEvery: 3500, segments: [{ at: 0, lanes: 3 }] },
   },
   REST_OPEN_BEFORE: 300,   // window opens 300 m before the rest area
   REST_CLOSE_AFTER: 150,   // window closes 150 m after it
@@ -257,6 +261,11 @@ const TR = {
       mode,
       condition,
       sightRange,
+      segments: route.segments.map((s) => ({ at: s.at, lanes: s.lanes })),
+      laneCount: route.segments[0].lanes,
+      laneXs: TR.LANE_X[route.segments[0].lanes],
+      laneChangedDist: -1e9,
+      warnedSegmentAt: null,
       routeLen: route.len,
       upgrades,
       moveTime,
@@ -299,6 +308,20 @@ const TR = {
     return st.restStops.find((s) => s.state === 'upcoming' || s.state === 'open') || null;
   },
 
+  // Lane count at a distance (last segment line at or before it).
+  laneCountAt(st, dist) {
+    let lanes = st.segments[0].lanes;
+    for (const seg of st.segments) {
+      if (dist >= seg.at) lanes = seg.lanes; else break;
+    }
+    return lanes;
+  },
+
+  // The next lane-count change ahead of the player, or null.
+  nextSegmentChange(st) {
+    return st.segments.find((seg) => seg.at > st.dist) || null;
+  },
+
   baseSpeed(dist) {
     return 20 + Math.min(12, dist / 400);
   },
@@ -313,7 +336,7 @@ const TR = {
     if (st.status !== 'play') return false;
     const p = st.player;
     if (p.moveT < 1) return false; // already snapping; input is short (0.22 s)
-    const next = Math.max(0, Math.min(2, p.targetLane + dir));
+    const next = Math.max(0, Math.min(st.laneCount - 1, p.targetLane + dir));
     if (next === p.targetLane) return false;
     p.startX = p.x;
     p.targetLane = next;
@@ -340,8 +363,9 @@ const TR = {
     return true;
   },
 
-  // Wall rule shared by spawns and lane changes: at position s, are the two
-  // lanes other than `lane` both occupied within `win` metres?
+  // Wall rule shared by spawns and lane changes: at position s, are ALL
+  // lanes other than `lane` occupied within 25 metres? (2 lanes: the other
+  // lane alone is a wall; 4 lanes: all three others must be blocked.)
   wallAt(st, s, lane, exclude) {
     const occupied = new Set();
     for (const v of st.traffic) {
@@ -350,11 +374,11 @@ const TR = {
       // A car mid-change also occupies its target lane for fairness purposes.
       if (v.moving && Math.abs(v.s - s) <= 25 && v.targetLane !== lane) occupied.add(v.targetLane);
     }
-    return occupied.size >= 2;
+    return occupied.size >= st.laneCount - 1;
   },
 
   canChangeLane(st, v, target) {
-    if (target < 0 || target > 2 || target === v.lane) return false;
+    if (target < 0 || target > st.laneCount - 1 || target === v.lane) return false;
     for (const o of st.traffic) {
       if (o === v) continue;
       if (o.lane === target && Math.abs(o.s - v.s) < 45) return false;
@@ -372,7 +396,7 @@ const TR = {
   // vehicle, or null when a fairness rule blocks the spawn.
   spawnVehicle(st, opts) {
     const o = opts || {};
-    const lane = o.lane !== undefined ? o.lane : Math.floor(Math.random() * 3);
+    const lane = o.lane !== undefined ? o.lane : Math.floor(Math.random() * st.laneCount);
     const gapAhead = o.gapAhead !== undefined ? o.gapAhead : 180 + Math.random() * 80;
     const s = st.dist + gapAhead;
     for (const v of st.traffic) {
@@ -387,7 +411,7 @@ const TR = {
       : (kind === 'bus' ? 13 + Math.random() * 3 : 14 + Math.random() * 5));
     const v = {
       kind, lane, targetLane: lane, s, speed, len,
-      x: TR.LANES[lane], startX: TR.LANES[lane], moveT: 1, moving: false,
+      x: st.laneXs[lane], startX: st.laneXs[lane], moveT: 1, moving: false,
       signalT: 0, changeCd: 2 + Math.random() * 4, passed: false,
       color: o.color !== undefined ? o.color : Math.floor(Math.random() * 360),
     };
@@ -433,12 +457,44 @@ const TR = {
       st.events.push({ t: 'fuelCritical', fuel: st.fuel });
     }
 
+    // Lane-count segments: warn 300 m ahead, then switch at the segment line.
+    // The warning was computed from the previous step's segments, which for
+    // endless already extend 3000 m ahead, so the next change is always known.
+    const nextSeg = TR.nextSegmentChange(st);
+    if (nextSeg && nextSeg.at - st.dist <= TR.SEGMENT_WARN && st.warnedSegmentAt !== nextSeg.at) {
+      st.warnedSegmentAt = nextSeg.at;
+      st.events.push({ t: 'lanesAhead', lanes: nextSeg.lanes, at: nextSeg.at });
+    }
+    const newCount = TR.laneCountAt(st, st.dist);
+    if (newCount !== st.laneCount) {
+      st.laneCount = newCount;
+      st.laneXs = TR.LANE_X[newCount];
+      st.laneChangedDist = st.dist;
+      // Clamp the player into the new road (the 300 m warning is the fair
+      // chance to move first; this is only the safety net).
+      if (st.player.lane >= newCount || st.player.targetLane >= newCount) {
+        st.player.lane = st.player.targetLane = newCount - 1;
+        st.player.x = st.laneXs[newCount - 1];
+        st.player.moveT = 1;
+      }
+      // Drop traffic in lanes that no longer exist; re-seat the rest on the
+      // new lane centres (mid-change moves are cancelled at the line).
+      st.traffic = st.traffic.filter((v) => v.lane < newCount && v.targetLane < newCount);
+      for (const v of st.traffic) {
+        v.x = v.startX = st.laneXs[v.lane];
+        v.targetLane = v.lane; v.moveT = 1; v.moving = false; v.signalT = 0;
+      }
+      st.pickups = st.pickups.filter((pk) => pk.lane < newCount);
+      for (const pk of st.pickups) pk.x = st.laneXs[pk.lane];
+      st.events.push({ t: 'lanesChanged', lanes: newCount });
+    }
+
     // Player lane snap.
     const p = st.player;
     if (p.moveT < 1) {
       p.moveT = Math.min(1, p.moveT + dt / st.moveTime);
       const e = 1 - Math.pow(1 - p.moveT, 2);
-      p.x = p.startX + (TR.LANES[p.targetLane] - p.startX) * e;
+      p.x = p.startX + (st.laneXs[p.targetLane] - p.startX) * e;
       if (p.moveT >= 1) p.lane = p.targetLane;
     }
 
@@ -462,6 +518,13 @@ const TR = {
         last = { at: last.at + every, state: 'upcoming' };
         st.restStops.push(last);
       }
+      // Endless lane cycle: 3 -> 4 -> 2 -> 3 ... every 2000 m.
+      const cycle = [4, 2, 3];
+      let lastSeg = st.segments[st.segments.length - 1];
+      while (lastSeg.at < st.dist + 3000) {
+        lastSeg = { at: lastSeg.at + 2000, lanes: cycle[(st.segments.length - 1) % 3] };
+        st.segments.push(lastSeg);
+      }
     }
 
     // Spawner.
@@ -473,13 +536,13 @@ const TR = {
 
     // Fuel pickup spawner: never on top of a car in the same lane.
     if (st.dist >= st.nextPickupAt) {
-      const startLane = Math.floor(Math.random() * 3);
-      for (let k = 0; k < 3; k++) {
-        const lane = (startLane + k) % 3;
+      const startLane = Math.floor(Math.random() * st.laneCount);
+      for (let k = 0; k < st.laneCount; k++) {
+        const lane = (startLane + k) % st.laneCount;
         const s = st.dist + 180 + Math.random() * 60;
         const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25);
         if (!blocked) {
-          st.pickups.push({ lane, s, x: TR.LANES[lane], taken: false });
+          st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false });
           break;
         }
       }
@@ -496,7 +559,7 @@ const TR = {
       } else if (v.moving) {
         v.moveT = Math.min(1, v.moveT + dt / TR.LANE_MOVE_TIME);
         const e = v.moveT * v.moveT * (3 - 2 * v.moveT);
-        v.x = v.startX + (TR.LANES[v.targetLane] - v.startX) * e;
+        v.x = v.startX + (st.laneXs[v.targetLane] - v.startX) * e;
         if (v.moveT >= 1) { v.lane = v.targetLane; v.moving = false; }
       } else if ((v.kind === 'sedan') && st.status === 'play') {
         // Only sedans change lanes, and only after signalling.
@@ -628,6 +691,7 @@ const I18N = {
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
     menu: 'MENU', restTitle: 'REST AREA', restSub: 'Belok kiri • isi bensin',
     restInfo: 'HP penuh + bensin penuh (+250)', restSkip: 'SKIP ⏭',
+    lanes: 'JALUR', lanesBecome: '⚠️ JALAN MENJADI', lanesNow: 'JALAN',
     how4: 'Salip mepet = combo + nitro. REM untuk manuver sempit.',
     start: '▶ MULAI', again: '↻ MAIN LAGI', brake: 'REM',
     modePick: 'Pilih rute:', modeShort: 'RUTE 5 KM', modeLong: 'RUTE 10 KM', modeEndless: 'ENDLESS',
@@ -655,6 +719,7 @@ const I18N = {
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
     menu: 'MENU', restTitle: 'REST AREA', restSub: 'Turn left • refuel',
     restInfo: 'Full HP + full fuel (+250)', restSkip: 'SKIP ⏭',
+    lanes: 'LANES', lanesBecome: '⚠️ ROAD BECOMES', lanesNow: 'ROAD',
     how4: 'Close overtake = combo + nitro. BRAKE for tight gaps.',
     start: '▶ START', again: '↻ PLAY AGAIN', brake: 'BRAKE',
     modePick: 'Pick a route:', modeShort: 'ROUTE 5 KM', modeLong: 'ROUTE 10 KM', modeEndless: 'ENDLESS',
@@ -819,8 +884,17 @@ let renderer, scene, camera, playerMesh;
 let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoints = null;
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
-const dashes = [], posts = [], trees = [];
-let restGroup = null, exitGroup = null;
+let dashes = [];
+const posts = [], trees = [];
+let restGroup = null, exitGroup = null, lanesGroup = null, lanesSignMat = null;
+let markingGroups = {}, dashesByCount = {}, currentMarkings = 3;
+const lanesTex = {};
+// Road markings per lane count: edge lines + dividers between lane centres.
+function setLaneMarkings(count) {
+  for (const c of [2, 3, 4]) if (markingGroups[c]) markingGroups[c].visible = c === count;
+  if (dashesByCount[count]) dashes = dashesByCount[count];
+  currentMarkings = count;
+}
 
 function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
 function box(w, h, d, color, x, y, z) {
@@ -899,16 +973,22 @@ function initThree() {
   const grassL = new THREE.Mesh(new THREE.PlaneGeometry(60, 400), mat(0x4a7a3a));
   grassL.rotation.x = -Math.PI / 2; grassL.position.set(-37.5, -0.05, -90); scene.add(grassL);
   const grassR = grassL.clone(); grassR.position.x = 37.5; scene.add(grassR);
-  for (const x of [-5.45, 5.45]) {
-    const line = box(0.22, 0.02, 400, 0xffffff, x, 0.02, -90); scene.add(line);
-  }
-  // dashed lane dividers
-  for (const x of [-1.7, 1.7]) {
-    for (let i = 0; i < 16; i++) {
-      const d = box(0.16, 0.02, 3.2, 0xffffff, x, 0.02, -12 - i * 12);
-      scene.add(d); dashes.push(d);
+  // road markings, one group per lane count (only the current one is visible)
+  const MARKINGS = { 2: { edges: [-3.4, 3.4], dividers: [0] }, 3: { edges: [-5.1, 5.1], dividers: [-1.7, 1.7] }, 4: { edges: [-6.8, 6.8], dividers: [-3.4, 0, 3.4] } };
+  for (const count of [2, 3, 4]) {
+    const grp = new THREE.Group();
+    for (const x of MARKINGS[count].edges) grp.add(box(0.22, 0.02, 400, 0xffffff, x, 0.02, -90));
+    const ds = [];
+    for (const x of MARKINGS[count].dividers) {
+      for (let i = 0; i < 16; i++) {
+        const d = box(0.16, 0.02, 3.2, 0xffffff, x, 0.02, -12 - i * 12);
+        grp.add(d); ds.push(d);
+      }
     }
+    grp.visible = count === 3; scene.add(grp);
+    markingGroups[count] = grp; dashesByCount[count] = ds;
   }
+  dashes = dashesByCount[3];
   // guard posts + side trees, recycled
   for (let i = 0; i < 10; i++) {
     for (const x of [-7.6, 7.6]) {
@@ -940,6 +1020,15 @@ function initThree() {
     new THREE.MeshBasicMaterial({ map: makeSignTexture('EXIT', 'TOL SELESAI') }));
   exitSign.position.set(0, 5, 0); exitGroup.add(exitSign);
   exitGroup.visible = false; scene.add(exitGroup);
+  // lane-count gantry: overhead sign at the next segment line
+  lanesGroup = new THREE.Group();
+  lanesGroup.add(box(0.5, 6, 0.5, 0xdddddd, -7.5, 3, 0));
+  lanesGroup.add(box(0.5, 6, 0.5, 0xdddddd, 7.5, 3, 0));
+  for (const c of [2, 3, 4]) lanesTex[c] = makeSignTexture(c + ' JALUR', '');
+  lanesSignMat = new THREE.MeshBasicMaterial({ map: lanesTex[3] });
+  const lanesSign = new THREE.Mesh(new THREE.PlaneGeometry(11, 3.2), lanesSignMat);
+  lanesSign.position.set(0, 5, 0); lanesGroup.add(lanesSign);
+  lanesGroup.visible = false; scene.add(lanesGroup);
 
   playerMesh = makeCar('sedan', 0xff6a1a);
   scene.add(playerMesh);
@@ -1051,10 +1140,15 @@ function updateHUD() {
   $('fuelFill').style.width = Math.round((st.fuel / st.maxFuel) * 100) + '%';
   $('fuelFill').style.background = (st.fuel / st.maxFuel) < 0.25 ? '#ff3d5e' : '#ffb020';
   $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
+  $('laneLabel').textContent = st.laneCount + ' ' + t('lanes');
   const nextRest = TR.nextRestStop(st);
   const restGap = nextRest ? nextRest.at - st.dist : Infinity;
+  const nextSeg = TR.nextSegmentChange(st);
+  const segGap = nextSeg ? nextSeg.at - st.dist : Infinity;
   let sign = '';
-  if (TR.openRestStop(st)) sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
+  if (nextSeg && segGap > 0 && segGap <= 300) sign = '▶ ' + t('lanesBecome') + ' ' + nextSeg.lanes + ' ' + t('lanes') + ' ' + Math.round(segGap) + ' m';
+  else if (st.dist - st.laneChangedDist < 150) sign = t('lanesNow') + ' ' + st.laneCount + ' ' + t('lanes');
+  else if (TR.openRestStop(st)) sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
   else if (nextRest && restGap > 0 && restGap <= 300) sign = '▶ ' + t('restSoon') + ' ' + Math.round(restGap) + ' m';
   else if (!endless && st.routeLen - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(st.routeLen - st.dist) + ' m';
   $('sign').textContent = sign;
@@ -1073,6 +1167,10 @@ function handleEvents() {
       toast(t('restOpen')); beep(660, 0.15, 'sine', 0.2);
     } else if (e.t === 'rest') {
       toast(t('restDone')); beep(660, 0.15, 'sine', 0.2); setTimeout(() => beep(880, 0.2, 'sine', 0.2), 160);
+    } else if (e.t === 'lanesAhead') {
+      toast(t('lanesBecome') + ' ' + e.lanes + ' ' + t('lanes')); beep(700, 0.15, 'square', 0.15);
+    } else if (e.t === 'lanesChanged') {
+      toast(t('lanesNow') + ' ' + e.lanes + ' ' + t('lanes'));
     } else if (e.t === 'restMissed') {
       toast(t('restMissed'));
     } else if (e.t === 'fuel') {
@@ -1117,6 +1215,8 @@ function goToMenu() {
   if (playerMesh) { playerMesh.position.set(0, 0, 0); playerMesh.rotation.set(0, 0, 0); }
   $('hud').classList.add('hidden'); $('controls').classList.add('hidden'); $('endOverlay').classList.add('hidden');
   $('startOverlay').classList.remove('hidden');
+  setLaneMarkings(3);
+  if (lanesGroup) lanesGroup.visible = false;
   updateBestLine(); renderShop();
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
 }
@@ -1182,6 +1282,7 @@ function startGame(mode) {
   pickupMeshes.clear();
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition });
   applyCondition(st.condition);
+  setLaneMarkings(st.laneCount);
   running = true;
   $('startOverlay').classList.add('hidden');
   $('endOverlay').classList.add('hidden');
@@ -1267,6 +1368,7 @@ function loop(now) {
     TR.step(st, dt);
     handleEvents();
     // scroll world props with player speed
+    if (st.laneCount !== currentMarkings) setLaneMarkings(st.laneCount);
     const move = st.speed * dt;
     for (const d of dashes) { d.position.z += move; if (d.position.z > 12) d.position.z -= 192; }
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
@@ -1279,9 +1381,19 @@ function loop(now) {
     const exitGap = st.mode === 'endless' ? Infinity : st.routeLen - st.dist;
     exitGroup.visible = exitGap > -30 && exitGap < 260;
     exitGroup.position.z = -exitGap;
+    // lane-count gantry follows the next segment line
+    const nextSeg = TR.nextSegmentChange(st);
+    const segGap = nextSeg ? nextSeg.at - st.dist : Infinity;
+    lanesGroup.visible = !!nextSeg && segGap > -30 && segGap < 260;
+    if (lanesGroup.visible) {
+      lanesGroup.position.z = -segGap;
+      if (lanesSignMat.map !== lanesTex[nextSeg.lanes]) {
+        lanesSignMat.map = lanesTex[nextSeg.lanes]; lanesSignMat.needsUpdate = true;
+      }
+    }
     // player mesh
     playerMesh.position.set(st.player.x, 0, 0);
-    playerMesh.rotation.y = (TR.LANES[st.player.targetLane] - st.player.x) * -0.05;
+    playerMesh.rotation.y = (st.laneXs[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
     syncPickups();

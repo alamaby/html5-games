@@ -249,5 +249,75 @@ function quiet(st) { st.spawnT = 9999; }
   ok('random varies', seen.size > 1);
 }
 
+// Lane-count segments: short route changes 3 -> 4 -> 2 -> 3
+{
+  const st = TR.createGame({ mode: 'short' }); quiet(st);
+  eq('short starts 3 lanes', st.laneCount, 3);
+  eq('laneCountAt 0 m', TR.laneCountAt(st, 0), 3);
+  eq('laneCountAt 1500 m', TR.laneCountAt(st, 1500), 4);
+  eq('laneCountAt 3000 m', TR.laneCountAt(st, 3000), 2);
+  eq('laneCountAt 4000 m', TR.laneCountAt(st, 4000), 3);
+  eq('next change from start', TR.nextSegmentChange(st).lanes, 4);
+
+  // warning fires 300 m before the line
+  const w = TR.createGame({ mode: 'short' }); quiet(w);
+  w.dist = 1150;
+  TR.step(w, 1 / 60);
+  ok('no warning 350 m out', !w.events.some((e) => e.t === 'lanesAhead'));
+  w.dist = 1250;
+  TR.step(w, 1 / 60);
+  ok('warning within 300 m', w.events.some((e) => e.t === 'lanesAhead'));
+
+  // transition clamps the player into the narrower road
+  const n = TR.createGame({ mode: 'short' }); quiet(n);
+  n.dist = 2000; TR.step(n, 1 / 60); // onto the 4-lane stretch
+  eq('4 lanes at 2000 m', n.laneCount, 4);
+  n.player.lane = 3; n.player.targetLane = 3; n.player.x = 5.1; n.player.moveT = 1;
+  n.dist = 2999.8; TR.step(n, 1 / 60); // crosses the 3000 m line
+  eq('player clamped to 2 lanes', n.player.lane, 1);
+  eq('player x on new centre', n.player.x, 1.7);
+  ok('lanesChanged event', n.events.some((e) => e.t === 'lanesChanged' && e.lanes === 2));
+
+  // traffic in a disappearing lane is dropped at the line
+  const t = TR.createGame({ mode: 'short' }); quiet(t);
+  t.dist = 2000; TR.step(t, 1 / 60); // 4 lanes
+  const mkCar = (lane, x) => ({ kind: 'sedan', lane, targetLane: lane, s: 3200, x, startX: x, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 });
+  t.traffic.push(mkCar(3, 5.1), mkCar(1, 0));
+  eq('traffic kept on 4-lane stretch', t.traffic.length, 2);
+  t.dist = 2999.8; TR.step(t, 1 / 60);
+  eq('vanishing-lane traffic dropped', t.traffic.length, 1);
+  eq('remaining traffic reseated', t.traffic[0].lane, 1);
+
+  // moveLane clamps to the current lane count
+  const m = TR.createGame({ mode: 'short' }); quiet(m);
+  m.dist = 1600; TR.step(m, 1 / 60); // now 4 lanes
+  eq('4 lanes after line', m.laneCount, 4);
+  ok('can move to lane 1', TR.moveLane(m, 1));
+  m.player.moveT = 1; m.player.lane = m.player.targetLane = 1;
+  ok('can move to lane 2', TR.moveLane(m, 1));
+  m.player.moveT = 1; m.player.lane = m.player.targetLane = 2;
+  ok('can move to lane 3', TR.moveLane(m, 1));
+  m.player.moveT = 1; m.player.lane = m.player.targetLane = 3;
+  ok('cannot move past lane 3', !TR.moveLane(m, 1));
+  m.dist = 3100; TR.step(m, 1 / 60); // now 2 lanes, player auto-clamped
+  eq('2 lanes after line', m.laneCount, 2);
+  eq('player auto-clamped', m.player.lane, 1);
+  ok('cannot move past lane 1 on 2-lane road', !TR.moveLane(m, 1));
+
+  // wall rule generalises: on 2 lanes, the single other lane blocked = wall
+  const wl = TR.createGame({ mode: 'short' }); quiet(wl);
+  wl.dist = 3100; TR.step(wl, 1 / 60);
+  wl.traffic.push({ lane: 1, targetLane: 1, s: wl.dist + 180, x: 1.7, moving: false });
+  ok('2-lane wall blocks spawn', TR.spawnVehicle(wl, { lane: 0, gapAhead: 180 }) === null);
+
+  // endless lane cycle: 3 -> 4 -> 2 -> 3 every 2000 m
+  const e = TR.createGame({ mode: 'endless' }); quiet(e);
+  const drive = (st, target) => { let guard = 0; while (st.dist < target && guard++ < 2000) TR.step(st, 1); };
+  drive(e, 2100);
+  eq('endless 4 lanes at ~2100 m', e.laneCount, 4);
+  drive(e, 6100);
+  eq('endless back to 3 lanes at ~6100 m', e.laneCount, 3);
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

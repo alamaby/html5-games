@@ -54,6 +54,7 @@ const I18N = {
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
     menu: 'MENU', restTitle: 'REST AREA', restSub: 'Belok kiri • isi bensin',
     restInfo: 'HP penuh + bensin penuh (+250)', restSkip: 'SKIP ⏭',
+    lanes: 'JALUR', lanesBecome: '⚠️ JALAN MENJADI', lanesNow: 'JALAN',
     how4: 'Salip mepet = combo + nitro. REM untuk manuver sempit.',
     start: '▶ MULAI', again: '↻ MAIN LAGI', brake: 'REM',
     modePick: 'Pilih rute:', modeShort: 'RUTE 5 KM', modeLong: 'RUTE 10 KM', modeEndless: 'ENDLESS',
@@ -81,6 +82,7 @@ const I18N = {
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
     menu: 'MENU', restTitle: 'REST AREA', restSub: 'Turn left • refuel',
     restInfo: 'Full HP + full fuel (+250)', restSkip: 'SKIP ⏭',
+    lanes: 'LANES', lanesBecome: '⚠️ ROAD BECOMES', lanesNow: 'ROAD',
     how4: 'Close overtake = combo + nitro. BRAKE for tight gaps.',
     start: '▶ START', again: '↻ PLAY AGAIN', brake: 'BRAKE',
     modePick: 'Pick a route:', modeShort: 'ROUTE 5 KM', modeLong: 'ROUTE 10 KM', modeEndless: 'ENDLESS',
@@ -245,8 +247,17 @@ let renderer, scene, camera, playerMesh;
 let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoints = null;
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
-const dashes = [], posts = [], trees = [];
-let restGroup = null, exitGroup = null;
+let dashes = [];
+const posts = [], trees = [];
+let restGroup = null, exitGroup = null, lanesGroup = null, lanesSignMat = null;
+let markingGroups = {}, dashesByCount = {}, currentMarkings = 3;
+const lanesTex = {};
+// Road markings per lane count: edge lines + dividers between lane centres.
+function setLaneMarkings(count) {
+  for (const c of [2, 3, 4]) if (markingGroups[c]) markingGroups[c].visible = c === count;
+  if (dashesByCount[count]) dashes = dashesByCount[count];
+  currentMarkings = count;
+}
 
 function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
 function box(w, h, d, color, x, y, z) {
@@ -325,16 +336,22 @@ function initThree() {
   const grassL = new THREE.Mesh(new THREE.PlaneGeometry(60, 400), mat(0x4a7a3a));
   grassL.rotation.x = -Math.PI / 2; grassL.position.set(-37.5, -0.05, -90); scene.add(grassL);
   const grassR = grassL.clone(); grassR.position.x = 37.5; scene.add(grassR);
-  for (const x of [-5.45, 5.45]) {
-    const line = box(0.22, 0.02, 400, 0xffffff, x, 0.02, -90); scene.add(line);
-  }
-  // dashed lane dividers
-  for (const x of [-1.7, 1.7]) {
-    for (let i = 0; i < 16; i++) {
-      const d = box(0.16, 0.02, 3.2, 0xffffff, x, 0.02, -12 - i * 12);
-      scene.add(d); dashes.push(d);
+  // road markings, one group per lane count (only the current one is visible)
+  const MARKINGS = { 2: { edges: [-3.4, 3.4], dividers: [0] }, 3: { edges: [-5.1, 5.1], dividers: [-1.7, 1.7] }, 4: { edges: [-6.8, 6.8], dividers: [-3.4, 0, 3.4] } };
+  for (const count of [2, 3, 4]) {
+    const grp = new THREE.Group();
+    for (const x of MARKINGS[count].edges) grp.add(box(0.22, 0.02, 400, 0xffffff, x, 0.02, -90));
+    const ds = [];
+    for (const x of MARKINGS[count].dividers) {
+      for (let i = 0; i < 16; i++) {
+        const d = box(0.16, 0.02, 3.2, 0xffffff, x, 0.02, -12 - i * 12);
+        grp.add(d); ds.push(d);
+      }
     }
+    grp.visible = count === 3; scene.add(grp);
+    markingGroups[count] = grp; dashesByCount[count] = ds;
   }
+  dashes = dashesByCount[3];
   // guard posts + side trees, recycled
   for (let i = 0; i < 10; i++) {
     for (const x of [-7.6, 7.6]) {
@@ -366,6 +383,15 @@ function initThree() {
     new THREE.MeshBasicMaterial({ map: makeSignTexture('EXIT', 'TOL SELESAI') }));
   exitSign.position.set(0, 5, 0); exitGroup.add(exitSign);
   exitGroup.visible = false; scene.add(exitGroup);
+  // lane-count gantry: overhead sign at the next segment line
+  lanesGroup = new THREE.Group();
+  lanesGroup.add(box(0.5, 6, 0.5, 0xdddddd, -7.5, 3, 0));
+  lanesGroup.add(box(0.5, 6, 0.5, 0xdddddd, 7.5, 3, 0));
+  for (const c of [2, 3, 4]) lanesTex[c] = makeSignTexture(c + ' JALUR', '');
+  lanesSignMat = new THREE.MeshBasicMaterial({ map: lanesTex[3] });
+  const lanesSign = new THREE.Mesh(new THREE.PlaneGeometry(11, 3.2), lanesSignMat);
+  lanesSign.position.set(0, 5, 0); lanesGroup.add(lanesSign);
+  lanesGroup.visible = false; scene.add(lanesGroup);
 
   playerMesh = makeCar('sedan', 0xff6a1a);
   scene.add(playerMesh);
@@ -477,10 +503,15 @@ function updateHUD() {
   $('fuelFill').style.width = Math.round((st.fuel / st.maxFuel) * 100) + '%';
   $('fuelFill').style.background = (st.fuel / st.maxFuel) < 0.25 ? '#ff3d5e' : '#ffb020';
   $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
+  $('laneLabel').textContent = st.laneCount + ' ' + t('lanes');
   const nextRest = TR.nextRestStop(st);
   const restGap = nextRest ? nextRest.at - st.dist : Infinity;
+  const nextSeg = TR.nextSegmentChange(st);
+  const segGap = nextSeg ? nextSeg.at - st.dist : Infinity;
   let sign = '';
-  if (TR.openRestStop(st)) sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
+  if (nextSeg && segGap > 0 && segGap <= 300) sign = '▶ ' + t('lanesBecome') + ' ' + nextSeg.lanes + ' ' + t('lanes') + ' ' + Math.round(segGap) + ' m';
+  else if (st.dist - st.laneChangedDist < 150) sign = t('lanesNow') + ' ' + st.laneCount + ' ' + t('lanes');
+  else if (TR.openRestStop(st)) sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
   else if (nextRest && restGap > 0 && restGap <= 300) sign = '▶ ' + t('restSoon') + ' ' + Math.round(restGap) + ' m';
   else if (!endless && st.routeLen - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(st.routeLen - st.dist) + ' m';
   $('sign').textContent = sign;
@@ -499,6 +530,10 @@ function handleEvents() {
       toast(t('restOpen')); beep(660, 0.15, 'sine', 0.2);
     } else if (e.t === 'rest') {
       toast(t('restDone')); beep(660, 0.15, 'sine', 0.2); setTimeout(() => beep(880, 0.2, 'sine', 0.2), 160);
+    } else if (e.t === 'lanesAhead') {
+      toast(t('lanesBecome') + ' ' + e.lanes + ' ' + t('lanes')); beep(700, 0.15, 'square', 0.15);
+    } else if (e.t === 'lanesChanged') {
+      toast(t('lanesNow') + ' ' + e.lanes + ' ' + t('lanes'));
     } else if (e.t === 'restMissed') {
       toast(t('restMissed'));
     } else if (e.t === 'fuel') {
@@ -543,6 +578,8 @@ function goToMenu() {
   if (playerMesh) { playerMesh.position.set(0, 0, 0); playerMesh.rotation.set(0, 0, 0); }
   $('hud').classList.add('hidden'); $('controls').classList.add('hidden'); $('endOverlay').classList.add('hidden');
   $('startOverlay').classList.remove('hidden');
+  setLaneMarkings(3);
+  if (lanesGroup) lanesGroup.visible = false;
   updateBestLine(); renderShop();
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
 }
@@ -608,6 +645,7 @@ function startGame(mode) {
   pickupMeshes.clear();
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition });
   applyCondition(st.condition);
+  setLaneMarkings(st.laneCount);
   running = true;
   $('startOverlay').classList.add('hidden');
   $('endOverlay').classList.add('hidden');
@@ -693,6 +731,7 @@ function loop(now) {
     TR.step(st, dt);
     handleEvents();
     // scroll world props with player speed
+    if (st.laneCount !== currentMarkings) setLaneMarkings(st.laneCount);
     const move = st.speed * dt;
     for (const d of dashes) { d.position.z += move; if (d.position.z > 12) d.position.z -= 192; }
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
@@ -705,9 +744,19 @@ function loop(now) {
     const exitGap = st.mode === 'endless' ? Infinity : st.routeLen - st.dist;
     exitGroup.visible = exitGap > -30 && exitGap < 260;
     exitGroup.position.z = -exitGap;
+    // lane-count gantry follows the next segment line
+    const nextSeg = TR.nextSegmentChange(st);
+    const segGap = nextSeg ? nextSeg.at - st.dist : Infinity;
+    lanesGroup.visible = !!nextSeg && segGap > -30 && segGap < 260;
+    if (lanesGroup.visible) {
+      lanesGroup.position.z = -segGap;
+      if (lanesSignMat.map !== lanesTex[nextSeg.lanes]) {
+        lanesSignMat.map = lanesTex[nextSeg.lanes]; lanesSignMat.needsUpdate = true;
+      }
+    }
     // player mesh
     playerMesh.position.set(st.player.x, 0, 0);
-    playerMesh.rotation.y = (TR.LANES[st.player.targetLane] - st.player.x) * -0.05;
+    playerMesh.rotation.y = (st.laneXs[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
     syncPickups();
