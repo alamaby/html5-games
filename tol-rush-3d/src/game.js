@@ -178,6 +178,35 @@ function bestScore() { try { return parseInt(localStorage.getItem('tr_best_score
 function updateBestLine() {
   const b = bestScore();
   $('bestLine').textContent = b > 0 ? t('best') + b.toLocaleString('id-ID') : '';
+  const odoEl = $('odoLine');
+  if (odoEl) odoEl.textContent = 'ODO ' + fmtKm(odoSaved);
+}
+
+// ---------- odometer (lifetime distance, localStorage, metres) ----------
+// odoSaved = persisted total (already includes the current run up to the last
+// 100 m milestone); odoRunStart = odoSaved snapshot at run start, so the live
+// total is odoRunStart + st.dist and nothing is ever counted twice.
+let odoSaved = 0, odoRunStart = 0;
+try { odoSaved = parseFloat(localStorage.getItem('tr_odometer_m') || '0') || 0; } catch (e) {}
+function saveOdometer(v) { odoSaved = v; try { localStorage.setItem('tr_odometer_m', String(v)); } catch (e) {} }
+function fmtKm(m) { return (m / 1000).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' km'; }
+function currentOdometer() { return running && st ? odoRunStart + st.dist : odoSaved; }
+function foldOdometer() { if (st) saveOdometer(odoRunStart + st.dist); }
+window.addEventListener('pagehide', () => { if (running) foldOdometer(); });
+
+// ---------- speedometer ticks (0-160 km/h, -120° to +120°) ----------
+function buildSpeedoTicks() {
+  const g = $('speedTicks');
+  if (!g) return;
+  const NS = 'http://www.w3.org/2000/svg';
+  for (let v = 0; v <= 160; v += 20) {
+    const a = (-120 + (v / 160) * 240) * Math.PI / 180;
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', 60 + 46 * Math.sin(a)); line.setAttribute('y1', 60 - 46 * Math.cos(a));
+    line.setAttribute('x2', 60 + 52 * Math.sin(a)); line.setAttribute('y2', 60 - 52 * Math.cos(a));
+    line.setAttribute('stroke', 'rgba(255,255,255,.7)'); line.setAttribute('stroke-width', v % 80 === 0 ? 3 : 2);
+    g.appendChild(line);
+  }
 }
 
 // ---------- audio (WebAudio synth, no assets) ----------
@@ -488,7 +517,20 @@ function syncPickups() {
 function updateHUD() {
   $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, st.maxHp - st.hp));
   $('score').textContent = st.score.toLocaleString('id-ID');
-  $('speed').textContent = Math.round(st.speed * 3.6) + ' km/h';
+  // speedometer: needle 0-160 km/h over a 240° sweep, plus digital readout
+  const kmh = Math.round(st.speed * 3.6);
+  const clamped = Math.max(0, Math.min(160, kmh));
+  const needle = $('needle');
+  if (needle) {
+    needle.setAttribute('transform', 'rotate(' + (-120 + (clamped / 160) * 240) + ' 60 60)');
+    needle.setAttribute('stroke', kmh > 120 ? '#ff3d5e' : '#ffd76a');
+  }
+  const speedText = $('speedText');
+  if (speedText) speedText.textContent = kmh;
+  // odometer: live total, persisted every 100 m so a closed tab keeps most of it
+  const total = odoRunStart + st.dist;
+  if (Math.floor(total / 100) > Math.floor(odoSaved / 100)) saveOdometer(total);
+  $('odo').textContent = 'ODO ' + fmtKm(total);
   const endless = st.mode === 'endless';
   if (endless) {
     $('dist').textContent = t('travelled') + ' ' + (st.dist / 1000).toFixed(1) + ' km';
@@ -549,6 +591,7 @@ function handleEvents() {
   st.events.length = 0;
 }
 function endGame(finished) {
+  foldOdometer();
   running = false; cgStop(); engineUpdate(0, false);
   $('hud').classList.add('hidden'); $('controls').classList.add('hidden');
   $('endKicker').textContent = finished ? t('finishSub') : t('overSub');
@@ -563,7 +606,8 @@ function endGame(finished) {
     (isNewBest ? ' ★' : '') + '<br><b>' + t('dist') + ':</b> ' +
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
-    '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')';
+    '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
+    '<br><b>ODO:</b> ' + fmtKm(odoSaved);
   $('endOverlay').classList.remove('hidden');
   updateBestLine();
   renderShop();
@@ -574,6 +618,7 @@ function endGame(finished) {
 function goToMenu() {
   if (restAnim) { restAnim = null; $('restOverlay').classList.add('hidden'); }
   if (st && st.score > bestScore()) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
+  if (running) foldOdometer();
   running = false; cgStop(); engineUpdate(0, false);
   if (playerMesh) { playerMesh.position.set(0, 0, 0); playerMesh.rotation.set(0, 0, 0); }
   $('hud').classList.add('hidden'); $('controls').classList.add('hidden'); $('endOverlay').classList.add('hidden');
@@ -644,6 +689,7 @@ function startGame(mode) {
   for (const mesh of pickupMeshes.values()) scene.remove(mesh);
   pickupMeshes.clear();
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition });
+  odoRunStart = odoSaved;
   applyCondition(st.condition);
   setLaneMarkings(st.laneCount);
   running = true;
@@ -790,7 +836,7 @@ function loop(now) {
 }
 
 // ---------- boot ----------
-applyI18n(); syncMuteUI();
+applyI18n(); syncMuteUI(); buildSpeedoTicks();
 if (typeof THREE === 'undefined') {
   document.querySelector('[data-i18n="tagline"]').textContent = t('threeMissing');
 } else {
