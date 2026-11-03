@@ -44,12 +44,14 @@ function requestMidgameAd(onDone) {
 const $ = (id) => document.getElementById(id);
 const I18N = {
   id: {
-    tagline: 'Selesaikan rute tol 5 km, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit.',
+    tagline: 'Selesaikan rute tol, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit — atau melaju tanpa finis di Endless.',
     how1: '◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat',
     how2: '⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.',
     how3: '♥ 3x tabrakan = mogok. Mampir rest area untuk pulih penuh (+250).',
     how4: 'Salip mepet = combo + nitro. REM untuk manuver sempit.',
     start: '▶ MULAI', again: '↻ MAIN LAGI', brake: 'REM',
+    modePick: 'Pilih rute:', modeShort: 'RUTE 5 KM', modeLong: 'RUTE 10 KM', modeEndless: 'ENDLESS',
+    travelled: 'Jarak tempuh',
     rotate: 'Putar HP ke landscape untuk pengalaman terbaik',
     best: 'SKOR TERBAIK: ',
     finish: 'EXIT TERCAPAI', over: 'MOBIL MOGOK',
@@ -63,12 +65,14 @@ const I18N = {
     threeMissing: 'Three.js gagal dimuat. Periksa koneksi lalu muat ulang halaman.',
   },
   en: {
-    tagline: 'Finish a 5 km toll route, decide whether to stop at the rest area or chase the time bonus, and reach the exit.',
+    tagline: 'Finish a toll route, decide whether to stop at the rest area or chase the time bonus, and reach the exit — or drive with no finish in Endless.',
     how1: '◀ ▶ / swipe: change lane — dodge slower traffic',
     how2: '⚠️ Blinking indicator = that car is about to change lane. Never block every lane.',
     how3: '♥ 3 crashes = breakdown. Stop at the rest area to fully recover (+250).',
     how4: 'Close overtake = combo + nitro. BRAKE for tight gaps.',
     start: '▶ START', again: '↻ PLAY AGAIN', brake: 'BRAKE',
+    modePick: 'Pick a route:', modeShort: 'ROUTE 5 KM', modeLong: 'ROUTE 10 KM', modeEndless: 'ENDLESS',
+    travelled: 'Distance',
     rotate: 'Rotate your phone to landscape for the best experience',
     best: 'BEST SCORE: ',
     finish: 'EXIT REACHED', over: 'BROKEN DOWN',
@@ -147,6 +151,7 @@ function engineUpdate(speed, running) {
 // ---------- state ----------
 let st = TR.createGame();
 let running = false;
+let currentMode = 'short';
 let toastTimer = null;
 function toast(msg) {
   const el = $('toast'); el.textContent = msg; el.classList.add('show');
@@ -266,7 +271,7 @@ function initThree() {
   restGroup.add(box(10, 3, 8, 0xe8e2d2, 13, 1.5, 0));
   restGroup.add(box(11, 0.5, 9, 0x2a6b4a, 13, 3.2, 0));
   const restSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 4),
-    new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', 'KM 2,5') }));
+    new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', '') }));
   restSign.position.set(13, 4.5, 0); restGroup.add(restSign);
   restGroup.visible = false; scene.add(restGroup);
   // exit gantry (shown near the finish)
@@ -314,17 +319,26 @@ function updateHUD() {
   $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, TR.MAX_HP - st.hp));
   $('score').textContent = st.score.toLocaleString('id-ID');
   $('speed').textContent = Math.round(st.speed * 3.6) + ' km/h';
-  const remain = Math.max(0, TR.ROUTE_LEN - st.dist) / 1000;
-  $('dist').textContent = t('left') + ' ' + remain.toFixed(1) + ' km';
-  $('progFill').style.width = Math.min(100, (st.dist / TR.ROUTE_LEN) * 100) + '%';
+  const endless = st.mode === 'endless';
+  if (endless) {
+    $('dist').textContent = t('travelled') + ' ' + (st.dist / 1000).toFixed(1) + ' km';
+    $('prog').style.display = 'none';
+  } else {
+    const remain = Math.max(0, st.routeLen - st.dist) / 1000;
+    $('dist').textContent = t('left') + ' ' + remain.toFixed(1) + ' km';
+    $('prog').style.display = 'block';
+    $('progFill').style.width = Math.min(100, (st.dist / st.routeLen) * 100) + '%';
+  }
   $('nitroFill').style.width = Math.round(st.nitro) + '%';
   $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
-  const restGap = TR.REST_AT - st.dist;
+  const nextRest = TR.nextRestStop(st);
+  const restGap = nextRest ? nextRest.at - st.dist : Infinity;
   let sign = '';
-  if (st.rest === 'open') sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
-  else if (TR.ROUTE_LEN - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(TR.ROUTE_LEN - st.dist) + ' m';
+  if (TR.openRestStop(st)) sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
+  else if (nextRest && restGap > 0 && restGap <= 300) sign = '▶ ' + t('restSoon') + ' ' + Math.round(restGap) + ' m';
+  else if (!endless && st.routeLen - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(st.routeLen - st.dist) + ' m';
   $('sign').textContent = sign;
-  $('restBtn').classList.toggle('show', st.rest === 'open');
+  $('restBtn').classList.toggle('show', !!TR.openRestStop(st));
 }
 function handleEvents() {
   for (const e of st.events) {
@@ -357,16 +371,17 @@ function endGame(finished) {
   $('endStats').innerHTML =
     '<b>' + t('score') + ':</b> ' + st.score.toLocaleString('id-ID') +
     (isNewBest ? ' ★' : '') + '<br><b>' + t('dist') + ':</b> ' +
-    (Math.min(TR.ROUTE_LEN, Math.floor(st.dist)) / 1000).toFixed(2) + ' km' +
+    (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + TR.MAX_HP;
   $('endOverlay').classList.remove('hidden');
   updateBestLine();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
-function startGame() {
+function startGame(mode) {
+  currentMode = TR.ROUTES[mode] ? mode : 'short';
   for (const mesh of trafficMeshes.values()) scene.remove(mesh);
   trafficMeshes.clear();
-  st = TR.createGame();
+  st = TR.createGame({ mode: currentMode });
   running = true;
   $('startOverlay').classList.add('hidden');
   $('endOverlay').classList.add('hidden');
@@ -398,8 +413,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') TR.setNitro(st, true);
   else if (e.key === 'r' || e.key === 'R') rest();
   else if (e.key === 'Enter') {
-    if (!$('startOverlay').classList.contains('hidden')) startGame();
-    else if (!$('endOverlay').classList.contains('hidden')) requestMidgameAd(startGame);
+    if (!$('startOverlay').classList.contains('hidden')) startGame('short');
+    else if (!$('endOverlay').classList.contains('hidden')) requestMidgameAd(() => startGame(currentMode));
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -414,8 +429,10 @@ $('c').addEventListener('touchend', (e) => {
   if (dx > 40) lane(1); else if (dx < -40) lane(-1);
   touchX = null;
 }, { passive: true });
-$('startBtn').addEventListener('click', startGame);
-$('againBtn').addEventListener('click', () => requestMidgameAd(startGame));
+document.querySelectorAll('[data-mode]').forEach((btn) => {
+  btn.addEventListener('click', () => startGame(btn.dataset.mode));
+});
+$('againBtn').addEventListener('click', () => requestMidgameAd(() => startGame(currentMode)));
 $('muteBtn').addEventListener('click', () => {
   try { localStorage.setItem('tr_mute', isMuted() ? '0' : '1'); } catch (e) {}
   syncMuteUI();
@@ -441,10 +458,11 @@ function loop(now) {
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
     for (const tr of trees) { tr.position.z += move; if (tr.position.z > 12) { tr.position.z -= 198; tr.position.x = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 6); } }
     // rest + exit set pieces follow their route position
-    const restGap = TR.REST_AT - st.dist;
+    const nextRest = TR.nextRestStop(st);
+    const restGap = nextRest ? nextRest.at - st.dist : Infinity;
     restGroup.visible = restGap > -60 && restGap < 260;
     restGroup.position.z = -restGap;
-    const exitGap = TR.ROUTE_LEN - st.dist;
+    const exitGap = st.mode === 'endless' ? Infinity : st.routeLen - st.dist;
     exitGroup.visible = exitGap > -30 && exitGap < 260;
     exitGroup.position.z = -exitGap;
     // player mesh

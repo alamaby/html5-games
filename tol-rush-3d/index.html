@@ -32,6 +32,8 @@
             border:0; border-radius:16px; padding:16px 34px; cursor:pointer; }
   .bigbtn:active { transform:scale(.96); }
   .bigbtn.secondary { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.2); }
+  .moderow { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-bottom:12px; font-weight:800; font-size:14px; color:#ffd76a; letter-spacing:1px; }
+  .modebtn { font-size:14px; padding:13px 16px; letter-spacing:1px; }
   #hud { position:fixed; top:0; left:0; right:0; z-index:5; padding:10px 12px 0;
          padding-top:max(10px, env(safe-area-inset-top)); pointer-events:none; }
   #hud.hidden, #controls.hidden { display:none; }
@@ -118,7 +120,7 @@
 <div class="overlay" id="startOverlay">
   <div class="kicker">HTML5 • THREE.JS • 3 JALUR</div>
   <h1 class="title">TOL RUSH 3D</h1>
-  <p class="subtitle" data-i18n="tagline">Selesaikan rute tol 5 km, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit.</p>
+  <p class="subtitle" data-i18n="tagline">Selesaikan rute tol, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit — atau melaju tanpa finis di Endless.</p>
   <div class="howto">
     <div class="hrow" data-i18n="how1">◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat</div>
     <div class="hrow" data-i18n="how2">⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.</div>
@@ -126,7 +128,12 @@
     <div class="hrow" data-i18n="how4">Salip mepet = combo + nitro. REM untuk manuver sempit.</div>
   </div>
   <div class="best" id="bestLine"></div>
-  <button class="bigbtn" id="startBtn" data-i18n="start">▶ MULAI</button>
+  <div class="moderow"><span data-i18n="modePick">Pilih rute:</span></div>
+  <div class="moderow">
+    <button class="bigbtn modebtn" data-mode="short" data-i18n="modeShort">RUTE 5 KM</button>
+    <button class="bigbtn modebtn" data-mode="long" data-i18n="modeLong">RUTE 10 KM</button>
+    <button class="bigbtn modebtn" data-mode="endless" data-i18n="modeEndless">ENDLESS</button>
+  </div>
 </div>
 
 <div class="overlay hidden" id="endOverlay">
@@ -140,8 +147,9 @@
 
 <script>
 /* Tol Rush 3D — pure game logic (no DOM, no THREE, no audio). Testable in Node.
- * Design rules (from the approved MVP proposal):
- *  - 3 lanes, lane-snap controls, mission route 5000 m with one rest area.
+ * Design rules (from the approved MVP proposal, extended in Fase 2A):
+ *  - 3 lanes, lane-snap controls. Modes: 'short' (5 km, 1 rest area),
+ *    'long' (10 km, 2 rest areas), 'endless' (no finish, rest areas recur).
  *  - Damage: 3 HP, a crash costs 1 HP, 0 HP = run over. No 1-hit death.
  *  - Fairness: a lane-changing car must signal first, may not close the
  *    last escape lane, and may not move into the player's lane when the
@@ -155,8 +163,13 @@
 
 const TR = {
   LANES: [-3.4, 0, 3.4],
-  ROUTE_LEN: 5000,
-  REST_AT: 2500,
+  ROUTE_LEN: 5000, // default (short) route, kept for callers/tests
+  REST_AT: 2500,   // default (short) route rest area, kept for callers/tests
+  ROUTES: {
+    short: { len: 5000, rests: [2500] },
+    long: { len: 10000, rests: [3000, 6500] },
+    endless: { len: Infinity, rests: [2500], restEvery: 3500 },
+  },
   REST_OPEN_BEFORE: 300,   // window opens 300 m before the rest area
   REST_CLOSE_AFTER: 150,   // window closes 150 m after it
   SIGNAL_TIME: 0.9,        // seconds of indicator before a car starts moving
@@ -165,9 +178,14 @@ const TR = {
   MAX_HP: 3,
   CRASH_INVULN: 2.0,
 
-  createGame() {
+  createGame(opts) {
+    const o = opts || {};
+    const mode = TR.ROUTES[o.mode] ? o.mode : 'short';
+    const route = TR.ROUTES[mode];
     return {
       status: 'play', // play | finished | over
+      mode,
+      routeLen: route.len,
       time: 0,
       dist: 0,
       speed: 20,
@@ -182,11 +200,21 @@ const TR = {
       player: { lane: 1, targetLane: 1, x: 0, startX: 0, moveT: 1 },
       traffic: [],
       spawnT: 1.2,
-      rest: 'upcoming', // upcoming | open | used | missed
+      restStops: route.rests.map((at) => ({ at, state: 'upcoming' })),
       crashT: 0,
       invuln: 0,
       events: [],
     };
+  },
+
+  // The rest stop whose window is currently open, or null.
+  openRestStop(st) {
+    return st.restStops.find((s) => s.state === 'open') || null;
+  },
+
+  // The next rest stop the player has not passed yet (upcoming or open).
+  nextRestStop(st) {
+    return st.restStops.find((s) => s.state === 'upcoming' || s.state === 'open') || null;
   },
 
   baseSpeed(dist) {
@@ -214,16 +242,18 @@ const TR = {
   setBrake(st, on) { st.brake = !!on; },
   setNitro(st, on) { st.nitroOn = !!on; },
 
-  // Rest-area decision. Returns true only when the window is open.
+  // Rest-area decision. Returns true only when a stop's window is open.
   tryRest(st) {
-    if (st.status !== 'play' || st.rest !== 'open') return false;
-    st.rest = 'used';
+    if (st.status !== 'play') return false;
+    const stop = TR.openRestStop(st);
+    if (!stop) return false;
+    stop.state = 'used';
     st.hp = TR.MAX_HP;
     st.bonus += 250;
     st.invuln = Math.max(st.invuln, 3);
     // Clear traffic just ahead so leaving the rest area is never an instant crash.
     st.traffic = st.traffic.filter((v) => (v.s - st.dist) < 0 || (v.s - st.dist) > 80);
-    st.events.push({ t: 'rest', dist: st.dist });
+    st.events.push({ t: 'rest', dist: st.dist, at: stop.at });
     return true;
   },
 
@@ -312,16 +342,26 @@ const TR = {
       if (p.moveT >= 1) p.lane = p.targetLane;
     }
 
-    // Rest-area window.
-    if (st.rest === 'upcoming' && st.dist > TR.REST_AT + TR.REST_CLOSE_AFTER) {
-      st.rest = 'missed'; // jumped past the window (e.g. a test teleport)
-      st.events.push({ t: 'restMissed', dist: st.dist });
-    } else if (st.rest === 'upcoming' && st.dist >= TR.REST_AT - TR.REST_OPEN_BEFORE) {
-      st.rest = 'open';
-      st.events.push({ t: 'restOpen', dist: st.dist });
-    } else if (st.rest === 'open' && st.dist > TR.REST_AT + TR.REST_CLOSE_AFTER) {
-      st.rest = 'missed';
-      st.events.push({ t: 'restMissed', dist: st.dist });
+    // Rest-area windows (one per stop; endless mode appends new stops).
+    for (const stop of st.restStops) {
+      if (stop.state === 'upcoming' && st.dist > stop.at + TR.REST_CLOSE_AFTER) {
+        stop.state = 'missed'; // jumped past the window (e.g. a test teleport)
+        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at });
+      } else if (stop.state === 'upcoming' && st.dist >= stop.at - TR.REST_OPEN_BEFORE) {
+        stop.state = 'open';
+        st.events.push({ t: 'restOpen', dist: st.dist, at: stop.at });
+      } else if (stop.state === 'open' && st.dist > stop.at + TR.REST_CLOSE_AFTER) {
+        stop.state = 'missed';
+        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at });
+      }
+    }
+    if (st.mode === 'endless') {
+      const every = TR.ROUTES.endless.restEvery;
+      let last = st.restStops[st.restStops.length - 1];
+      while (last.at < st.dist + 3000) {
+        last = { at: last.at + every, state: 'upcoming' };
+        st.restStops.push(last);
+      }
     }
 
     // Spawner.
@@ -390,8 +430,8 @@ const TR = {
 
     st.score = Math.floor(st.dist) + st.bonus;
 
-    if (st.status === 'play' && st.dist >= TR.ROUTE_LEN) {
-      st.dist = TR.ROUTE_LEN;
+    if (st.status === 'play' && st.mode !== 'endless' && st.dist >= st.routeLen) {
+      st.dist = st.routeLen;
       st.bonus += 500 + st.hp * 200;
       st.score = Math.floor(st.dist) + st.bonus;
       st.status = 'finished';
@@ -450,12 +490,14 @@ function requestMidgameAd(onDone) {
 const $ = (id) => document.getElementById(id);
 const I18N = {
   id: {
-    tagline: 'Selesaikan rute tol 5 km, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit.',
+    tagline: 'Selesaikan rute tol, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit — atau melaju tanpa finis di Endless.',
     how1: '◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat',
     how2: '⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.',
     how3: '♥ 3x tabrakan = mogok. Mampir rest area untuk pulih penuh (+250).',
     how4: 'Salip mepet = combo + nitro. REM untuk manuver sempit.',
     start: '▶ MULAI', again: '↻ MAIN LAGI', brake: 'REM',
+    modePick: 'Pilih rute:', modeShort: 'RUTE 5 KM', modeLong: 'RUTE 10 KM', modeEndless: 'ENDLESS',
+    travelled: 'Jarak tempuh',
     rotate: 'Putar HP ke landscape untuk pengalaman terbaik',
     best: 'SKOR TERBAIK: ',
     finish: 'EXIT TERCAPAI', over: 'MOBIL MOGOK',
@@ -469,12 +511,14 @@ const I18N = {
     threeMissing: 'Three.js gagal dimuat. Periksa koneksi lalu muat ulang halaman.',
   },
   en: {
-    tagline: 'Finish a 5 km toll route, decide whether to stop at the rest area or chase the time bonus, and reach the exit.',
+    tagline: 'Finish a toll route, decide whether to stop at the rest area or chase the time bonus, and reach the exit — or drive with no finish in Endless.',
     how1: '◀ ▶ / swipe: change lane — dodge slower traffic',
     how2: '⚠️ Blinking indicator = that car is about to change lane. Never block every lane.',
     how3: '♥ 3 crashes = breakdown. Stop at the rest area to fully recover (+250).',
     how4: 'Close overtake = combo + nitro. BRAKE for tight gaps.',
     start: '▶ START', again: '↻ PLAY AGAIN', brake: 'BRAKE',
+    modePick: 'Pick a route:', modeShort: 'ROUTE 5 KM', modeLong: 'ROUTE 10 KM', modeEndless: 'ENDLESS',
+    travelled: 'Distance',
     rotate: 'Rotate your phone to landscape for the best experience',
     best: 'BEST SCORE: ',
     finish: 'EXIT REACHED', over: 'BROKEN DOWN',
@@ -553,6 +597,7 @@ function engineUpdate(speed, running) {
 // ---------- state ----------
 let st = TR.createGame();
 let running = false;
+let currentMode = 'short';
 let toastTimer = null;
 function toast(msg) {
   const el = $('toast'); el.textContent = msg; el.classList.add('show');
@@ -672,7 +717,7 @@ function initThree() {
   restGroup.add(box(10, 3, 8, 0xe8e2d2, 13, 1.5, 0));
   restGroup.add(box(11, 0.5, 9, 0x2a6b4a, 13, 3.2, 0));
   const restSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 4),
-    new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', 'KM 2,5') }));
+    new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', '') }));
   restSign.position.set(13, 4.5, 0); restGroup.add(restSign);
   restGroup.visible = false; scene.add(restGroup);
   // exit gantry (shown near the finish)
@@ -720,17 +765,26 @@ function updateHUD() {
   $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, TR.MAX_HP - st.hp));
   $('score').textContent = st.score.toLocaleString('id-ID');
   $('speed').textContent = Math.round(st.speed * 3.6) + ' km/h';
-  const remain = Math.max(0, TR.ROUTE_LEN - st.dist) / 1000;
-  $('dist').textContent = t('left') + ' ' + remain.toFixed(1) + ' km';
-  $('progFill').style.width = Math.min(100, (st.dist / TR.ROUTE_LEN) * 100) + '%';
+  const endless = st.mode === 'endless';
+  if (endless) {
+    $('dist').textContent = t('travelled') + ' ' + (st.dist / 1000).toFixed(1) + ' km';
+    $('prog').style.display = 'none';
+  } else {
+    const remain = Math.max(0, st.routeLen - st.dist) / 1000;
+    $('dist').textContent = t('left') + ' ' + remain.toFixed(1) + ' km';
+    $('prog').style.display = 'block';
+    $('progFill').style.width = Math.min(100, (st.dist / st.routeLen) * 100) + '%';
+  }
   $('nitroFill').style.width = Math.round(st.nitro) + '%';
   $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
-  const restGap = TR.REST_AT - st.dist;
+  const nextRest = TR.nextRestStop(st);
+  const restGap = nextRest ? nextRest.at - st.dist : Infinity;
   let sign = '';
-  if (st.rest === 'open') sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
-  else if (TR.ROUTE_LEN - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(TR.ROUTE_LEN - st.dist) + ' m';
+  if (TR.openRestStop(st)) sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
+  else if (nextRest && restGap > 0 && restGap <= 300) sign = '▶ ' + t('restSoon') + ' ' + Math.round(restGap) + ' m';
+  else if (!endless && st.routeLen - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(st.routeLen - st.dist) + ' m';
   $('sign').textContent = sign;
-  $('restBtn').classList.toggle('show', st.rest === 'open');
+  $('restBtn').classList.toggle('show', !!TR.openRestStop(st));
 }
 function handleEvents() {
   for (const e of st.events) {
@@ -763,16 +817,17 @@ function endGame(finished) {
   $('endStats').innerHTML =
     '<b>' + t('score') + ':</b> ' + st.score.toLocaleString('id-ID') +
     (isNewBest ? ' ★' : '') + '<br><b>' + t('dist') + ':</b> ' +
-    (Math.min(TR.ROUTE_LEN, Math.floor(st.dist)) / 1000).toFixed(2) + ' km' +
+    (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + TR.MAX_HP;
   $('endOverlay').classList.remove('hidden');
   updateBestLine();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
-function startGame() {
+function startGame(mode) {
+  currentMode = TR.ROUTES[mode] ? mode : 'short';
   for (const mesh of trafficMeshes.values()) scene.remove(mesh);
   trafficMeshes.clear();
-  st = TR.createGame();
+  st = TR.createGame({ mode: currentMode });
   running = true;
   $('startOverlay').classList.add('hidden');
   $('endOverlay').classList.add('hidden');
@@ -804,8 +859,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') TR.setNitro(st, true);
   else if (e.key === 'r' || e.key === 'R') rest();
   else if (e.key === 'Enter') {
-    if (!$('startOverlay').classList.contains('hidden')) startGame();
-    else if (!$('endOverlay').classList.contains('hidden')) requestMidgameAd(startGame);
+    if (!$('startOverlay').classList.contains('hidden')) startGame('short');
+    else if (!$('endOverlay').classList.contains('hidden')) requestMidgameAd(() => startGame(currentMode));
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -820,8 +875,10 @@ $('c').addEventListener('touchend', (e) => {
   if (dx > 40) lane(1); else if (dx < -40) lane(-1);
   touchX = null;
 }, { passive: true });
-$('startBtn').addEventListener('click', startGame);
-$('againBtn').addEventListener('click', () => requestMidgameAd(startGame));
+document.querySelectorAll('[data-mode]').forEach((btn) => {
+  btn.addEventListener('click', () => startGame(btn.dataset.mode));
+});
+$('againBtn').addEventListener('click', () => requestMidgameAd(() => startGame(currentMode)));
 $('muteBtn').addEventListener('click', () => {
   try { localStorage.setItem('tr_mute', isMuted() ? '0' : '1'); } catch (e) {}
   syncMuteUI();
@@ -847,10 +904,11 @@ function loop(now) {
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
     for (const tr of trees) { tr.position.z += move; if (tr.position.z > 12) { tr.position.z -= 198; tr.position.x = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 6); } }
     // rest + exit set pieces follow their route position
-    const restGap = TR.REST_AT - st.dist;
+    const nextRest = TR.nextRestStop(st);
+    const restGap = nextRest ? nextRest.at - st.dist : Infinity;
     restGroup.visible = restGap > -60 && restGap < 260;
     restGroup.position.z = -restGap;
-    const exitGap = TR.ROUTE_LEN - st.dist;
+    const exitGap = st.mode === 'endless' ? Infinity : st.routeLen - st.dist;
     exitGroup.visible = exitGap > -30 && exitGap < 260;
     exitGroup.position.z = -exitGap;
     // player mesh

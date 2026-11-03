@@ -32,6 +32,8 @@
             border:0; border-radius:16px; padding:16px 34px; cursor:pointer; }
   .bigbtn:active { transform:scale(.96); }
   .bigbtn.secondary { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.2); }
+  .moderow { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-bottom:12px; font-weight:800; font-size:14px; color:#ffd76a; letter-spacing:1px; }
+  .modebtn { font-size:14px; padding:13px 16px; letter-spacing:1px; }
   #hud { position:fixed; top:0; left:0; right:0; z-index:5; padding:10px 12px 0;
          padding-top:max(10px, env(safe-area-inset-top)); pointer-events:none; }
   #hud.hidden, #controls.hidden { display:none; }
@@ -118,7 +120,7 @@
 <div class="overlay" id="startOverlay">
   <div class="kicker">HTML5 • THREE.JS • 3 JALUR</div>
   <h1 class="title">TOL RUSH 3D</h1>
-  <p class="subtitle" data-i18n="tagline">Selesaikan rute tol 5 km, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit.</p>
+  <p class="subtitle" data-i18n="tagline">Selesaikan rute tol, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit — atau melaju tanpa finis di Endless.</p>
   <div class="howto">
     <div class="hrow" data-i18n="how1">◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat</div>
     <div class="hrow" data-i18n="how2">⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.</div>
@@ -126,7 +128,12 @@
     <div class="hrow" data-i18n="how4">Salip mepet = combo + nitro. REM untuk manuver sempit.</div>
   </div>
   <div class="best" id="bestLine"></div>
-  <button class="bigbtn" id="startBtn" data-i18n="start">▶ MULAI</button>
+  <div class="moderow"><span data-i18n="modePick">Pilih rute:</span></div>
+  <div class="moderow">
+    <button class="bigbtn modebtn" data-mode="short" data-i18n="modeShort">RUTE 5 KM</button>
+    <button class="bigbtn modebtn" data-mode="long" data-i18n="modeLong">RUTE 10 KM</button>
+    <button class="bigbtn modebtn" data-mode="endless" data-i18n="modeEndless">ENDLESS</button>
+  </div>
 </div>
 
 <div class="overlay hidden" id="endOverlay">

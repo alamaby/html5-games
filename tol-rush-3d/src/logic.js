@@ -1,6 +1,7 @@
 /* Tol Rush 3D — pure game logic (no DOM, no THREE, no audio). Testable in Node.
- * Design rules (from the approved MVP proposal):
- *  - 3 lanes, lane-snap controls, mission route 5000 m with one rest area.
+ * Design rules (from the approved MVP proposal, extended in Fase 2A):
+ *  - 3 lanes, lane-snap controls. Modes: 'short' (5 km, 1 rest area),
+ *    'long' (10 km, 2 rest areas), 'endless' (no finish, rest areas recur).
  *  - Damage: 3 HP, a crash costs 1 HP, 0 HP = run over. No 1-hit death.
  *  - Fairness: a lane-changing car must signal first, may not close the
  *    last escape lane, and may not move into the player's lane when the
@@ -14,8 +15,13 @@
 
 const TR = {
   LANES: [-3.4, 0, 3.4],
-  ROUTE_LEN: 5000,
-  REST_AT: 2500,
+  ROUTE_LEN: 5000, // default (short) route, kept for callers/tests
+  REST_AT: 2500,   // default (short) route rest area, kept for callers/tests
+  ROUTES: {
+    short: { len: 5000, rests: [2500] },
+    long: { len: 10000, rests: [3000, 6500] },
+    endless: { len: Infinity, rests: [2500], restEvery: 3500 },
+  },
   REST_OPEN_BEFORE: 300,   // window opens 300 m before the rest area
   REST_CLOSE_AFTER: 150,   // window closes 150 m after it
   SIGNAL_TIME: 0.9,        // seconds of indicator before a car starts moving
@@ -24,9 +30,14 @@ const TR = {
   MAX_HP: 3,
   CRASH_INVULN: 2.0,
 
-  createGame() {
+  createGame(opts) {
+    const o = opts || {};
+    const mode = TR.ROUTES[o.mode] ? o.mode : 'short';
+    const route = TR.ROUTES[mode];
     return {
       status: 'play', // play | finished | over
+      mode,
+      routeLen: route.len,
       time: 0,
       dist: 0,
       speed: 20,
@@ -41,11 +52,21 @@ const TR = {
       player: { lane: 1, targetLane: 1, x: 0, startX: 0, moveT: 1 },
       traffic: [],
       spawnT: 1.2,
-      rest: 'upcoming', // upcoming | open | used | missed
+      restStops: route.rests.map((at) => ({ at, state: 'upcoming' })),
       crashT: 0,
       invuln: 0,
       events: [],
     };
+  },
+
+  // The rest stop whose window is currently open, or null.
+  openRestStop(st) {
+    return st.restStops.find((s) => s.state === 'open') || null;
+  },
+
+  // The next rest stop the player has not passed yet (upcoming or open).
+  nextRestStop(st) {
+    return st.restStops.find((s) => s.state === 'upcoming' || s.state === 'open') || null;
   },
 
   baseSpeed(dist) {
@@ -73,16 +94,18 @@ const TR = {
   setBrake(st, on) { st.brake = !!on; },
   setNitro(st, on) { st.nitroOn = !!on; },
 
-  // Rest-area decision. Returns true only when the window is open.
+  // Rest-area decision. Returns true only when a stop's window is open.
   tryRest(st) {
-    if (st.status !== 'play' || st.rest !== 'open') return false;
-    st.rest = 'used';
+    if (st.status !== 'play') return false;
+    const stop = TR.openRestStop(st);
+    if (!stop) return false;
+    stop.state = 'used';
     st.hp = TR.MAX_HP;
     st.bonus += 250;
     st.invuln = Math.max(st.invuln, 3);
     // Clear traffic just ahead so leaving the rest area is never an instant crash.
     st.traffic = st.traffic.filter((v) => (v.s - st.dist) < 0 || (v.s - st.dist) > 80);
-    st.events.push({ t: 'rest', dist: st.dist });
+    st.events.push({ t: 'rest', dist: st.dist, at: stop.at });
     return true;
   },
 
@@ -171,16 +194,26 @@ const TR = {
       if (p.moveT >= 1) p.lane = p.targetLane;
     }
 
-    // Rest-area window.
-    if (st.rest === 'upcoming' && st.dist > TR.REST_AT + TR.REST_CLOSE_AFTER) {
-      st.rest = 'missed'; // jumped past the window (e.g. a test teleport)
-      st.events.push({ t: 'restMissed', dist: st.dist });
-    } else if (st.rest === 'upcoming' && st.dist >= TR.REST_AT - TR.REST_OPEN_BEFORE) {
-      st.rest = 'open';
-      st.events.push({ t: 'restOpen', dist: st.dist });
-    } else if (st.rest === 'open' && st.dist > TR.REST_AT + TR.REST_CLOSE_AFTER) {
-      st.rest = 'missed';
-      st.events.push({ t: 'restMissed', dist: st.dist });
+    // Rest-area windows (one per stop; endless mode appends new stops).
+    for (const stop of st.restStops) {
+      if (stop.state === 'upcoming' && st.dist > stop.at + TR.REST_CLOSE_AFTER) {
+        stop.state = 'missed'; // jumped past the window (e.g. a test teleport)
+        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at });
+      } else if (stop.state === 'upcoming' && st.dist >= stop.at - TR.REST_OPEN_BEFORE) {
+        stop.state = 'open';
+        st.events.push({ t: 'restOpen', dist: st.dist, at: stop.at });
+      } else if (stop.state === 'open' && st.dist > stop.at + TR.REST_CLOSE_AFTER) {
+        stop.state = 'missed';
+        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at });
+      }
+    }
+    if (st.mode === 'endless') {
+      const every = TR.ROUTES.endless.restEvery;
+      let last = st.restStops[st.restStops.length - 1];
+      while (last.at < st.dist + 3000) {
+        last = { at: last.at + every, state: 'upcoming' };
+        st.restStops.push(last);
+      }
     }
 
     // Spawner.
@@ -249,8 +282,8 @@ const TR = {
 
     st.score = Math.floor(st.dist) + st.bonus;
 
-    if (st.status === 'play' && st.dist >= TR.ROUTE_LEN) {
-      st.dist = TR.ROUTE_LEN;
+    if (st.status === 'play' && st.mode !== 'endless' && st.dist >= st.routeLen) {
+      st.dist = st.routeLen;
       st.bonus += 500 + st.hp * 200;
       st.score = Math.floor(st.dist) + st.bonus;
       st.status = 'finished';

@@ -112,18 +112,48 @@ function quiet(st) { st.spawnT = 9999; }
   ok('rest too early rejected', !TR.tryRest(st));
   st.dist = TR.REST_AT - 100;
   TR.step(st, 1 / 60);
-  eq('rest window opens', st.rest, 'open');
+  eq('rest window opens', !!TR.openRestStop(st), true);
   st.hp = 1;
   ok('rest accepted in window', TR.tryRest(st));
   eq('rest heals to full', st.hp, 3);
-  eq('rest used', st.rest, 'used');
+  eq('rest used', st.restStops[0].state, 'used');
   ok('rest bonus applied', st.bonus >= 250);
 
   const st2 = TR.createGame(); quiet(st2);
   st2.dist = TR.REST_AT + TR.REST_CLOSE_AFTER + 50;
   TR.step(st2, 1 / 60);
-  eq('rest missed after window', st2.rest, 'missed');
+  eq('rest missed after window', st2.restStops[0].state, 'missed');
   ok('missed rest rejected', !TR.tryRest(st2));
+}
+
+// Long route: 10 km, 2 rest areas, no finish at the old 5 km mark
+{
+  const st = TR.createGame({ mode: 'long' }); quiet(st);
+  eq('long route length', st.routeLen, 10000);
+  eq('long route rest stops', st.restStops.map((s) => s.at).join(','), '3000,6500');
+  st.dist = 4990;
+  for (let i = 0; i < 120 && st.status === 'play'; i++) TR.step(st, 1 / 60);
+  ok('long route not finished at 5 km', st.status === 'play' && st.dist > 5000);
+  // first rest area usable, second still upcoming
+  const st3 = TR.createGame({ mode: 'long' }); quiet(st3);
+  st3.dist = 2950;
+  TR.step(st3, 1 / 60);
+  ok('long first rest opens', !!TR.openRestStop(st3));
+  ok('long first rest accepted', TR.tryRest(st3));
+  eq('long second rest still upcoming', st3.restStops[1].state, 'upcoming');
+}
+
+// Endless: no finish past 5 km, rest areas keep recurring
+{
+  const st = TR.createGame({ mode: 'endless' }); quiet(st);
+  eq('endless route length', st.routeLen, Infinity);
+  st.dist = 4990;
+  for (let i = 0; i < 300 && st.status === 'play'; i++) TR.step(st, 1 / 60);
+  ok('endless never finishes', st.status === 'play' && st.dist > 5000);
+  ok('endless rest stops recur', st.restStops.length > 1 && st.restStops[st.restStops.length - 1].at > st.dist);
+  // unknown mode falls back to short
+  const st2 = TR.createGame({ mode: 'nope' }); quiet(st2);
+  eq('unknown mode falls back to short', st2.mode, 'short');
 }
 
 // Finish: reaching the exit wins and pays the finish bonus
