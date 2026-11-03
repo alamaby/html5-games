@@ -873,13 +873,16 @@ if (typeof module !== 'undefined' && module.exports) module.exports = TR;
  */
 
 // ---------- CrazyGames SDK (guarded) ----------
-const CG = { game: null, ready: false, muted: false };
+// v3 modules: game (gameplayStart/Stop) + ad (requestAd). Everything is
+// guarded: without the SDK (Pages, local file) every call is a no-op.
+const CG = { game: null, ad: null, ready: false, muted: false };
 (function initCG() {
   function boot() {
     if (CG.ready || !window.CrazyGames || !window.CrazyGames.SDK) return;
     try {
       window.CrazyGames.SDK.init().then(() => {
         CG.ready = true; CG.game = window.CrazyGames.SDK.game;
+        CG.ad = window.CrazyGames.SDK.ad || null;
         try {
           const go = CG.game && CG.game.settings;
           CG.muted = !!(go && go.muteAudio);
@@ -897,15 +900,30 @@ function cgStart() { try { if (CG.ready && CG.game && CG.game.gameplayStart) CG.
 function cgStop() { try { if (CG.ready && CG.game && CG.game.gameplayStop) CG.game.gameplayStop(); } catch (e) {} }
 function requestMidgameAd(onDone) {
   const done = () => { if (onDone) onDone(); };
-  if (!CG.ready || !CG.game || !CG.game.midgame) { done(); return; }
+  if (!CG.ready) { done(); return; }
+  cgStop(); // gameplay already stopped at run end; stop again for the ad break
   let finished = false;
   const finish = () => { if (!finished) { finished = true; done(); } };
   const watchdog = setTimeout(finish, 8000);
   try {
-    CG.game.midgame('midgame', () => {
-      clearTimeout(watchdog); cgStop(); setTimeout(finish, 50);
-    }, () => { clearTimeout(watchdog); finish(); });
-  } catch (e) { clearTimeout(watchdog); finish(); }
+    // SDK v3: ad.requestAd('midgame', { adFinished, adError }). A dismissed
+    // or failed ad arrives as adError: never punish, just continue.
+    if (CG.ad && CG.ad.requestAd) {
+      CG.ad.requestAd('midgame', {
+        adFinished: () => { clearTimeout(watchdog); finish(); },
+        adError: () => { clearTimeout(watchdog); finish(); },
+      });
+      return;
+    }
+    // Legacy fallback (older SDK shape): game.midgame, if present.
+    if (CG.game && CG.game.midgame) {
+      CG.game.midgame('midgame', () => {
+        clearTimeout(watchdog); setTimeout(finish, 50);
+      }, () => { clearTimeout(watchdog); finish(); });
+      return;
+    }
+  } catch (e) {}
+  clearTimeout(watchdog); finish();
 }
 
 // ---------- helpers / i18n ----------
@@ -1322,6 +1340,53 @@ let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoi
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
 let shieldMesh = null; // translucent bubble around the player while shielded
+// ---------- visual polish (Fase 2L, view-only, no logic) ----------
+let skyDome = null, starPoints = null, moonMesh = null, nitroFlame = null;
+const debrisBursts = [];
+const debrisGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
+function setSkyColors(topHex, bottomHex) {
+  if (!skyDome) return;
+  const pos = skyDome.geometry.attributes.position, col = skyDome.geometry.attributes.color;
+  const top = new THREE.Color(topHex), bottom = new THREE.Color(bottomHex), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) / 320 + 1) / 2;
+    c.copy(bottom).lerp(top, Math.max(0, Math.min(1, t)));
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  col.needsUpdate = true;
+}
+function spawnDebris(x, z) {
+  if (!scene) return;
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 1 });
+  const parts = [];
+  for (let i = 0; i < 10; i++) {
+    const m = new THREE.Mesh(debrisGeo, mat);
+    m.position.set(x + (Math.random() - 0.5) * 1.2, 0.6 + Math.random() * 0.8, z + (Math.random() - 0.5) * 1.2);
+    scene.add(m);
+    parts.push({ m, vx: (Math.random() - 0.5) * 8, vy: 3 + Math.random() * 5, vz: (Math.random() - 0.5) * 8 + 4 });
+  }
+  debrisBursts.push({ mat, parts, life: 0.7 });
+}
+function updateDebris(dt) {
+  for (let i = debrisBursts.length - 1; i >= 0; i--) {
+    const b = debrisBursts[i];
+    b.life -= dt;
+    for (const p of b.parts) {
+      p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+      p.vy -= 12 * dt;
+      if (p.m.position.y < 0.15) { p.m.position.y = 0.15; p.vy = 0; }
+    }
+    b.mat.opacity = Math.max(0, b.life / 0.7);
+    if (b.life <= 0) {
+      for (const p of b.parts) scene.remove(p.m);
+      debrisBursts.splice(i, 1);
+    }
+  }
+}
+function clearDebris() {
+  for (const b of debrisBursts) for (const p of b.parts) scene.remove(p.m);
+  debrisBursts.length = 0;
+}
 const roadworkMeshes = new Map(); // zone object -> group
 let coneGeo = null, coneMat = null;
 function buildRoadworkGroup(zone) {
@@ -1438,12 +1503,14 @@ function makeCar(kind, colorHex) {
   // glow at night instead of going dark with the scene lights
   const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : (kind === 'truck' ? -4.55 : (kind === 'hatch' ? -1.8 : -2.3)));
   const rear = -front;
+  const tails = [];
   for (const x of [-0.6, 0.6]) {
     const hl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }));
     hl.position.set(x, 0.7, front); g.add(hl);
     const tl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xff2a3c }));
-    tl.position.set(x, 0.7, rear); g.add(tl);
+    tl.position.set(x, 0.7, rear); g.add(tl); tails.push(tl.material);
   }
+  g.userData.tails = tails; // brake lights, brightened by the loop while braking
   // indicators on the rear corners, blinked by the sync loop
   const sigL = box(0.3, 0.18, 0.06, 0xffb020, -0.6, 0.95, rear + 0.04);
   const sigR = box(0.3, 0.18, 0.06, 0xffb020, 0.6, 0.95, rear + 0.04);
@@ -1465,6 +1532,29 @@ function initThree() {
   scene.add(hemiLight);
   sunLight = new THREE.DirectionalLight(0xffffff, 0.7);
   sunLight.position.set(20, 40, 10); scene.add(sunLight);
+
+  // gradient sky dome (fog-proof, covers the whole view) + night stars/moon
+  {
+    const geo = new THREE.SphereGeometry(320, 24, 16);
+    const colors = new Float32Array(geo.attributes.position.count * 3).fill(1);
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    skyDome = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true, fog: false, depthWrite: false }));
+    skyDome.renderOrder = -10; scene.add(skyDome);
+    setSkyColors(0x3f8fe0, 0xcfe8ff);
+    const starGeo = new THREE.BufferGeometry();
+    const sp = [];
+    for (let i = 0; i < 260; i++) sp.push((Math.random() - 0.5) * 320, 25 + Math.random() * 130, -200 + Math.random() * 220);
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+    starPoints = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0.9, fog: false }));
+    starPoints.visible = false; scene.add(starPoints);
+    moonMesh = new THREE.Mesh(new THREE.CircleGeometry(9, 24), new THREE.MeshBasicMaterial({ color: 0xf4f1de, fog: false }));
+    moonMesh.position.set(-60, 55, -220); moonMesh.visible = false; scene.add(moonMesh);
+  }
+  // nitro flame, synced to st.nitroOn in the loop (separate mesh: the
+  // player mesh is rebuilt on car change, so it cannot own the flame)
+  nitroFlame = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.6, 12),
+    new THREE.MeshBasicMaterial({ color: 0xff9a1f, transparent: true, opacity: 0.9, fog: false }));
+  nitroFlame.rotation.x = Math.PI / 2; nitroFlame.visible = false; scene.add(nitroFlame);
 
   // road
   roadMat = new THREE.MeshLambertMaterial({ color: 0x2b3038 });
@@ -1500,7 +1590,9 @@ function initThree() {
     const side = i % 2 === 0 ? -1 : 1;
     const tree = new THREE.Group();
     tree.add(box(0.5, 2.2, 0.5, 0x6b4a2a, 0, 1.1, 0));
-    tree.add(box(2.2, 2.2, 2.2, 0x2f6b2f, 0, 3.0, 0));
+    tree.add(box(2.2, 2.2, 2.2, Math.random() < 0.5 ? 0x2f6b2f : 0x357a35, 0, 3.0, 0));
+    const ts = 0.8 + Math.random() * 0.6;
+    tree.scale.set(ts, ts, ts);
     tree.position.set(side * (10 + Math.random() * 6), 0, -10 - i * 9);
     scene.add(tree); trees.push(tree);
   }
@@ -1570,18 +1662,27 @@ function applyCondition(cond) {
     if (roadMat) roadMat.color.set(0x23262c);
     if (headlight) headlight.intensity = 1.6;
     if (rainPoints) rainPoints.visible = false;
+    setSkyColors(0x050914, 0x1b2b4d);
+    if (starPoints) starPoints.visible = true;
+    if (moonMesh) moonMesh.visible = true;
   } else if (cond === 'rain') {
     scene.background.set(0x5a6a7d); scene.fog.color.set(0x5a6a7d); scene.fog.near = 25; scene.fog.far = 130;
     hemiLight.intensity = 0.6; sunLight.intensity = 0.35;
     if (roadMat) roadMat.color.set(0x1d2126);
     if (headlight) headlight.intensity = 0;
     if (rainPoints) rainPoints.visible = true;
+    setSkyColors(0x55606e, 0x8d97a3);
+    if (starPoints) starPoints.visible = false;
+    if (moonMesh) moonMesh.visible = false;
   } else {
     scene.background.set(0x87b5e0); scene.fog.color.set(0x87b5e0); scene.fog.near = 30; scene.fog.far = 170;
     hemiLight.intensity = 0.95; sunLight.intensity = 0.7;
     if (roadMat) roadMat.color.set(0x2b3038);
     if (headlight) headlight.intensity = 0;
     if (rainPoints) rainPoints.visible = false;
+    setSkyColors(0x3f8fe0, 0xcfe8ff);
+    if (starPoints) starPoints.visible = false;
+    if (moonMesh) moonMesh.visible = false;
   }
 }
 function syncTrafficMeshes() {
@@ -1691,6 +1792,7 @@ function handleEvents() {
       beep(120, 0.35, 'square', 0.3, 40);
       const f = $('flash'); f.classList.add('show');
       setTimeout(() => f.classList.remove('show'), 220);
+      spawnDebris(st.player.x, 0);
     } else if (e.t === 'near') {
       beep(900, 0.18, 'sine', 0.18, 1500);
       comboPop(t('combo') + e.combo + '  +' + e.pts);
@@ -1714,6 +1816,7 @@ function handleEvents() {
       toast(t('shieldDup')); beep(880, 0.12, 'sine', 0.2);
     } else if (e.t === 'shieldSave') {
       toast(t('shieldSaveToast')); beep(880, 0.15, 'sine', 0.25); setTimeout(() => beep(1320, 0.2, 'sine', 0.25), 140);
+      spawnDebris(st.player.x, 0);
     } else if (e.t === 'fuel') {
       toast(t('fuelPlus')); beep(880, 0.12, 'sine', 0.2);
     } else if (e.t === 'fuelLow') {
@@ -1781,8 +1884,10 @@ function setPaused(on) {
   if (paused) {
     TR.setBrake(st, false); TR.setNitro(st, false);
     engineUpdate(0, false);
+    cgStop(); // official docs: gameplayStop on every break, including pause
     beep(500, 0.1, 'sine', 0.15);
   } else {
+    cgStart(); // ...and gameplayStart when play resumes after the break
     beep(700, 0.1, 'sine', 0.15);
   }
 }
@@ -1793,6 +1898,7 @@ function togglePause() {
 // no coins for an unfinished run, but a beaten best score is still saved.
 function goToMenu() {
   paused = false; $('pauseOverlay').classList.add('hidden');
+  clearDebris();
   if (restAnim) { restAnim = null; $('restOverlay').classList.add('hidden'); }
   if (st && st.score > bestScore()) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
   if (running) foldOdometer();
@@ -1869,6 +1975,7 @@ function startGame(mode) {
   pickupMeshes.clear();
   for (const mesh of roadworkMeshes.values()) scene.remove(mesh);
   roadworkMeshes.clear();
+  clearDebris();
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition, car: loadSelectedCar() });
   refreshPlayerMesh();
   missionToasted = new Set();
@@ -2005,6 +2112,25 @@ function loop(now) {
       shieldMesh.visible = !!st.shield;
       shieldMesh.position.set(st.player.x, 1.0, 0);
     }
+    // player indicators (same 4 Hz blink as traffic) + brake lights
+    const psig = playerMesh.userData.signals;
+    if (psig) {
+      const moving = st.player.moveT < 1;
+      const blinking = moving && (Math.floor(st.time * 4) % 2 === 0);
+      const toRight = st.player.targetLane > st.player.lane;
+      psig.left.visible = blinking && !toRight;
+      psig.right.visible = blinking && toRight;
+    }
+    const ptails = playerMesh.userData.tails;
+    if (ptails) for (const m of ptails) m.color.set(st.brake ? 0xff7a85 : 0xff2a3c);
+    // nitro flame, flickering while nitro is held
+    if (nitroFlame) {
+      nitroFlame.visible = !!st.nitroOn;
+      nitroFlame.position.set(st.player.x, 0.6, 2.8);
+      const f = 0.85 + 0.3 * Math.sin(st.time * 42);
+      nitroFlame.scale.set(f, f, f);
+    }
+    updateDebris(dt);
     playerMesh.rotation.y = (st.laneXs[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
@@ -2034,6 +2160,11 @@ function loop(now) {
     // idle scene: slow drift so the start screen is not frozen
     // (skipped while paused so the frame stays frozen, not drifting)
     if (shieldMesh) shieldMesh.visible = false;
+    if (nitroFlame) nitroFlame.visible = false;
+    if (playerMesh && playerMesh.userData.signals) {
+      playerMesh.userData.signals.left.visible = false;
+      playerMesh.userData.signals.right.visible = false;
+    }
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
     camera.position.set(0, 5.4, 9);
     camera.lookAt(0, 0.8, -12);
