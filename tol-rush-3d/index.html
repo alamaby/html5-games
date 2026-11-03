@@ -182,6 +182,11 @@
     <button class="bigbtn condbtn" data-cond="random" data-i18n="condRandom">ACAK</button>
   </div>
   <div class="shop">
+    <div class="shophead"><span data-i18n="carTitle">MOBIL</span></div>
+    <div id="carList"></div>
+    <div id="carMsg"></div>
+  </div>
+  <div class="shop">
     <div class="shophead"><span data-i18n="shopTitle">UPGRADE</span> · <span id="coinLine"></span></div>
     <div id="shopList"></div>
     <div id="shopMsg"></div>
@@ -253,6 +258,14 @@ const TR = {
   FUEL_LIMP_SPEED: 8,       // crawl speed on an empty tank (not instant death)
   UPGRADE_COSTS: [60, 120, 200, 300], // per level 1..3, same for every track
   UPGRADE_MAX: 3,
+  // Cars: cost in coins; speed/move/fuel are multipliers on the base values,
+  // hp is bonus max HP on top of the Armor upgrade.
+  CARS: {
+    city: { cost: 0, speed: 1.0, move: 1.0, fuel: 1.0, hp: 0, kind: 'sedan', color: 0xff6a1a },
+    lincah: { cost: 300, speed: 0.95, move: 0.85, fuel: 1.0, hp: 0, kind: 'hatch', color: 0x2bd9a8 },
+    suv: { cost: 500, speed: 0.92, move: 1.10, fuel: 1.15, hp: 1, kind: 'suv', color: 0x4a7dff },
+    sport: { cost: 800, speed: 1.12, move: 0.90, fuel: 1.25, hp: 0, kind: 'sport', color: 0xe03131 },
+  },
 
   createGame(opts) {
     const o = opts || {};
@@ -261,13 +274,15 @@ const TR = {
     const up = o.upgrades || {};
     const lvl = (v) => Math.max(0, Math.min(TR.UPGRADE_MAX, Math.floor(v || 0)));
     const upgrades = { handling: lvl(up.handling), brake: lvl(up.brake), armor: lvl(up.armor), tank: lvl(up.tank) };
-    const maxHp = TR.MAX_HP + upgrades.armor;
+    const carKey = TR.CARS[o.car] ? o.car : 'city';
+    const car = TR.CARS[carKey];
+    const maxHp = TR.MAX_HP + upgrades.armor + car.hp;
     const maxFuel = 100 + upgrades.tank * 20;
     // Condition: day / night / rain; 'random' picks one per run, unknown falls back to day.
     const conds = ['day', 'night', 'rain'];
     let condition = conds.includes(o.condition) ? o.condition : 'day';
     if (o.condition === 'random') condition = conds[Math.floor(Math.random() * conds.length)];
-    let moveTime = Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03);
+    let moveTime = Math.max(0.10, Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03) * car.move);
     let brakeFactor = 0.55 - upgrades.brake * 0.07;
     let sightRange = 190;
     if (condition === 'night') sightRange = 110; // headlight range: cars appear later
@@ -284,6 +299,8 @@ const TR = {
       warnedSegmentAt: null,
       routeLen: route.len,
       upgrades,
+      car: carKey, carKind: car.kind, carColor: car.color,
+      speedFactor: car.speed, fuelFactor: car.fuel,
       moveTime,
       brakeFactor,
       time: 0,
@@ -446,7 +463,7 @@ const TR = {
     }
 
     // Speed: base rises with distance, brake slows, nitro boosts.
-    let speed = TR.baseSpeed(st.dist);
+    let speed = TR.baseSpeed(st.dist) * st.speedFactor;
     const nitroActive = st.nitroOn && st.nitro > 0;
     if (st.brake) speed *= st.brakeFactor;
     if (nitroActive) {
@@ -461,7 +478,7 @@ const TR = {
 
     // Fuel: drained per metre; nitro burns double, braking sips.
     if (st.fuel > 0) {
-      const rate = nitroActive ? TR.FUEL_DRAIN_NITRO : (st.brake ? TR.FUEL_DRAIN_BRAKE : TR.FUEL_DRAIN);
+      const rate = (nitroActive ? TR.FUEL_DRAIN_NITRO : (st.brake ? TR.FUEL_DRAIN_BRAKE : TR.FUEL_DRAIN)) * st.fuelFactor;
       st.fuel = Math.max(0, st.fuel - travelled * rate);
     }
     if (!st.fuelLow && st.fuel <= st.maxFuel * 0.25) {
@@ -702,6 +719,7 @@ const I18N = {
     how2: '⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.',
     how3: '♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).',
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
+    carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
@@ -730,6 +748,7 @@ const I18N = {
     how2: '⚠️ Blinking indicator = that car is about to change lane. Never block every lane.',
     how3: '♥ 3 HP, empty tank = crawl. Rest area: full HP + full fuel (+250).',
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
+    carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
@@ -769,6 +788,7 @@ function applyI18n() {
   $('langBtn').textContent = lang === 'id' ? 'EN' : 'ID';
   updateBestLine();
   renderShop();
+  renderCars();
   updateConditionUI();
 }
 
@@ -827,6 +847,86 @@ function buyUpgrade(key) {
   const msg = $('shopMsg'); if (msg) msg.textContent = t('bought');
   beep(880, 0.12, 'sine', 0.2); setTimeout(() => beep(1174, 0.15, 'sine', 0.2), 120);
 }
+// ---------- cars (localStorage, bought with coins) ----------
+const CAR_DEFS = [
+  { key: 'city', id: 'City', en: 'City', descId: 'Standar seimbang', descEn: 'Balanced starter' },
+  { key: 'lincah', id: 'Lincah', en: 'Swift', descId: 'Pindah jalur tercepat, top speed sedikit turun', descEn: 'Fastest lane change, slightly lower top speed' },
+  { key: 'suv', id: 'SUV', en: 'SUV', descId: '+1 HP, lebih lambat & boros', descEn: '+1 HP, slower and thirstier' },
+  { key: 'sport', id: 'Sport', en: 'Sport', descId: 'Top speed tertinggi, bensin boros', descEn: 'Highest top speed, thirsty' },
+];
+function loadOwnedCars() {
+  try {
+    const arr = JSON.parse(localStorage.getItem('tr_cars_owned') || '["city"]');
+    const owned = arr.filter((k) => TR.CARS[k]);
+    return owned.includes('city') ? owned : ['city'].concat(owned);
+  } catch (e) { return ['city']; }
+}
+function saveOwnedCars(arr) { try { localStorage.setItem('tr_cars_owned', JSON.stringify(arr)); } catch (e) {} }
+function loadSelectedCar() {
+  try {
+    const k = localStorage.getItem('tr_car');
+    if (k && TR.CARS[k] && loadOwnedCars().includes(k)) return k;
+  } catch (e) {}
+  return 'city';
+}
+function saveSelectedCar(k) { try { localStorage.setItem('tr_car', k); } catch (e) {} }
+function carName(key) {
+  const d = CAR_DEFS.find((c) => c.key === key);
+  return d ? (lang === 'id' ? d.id : d.en) : key;
+}
+function refreshPlayerMesh() {
+  if (!scene || !playerMesh) return;
+  const key = loadSelectedCar();
+  const car = TR.CARS[key];
+  scene.remove(playerMesh);
+  playerMesh = makeCar(car.kind, car.color);
+  scene.add(playerMesh);
+}
+function renderCars() {
+  const owned = loadOwnedCars(), selected = loadSelectedCar(), coins = loadCoins();
+  const list = $('carList');
+  if (!list) return;
+  list.innerHTML = CAR_DEFS.map((d) => {
+    const car = TR.CARS[d.key];
+    const isOwned = owned.includes(d.key), isSel = selected === d.key;
+    const name = lang === 'id' ? d.id : d.en;
+    const desc = lang === 'id' ? d.descId : d.descEn;
+    const btn = isSel ? '<button class="shopbuy" disabled>' + t('carUsed') + '</button>'
+      : isOwned ? '<button class="shopbuy" data-use-car="' + d.key + '">' + t('carUse') + '</button>'
+      : '<button class="shopbuy" data-buy-car="' + d.key + '">' + t('buy') + ' ' + car.cost + '</button>';
+    return '<div class="shoprow"><span><b>' + name + '</b> — ' + desc + '</span>' + btn + '</div>';
+  }).join('');
+  list.querySelectorAll('[data-buy-car]').forEach((btn) => {
+    btn.addEventListener('click', () => buyCar(btn.dataset.buyCar));
+  });
+  list.querySelectorAll('[data-use-car]').forEach((btn) => {
+    btn.addEventListener('click', () => selectCar(btn.dataset.useCar));
+  });
+  void coins;
+}
+function buyCar(key) {
+  const car = TR.CARS[key];
+  if (!car || loadOwnedCars().includes(key)) return;
+  let coins = loadCoins();
+  if (coins < car.cost) {
+    const msg = $('carMsg'); if (msg) msg.textContent = t('shopNeed');
+    beep(200, 0.15, 'square', 0.15);
+    return;
+  }
+  coins -= car.cost;
+  saveCoins(coins);
+  saveOwnedCars(loadOwnedCars().concat([key]));
+  saveSelectedCar(key);
+  renderCars(); renderShop(); refreshPlayerMesh();
+  const msg = $('carMsg'); if (msg) msg.textContent = t('bought');
+  beep(880, 0.12, 'sine', 0.2); setTimeout(() => beep(1174, 0.15, 'sine', 0.2), 120);
+}
+function selectCar(key) {
+  if (!loadOwnedCars().includes(key)) return;
+  saveSelectedCar(key);
+  renderCars(); refreshPlayerMesh();
+  beep(660, 0.08, 'sine', 0.15);
+}
 function bestScore() { try { return parseInt(localStorage.getItem('tr_best_score') || '0', 10) || 0; } catch (e) { return 0; } }
 function updateBestLine() {
   const b = bestScore();
@@ -847,13 +947,14 @@ function currentOdometer() { return running && st ? odoRunStart + st.dist : odoS
 function foldOdometer() { if (st) saveOdometer(odoRunStart + st.dist); }
 window.addEventListener('pagehide', () => { if (running) foldOdometer(); });
 
-// ---------- speedometer ticks (0-160 km/h, -120° to +120°) ----------
+// ---------- speedometer ticks (0-180 km/h, -120° to +120°) ----------
+// (180 covers Sport + nitro, ~165 km/h, without pegging the needle)
 function buildSpeedoTicks() {
   const g = $('speedTicks');
   if (!g) return;
   const NS = 'http://www.w3.org/2000/svg';
-  for (let v = 0; v <= 160; v += 20) {
-    const a = (-120 + (v / 160) * 240) * Math.PI / 180;
+  for (let v = 0; v <= 180; v += 20) {
+    const a = (-120 + (v / 180) * 240) * Math.PI / 180;
     const line = document.createElementNS(NS, 'line');
     line.setAttribute('x1', 60 + 46 * Math.sin(a)); line.setAttribute('y1', 60 - 46 * Math.cos(a));
     line.setAttribute('x2', 60 + 52 * Math.sin(a)); line.setAttribute('y2', 60 - 52 * Math.cos(a));
@@ -966,6 +1067,16 @@ function makeCar(kind, colorHex) {
   } else if (kind === 'bus') {
     g.add(box(2.0, 2.1, 8.5, col, 0, 1.35, 0));
     g.add(box(2.02, 0.7, 7.6, 0x1a2b45, 0, 1.85, 0)); // windows
+  } else if (kind === 'hatch') {
+    g.add(box(1.8, 0.6, 3.6, col, 0, 0.65, 0)); // short body
+    g.add(box(1.6, 0.5, 1.8, 0x1a2b45, 0, 1.18, 0.1)); // cabin
+  } else if (kind === 'suv') {
+    g.add(box(1.9, 0.75, 4.6, col, 0, 0.7, 0)); // tall body
+    g.add(box(1.7, 0.6, 2.4, 0x1a2b45, 0, 1.35, 0)); // cabin
+  } else if (kind === 'sport') {
+    g.add(box(1.9, 0.45, 4.6, col, 0, 0.55, 0)); // low wide body
+    g.add(box(1.5, 0.4, 1.8, 0x1a2b45, 0, 0.95, 0.3)); // cabin
+    g.add(box(1.9, 0.15, 0.7, col, 0, 0.85, 2.0)); // spoiler
   } else {
     g.add(box(1.8, 0.55, 4.4, col, 0, 0.62, 0)); // body
     g.add(box(1.6, 0.5, 2.2, 0x1a2b45, 0, 1.12, 0.2)); // cabin
@@ -973,15 +1084,19 @@ function makeCar(kind, colorHex) {
   }
   const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
   const wheelMat = mat(0x111111);
-  const zs = kind === 'sedan' ? [-1.45, 1.45] : [-3.2, -1.2, 1.2, 3.2];
-  if (kind === 'bus') zs.length = 0, zs.push(-2.8, 2.8);
+  let zs;
+  if (kind === 'truck') zs = [-3.2, -1.2, 1.2, 3.2];
+  else if (kind === 'bus') zs = [-2.8, 2.8];
+  else if (kind === 'hatch') zs = [-1.15, 1.15];
+  else if (kind === 'suv' || kind === 'sport') zs = [-1.5, 1.5];
+  else zs = [-1.45, 1.45];
   for (const z of zs) for (const x of [-0.92, 0.92]) {
     const w = new THREE.Mesh(wheelGeo, wheelMat);
     w.rotation.z = Math.PI / 2; w.position.set(x, 0.38, z); g.add(w);
   }
   // headlights (front = -z) and taillights (rear = +z); basic material so they
   // glow at night instead of going dark with the scene lights
-  const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : -4.55);
+  const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : (kind === 'truck' ? -4.55 : (kind === 'hatch' ? -1.8 : -2.3)));
   const rear = -front;
   for (const x of [-0.6, 0.6]) {
     const hl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }));
@@ -1075,7 +1190,7 @@ function initThree() {
   lanesSign.position.set(0, 5, 0); lanesGroup.add(lanesSign);
   lanesGroup.visible = false; scene.add(lanesGroup);
 
-  playerMesh = makeCar('sedan', 0xff6a1a);
+  { const _sc = TR.CARS[loadSelectedCar()]; playerMesh = makeCar(_sc.kind, _sc.color); }
   scene.add(playerMesh);
 
   // player headlight beam (night only; intensity set by applyCondition)
@@ -1170,13 +1285,13 @@ function syncPickups() {
 function updateHUD() {
   $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, st.maxHp - st.hp));
   $('score').textContent = st.score.toLocaleString('id-ID');
-  // speedometer: needle 0-160 km/h over a 240° sweep, plus digital readout
+  // speedometer: needle 0-180 km/h over a 240° sweep, plus digital readout
   const kmh = Math.round(st.speed * 3.6);
-  const clamped = Math.max(0, Math.min(160, kmh));
+  const clamped = Math.max(0, Math.min(180, kmh));
   const needle = $('needle');
   if (needle) {
-    needle.setAttribute('transform', 'rotate(' + (-120 + (clamped / 160) * 240) + ' 60 60)');
-    needle.setAttribute('stroke', kmh > 120 ? '#ff3d5e' : '#ffd76a');
+    needle.setAttribute('transform', 'rotate(' + (-120 + (clamped / 180) * 240) + ' 60 60)');
+    needle.setAttribute('stroke', kmh > 140 ? '#ff3d5e' : '#ffd76a');
   }
   const speedText = $('speedText');
   if (speedText) speedText.textContent = kmh;
@@ -1260,10 +1375,12 @@ function endGame(finished) {
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
+    '<br><b>' + t('carTitle') + ':</b> ' + carName(st.car) +
     '<br><b>ODO:</b> ' + fmtKm(odoSaved);
   $('endOverlay').classList.remove('hidden');
   updateBestLine();
   renderShop();
+  renderCars();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
 // Back to the start screen (= the upgrade shop). Mid-run, the run is abandoned:
@@ -1278,7 +1395,7 @@ function goToMenu() {
   $('startOverlay').classList.remove('hidden');
   setLaneMarkings(3);
   if (lanesGroup) lanesGroup.visible = false;
-  updateBestLine(); renderShop();
+  updateBestLine(); renderShop(); renderCars(); refreshPlayerMesh();
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
 }
 
@@ -1341,7 +1458,8 @@ function startGame(mode) {
   trafficMeshes.clear();
   for (const mesh of pickupMeshes.values()) scene.remove(mesh);
   pickupMeshes.clear();
-  st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition });
+  st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition, car: loadSelectedCar() });
+  refreshPlayerMesh();
   odoRunStart = odoSaved;
   applyCondition(st.condition);
   setLaneMarkings(st.laneCount);

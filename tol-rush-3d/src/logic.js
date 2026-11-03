@@ -41,6 +41,14 @@ const TR = {
   FUEL_LIMP_SPEED: 8,       // crawl speed on an empty tank (not instant death)
   UPGRADE_COSTS: [60, 120, 200, 300], // per level 1..3, same for every track
   UPGRADE_MAX: 3,
+  // Cars: cost in coins; speed/move/fuel are multipliers on the base values,
+  // hp is bonus max HP on top of the Armor upgrade.
+  CARS: {
+    city: { cost: 0, speed: 1.0, move: 1.0, fuel: 1.0, hp: 0, kind: 'sedan', color: 0xff6a1a },
+    lincah: { cost: 300, speed: 0.95, move: 0.85, fuel: 1.0, hp: 0, kind: 'hatch', color: 0x2bd9a8 },
+    suv: { cost: 500, speed: 0.92, move: 1.10, fuel: 1.15, hp: 1, kind: 'suv', color: 0x4a7dff },
+    sport: { cost: 800, speed: 1.12, move: 0.90, fuel: 1.25, hp: 0, kind: 'sport', color: 0xe03131 },
+  },
 
   createGame(opts) {
     const o = opts || {};
@@ -49,13 +57,15 @@ const TR = {
     const up = o.upgrades || {};
     const lvl = (v) => Math.max(0, Math.min(TR.UPGRADE_MAX, Math.floor(v || 0)));
     const upgrades = { handling: lvl(up.handling), brake: lvl(up.brake), armor: lvl(up.armor), tank: lvl(up.tank) };
-    const maxHp = TR.MAX_HP + upgrades.armor;
+    const carKey = TR.CARS[o.car] ? o.car : 'city';
+    const car = TR.CARS[carKey];
+    const maxHp = TR.MAX_HP + upgrades.armor + car.hp;
     const maxFuel = 100 + upgrades.tank * 20;
     // Condition: day / night / rain; 'random' picks one per run, unknown falls back to day.
     const conds = ['day', 'night', 'rain'];
     let condition = conds.includes(o.condition) ? o.condition : 'day';
     if (o.condition === 'random') condition = conds[Math.floor(Math.random() * conds.length)];
-    let moveTime = Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03);
+    let moveTime = Math.max(0.10, Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03) * car.move);
     let brakeFactor = 0.55 - upgrades.brake * 0.07;
     let sightRange = 190;
     if (condition === 'night') sightRange = 110; // headlight range: cars appear later
@@ -72,6 +82,8 @@ const TR = {
       warnedSegmentAt: null,
       routeLen: route.len,
       upgrades,
+      car: carKey, carKind: car.kind, carColor: car.color,
+      speedFactor: car.speed, fuelFactor: car.fuel,
       moveTime,
       brakeFactor,
       time: 0,
@@ -234,7 +246,7 @@ const TR = {
     }
 
     // Speed: base rises with distance, brake slows, nitro boosts.
-    let speed = TR.baseSpeed(st.dist);
+    let speed = TR.baseSpeed(st.dist) * st.speedFactor;
     const nitroActive = st.nitroOn && st.nitro > 0;
     if (st.brake) speed *= st.brakeFactor;
     if (nitroActive) {
@@ -249,7 +261,7 @@ const TR = {
 
     // Fuel: drained per metre; nitro burns double, braking sips.
     if (st.fuel > 0) {
-      const rate = nitroActive ? TR.FUEL_DRAIN_NITRO : (st.brake ? TR.FUEL_DRAIN_BRAKE : TR.FUEL_DRAIN);
+      const rate = (nitroActive ? TR.FUEL_DRAIN_NITRO : (st.brake ? TR.FUEL_DRAIN_BRAKE : TR.FUEL_DRAIN)) * st.fuelFactor;
       st.fuel = Math.max(0, st.fuel - travelled * rate);
     }
     if (!st.fuelLow && st.fuel <= st.maxFuel * 0.25) {

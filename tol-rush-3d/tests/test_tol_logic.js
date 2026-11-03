@@ -319,5 +319,39 @@ function quiet(st) { st.spawnT = 9999; }
   eq('endless back to 3 lanes at ~6100 m', e.laneCount, 3);
 }
 
+// --- cars (Fase 2G) ---
+{
+  const city = TR.createGame({ mode: 'short' });
+  eq('default car is city', city.car, 'city');
+  eq('city speed factor', city.speedFactor, 1.0);
+  eq('city fuel factor', city.fuelFactor, 1.0);
+  eq('city maxHp', city.maxHp, 3);
+  const bad = TR.createGame({ mode: 'short', car: 'nope' });
+  eq('unknown car falls back to city', bad.car, 'city');
+  const suv = TR.createGame({ mode: 'short', car: 'suv' });
+  eq('suv maxHp 4', suv.maxHp, 4);
+  eq('suv kind', suv.carKind, 'suv');
+  ok('suv slower lane change', suv.moveTime > city.moveTime);
+  const swift = TR.createGame({ mode: 'short', car: 'lincah' });
+  ok('lincah faster lane change', swift.moveTime < city.moveTime);
+  eq('lincah kind', swift.carKind, 'hatch');
+  const sport = TR.createGame({ mode: 'short', car: 'sport' });
+  eq('sport speed factor', sport.speedFactor, 1.12);
+  eq('sport kind', sport.carKind, 'sport');
+  // speed: same distance, sport runs faster than city
+  const sc = TR.createGame({ mode: 'short', car: 'sport' }); quiet(sc);
+  const cc = TR.createGame({ mode: 'short' }); quiet(cc);
+  TR.step(sc, 1); TR.step(cc, 1);
+  ok('sport faster than city', sc.speed > cc.speed);
+  // fuel: sport drains more over the same distance
+  const sf = TR.createGame({ mode: 'short', car: 'sport' }); quiet(sf);
+  const cf = TR.createGame({ mode: 'short' }); quiet(cf);
+  TR.step(sf, 1); TR.step(cf, 1);
+  ok('sport thirstier than city', sf.fuel < cf.fuel);
+  // costs are positive and ordered city < lincah < suv < sport
+  eq('city free', TR.CARS.city.cost, 0);
+  ok('car costs ordered', TR.CARS.lincah.cost > 0 && TR.CARS.suv.cost > TR.CARS.lincah.cost && TR.CARS.sport.cost > TR.CARS.suv.cost);
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
