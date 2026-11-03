@@ -1,0 +1,476 @@
+'use strict';
+/* Tol Rush 3D — browser shell: THREE render, input, audio, i18n, SDK.
+ * Logic lives in TR (logic.js). No portal SDK is required to run locally:
+ * the CrazyGames calls below are guarded and no-op when the SDK is absent.
+ */
+
+// ---------- CrazyGames SDK (guarded) ----------
+const CG = { game: null, ready: false, muted: false };
+(function initCG() {
+  function boot() {
+    if (CG.ready || !window.CrazyGames || !window.CrazyGames.SDK) return;
+    try {
+      window.CrazyGames.SDK.init().then(() => {
+        CG.ready = true; CG.game = window.CrazyGames.SDK.game;
+        try {
+          const go = CG.game && CG.game.settings;
+          CG.muted = !!(go && go.muteAudio);
+          if (CG.game && CG.game.onMuteStateChanged) CG.game.onMuteStateChanged((m) => { CG.muted = !!m; syncMuteUI(); });
+        } catch (e) {}
+        syncMuteUI();
+      }).catch(() => {});
+    } catch (e) {}
+  }
+  if (document.readyState === 'complete') boot();
+  else window.addEventListener('load', boot);
+  setTimeout(boot, 1500);
+})();
+function cgStart() { try { if (CG.ready && CG.game && CG.game.gameplayStart) CG.game.gameplayStart(); } catch (e) {} }
+function cgStop() { try { if (CG.ready && CG.game && CG.game.gameplayStop) CG.game.gameplayStop(); } catch (e) {} }
+function requestMidgameAd(onDone) {
+  const done = () => { if (onDone) onDone(); };
+  if (!CG.ready || !CG.game || !CG.game.midgame) { done(); return; }
+  let finished = false;
+  const finish = () => { if (!finished) { finished = true; done(); } };
+  const watchdog = setTimeout(finish, 8000);
+  try {
+    CG.game.midgame('midgame', () => {
+      clearTimeout(watchdog); cgStop(); setTimeout(finish, 50);
+    }, () => { clearTimeout(watchdog); finish(); });
+  } catch (e) { clearTimeout(watchdog); finish(); }
+}
+
+// ---------- helpers / i18n ----------
+const $ = (id) => document.getElementById(id);
+const I18N = {
+  id: {
+    tagline: 'Selesaikan rute tol 5 km, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit.',
+    how1: '◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat',
+    how2: '⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.',
+    how3: '♥ 3x tabrakan = mogok. Mampir rest area untuk pulih penuh (+250).',
+    how4: 'Salip mepet = combo + nitro. REM untuk manuver sempit.',
+    start: '▶ MULAI', again: '↻ MAIN LAGI', brake: 'REM',
+    rotate: 'Putar HP ke landscape untuk pengalaman terbaik',
+    best: 'SKOR TERBAIK: ',
+    finish: 'EXIT TERCAPAI', over: 'MOBIL MOGOK',
+    finishSub: 'RUTE SELESAI', overSub: 'RUN BERAKHIR',
+    score: 'Skor', dist: 'Jarak', left: 'Sisa',
+    restOpen: 'Rest area di depan! Tekan REST AREA untuk mampir.',
+    restDone: 'Rest area! HP penuh, +250 poin.',
+    restMissed: 'Rest area terlewat.',
+    combo: 'COMBO x',
+    restSoon: 'REST AREA', exitSoon: 'EXIT',
+    threeMissing: 'Three.js gagal dimuat. Periksa koneksi lalu muat ulang halaman.',
+  },
+  en: {
+    tagline: 'Finish a 5 km toll route, decide whether to stop at the rest area or chase the time bonus, and reach the exit.',
+    how1: '◀ ▶ / swipe: change lane — dodge slower traffic',
+    how2: '⚠️ Blinking indicator = that car is about to change lane. Never block every lane.',
+    how3: '♥ 3 crashes = breakdown. Stop at the rest area to fully recover (+250).',
+    how4: 'Close overtake = combo + nitro. BRAKE for tight gaps.',
+    start: '▶ START', again: '↻ PLAY AGAIN', brake: 'BRAKE',
+    rotate: 'Rotate your phone to landscape for the best experience',
+    best: 'BEST SCORE: ',
+    finish: 'EXIT REACHED', over: 'BROKEN DOWN',
+    finishSub: 'ROUTE COMPLETE', overSub: 'RUN OVER',
+    score: 'Score', dist: 'Distance', left: 'Left',
+    restOpen: 'Rest area ahead! Tap REST AREA to stop.',
+    restDone: 'Rest area! Full HP, +250 points.',
+    restMissed: 'Rest area missed.',
+    combo: 'COMBO x',
+    restSoon: 'REST AREA', exitSoon: 'EXIT',
+    threeMissing: 'Three.js failed to load. Check your connection and reload.',
+  },
+};
+let lang = 'id';
+try { lang = localStorage.getItem('tr_lang') || 'id'; } catch (e) {}
+function t(k) { return (I18N[lang] && I18N[lang][k]) || I18N.id[k] || k; }
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  $('langBtn').textContent = lang === 'id' ? 'EN' : 'ID';
+  updateBestLine();
+}
+function bestScore() { try { return parseInt(localStorage.getItem('tr_best_score') || '0', 10) || 0; } catch (e) { return 0; } }
+function updateBestLine() {
+  const b = bestScore();
+  $('bestLine').textContent = b > 0 ? t('best') + b.toLocaleString('id-ID') : '';
+}
+
+// ---------- audio (WebAudio synth, no assets) ----------
+let AC = null;
+function ac() {
+  if (typeof window === 'undefined') return null;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!AC) { try { AC = new Ctx(); } catch (e) { return null; } }
+  if (AC.state === 'suspended') AC.resume().catch(() => {});
+  return AC;
+}
+function isMuted() {
+  if (CG.muted) return true;
+  try { return localStorage.getItem('tr_mute') === '1'; } catch (e) { return false; }
+}
+function syncMuteUI() { $('muteBtn').textContent = isMuted() ? '🔇' : '🔊'; }
+function beep(freq, dur, type, vol, slideTo) {
+  if (isMuted()) return;
+  const c = ac(); if (!c) return;
+  try {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(freq, c.currentTime);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), c.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.2, c.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+    o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + dur);
+  } catch (e) {}
+}
+let engineOsc = null, engineGain = null;
+function engineStart() {
+  const c = ac(); if (!c || engineOsc) return;
+  try {
+    engineOsc = c.createOscillator(); engineGain = c.createGain();
+    engineOsc.type = 'sawtooth'; engineOsc.frequency.value = 70;
+    engineGain.gain.value = 0.0;
+    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 300;
+    engineOsc.connect(f); f.connect(engineGain); engineGain.connect(c.destination);
+    engineOsc.start();
+  } catch (e) {}
+}
+function engineUpdate(speed, running) {
+  if (!engineOsc || !engineGain) return;
+  try {
+    const c = ac();
+    engineOsc.frequency.setValueAtTime(55 + speed * 2.2, c.currentTime);
+    engineGain.gain.setValueAtTime(isMuted() || !running ? 0 : 0.035, c.currentTime);
+  } catch (e) {}
+}
+
+// ---------- state ----------
+let st = TR.createGame();
+let running = false;
+let toastTimer = null;
+function toast(msg) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+function comboPop(msg) {
+  const el = $('comboPop'); el.textContent = msg;
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+}
+
+// ---------- THREE scene ----------
+let renderer, scene, camera, playerMesh;
+const trafficMeshes = new Map(); // vehicle object -> group
+const dashes = [], posts = [], trees = [];
+let restGroup = null, exitGroup = null;
+
+function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
+function box(w, h, d, color, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
+  m.position.set(x, y, z); return m;
+}
+function makeSignTexture(line1, line2) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#0a7a3d'; g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = '#ffffff'; g.lineWidth = 10; g.strokeRect(8, 8, 496, 240);
+  g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.font = '900 72px Arial';
+  g.fillText(line1, 256, 110);
+  g.font = '700 44px Arial'; g.fillText(line2 || '', 256, 190);
+  const tex = new THREE.CanvasTexture(cv); return tex;
+}
+function makeCar(kind, colorHex) {
+  const g = new THREE.Group();
+  const col = colorHex;
+  if (kind === 'truck') {
+    g.add(box(2.0, 1.7, 1.9, 0xd8dee9, 0, 1.15, -3.6)); // cab
+    g.add(box(2.1, 2.3, 7.2, col, 0, 1.45, 0.6)); // container
+    g.add(box(1.9, 0.7, 0.2, 0x223044, 0, 0.9, -4.6)); // windshield
+  } else if (kind === 'bus') {
+    g.add(box(2.0, 2.1, 8.5, col, 0, 1.35, 0));
+    g.add(box(2.02, 0.7, 7.6, 0x1a2b45, 0, 1.85, 0)); // windows
+  } else {
+    g.add(box(1.8, 0.55, 4.4, col, 0, 0.62, 0)); // body
+    g.add(box(1.6, 0.5, 2.2, 0x1a2b45, 0, 1.12, 0.2)); // cabin
+    g.add(box(1.85, 0.18, 0.9, col, 0, 0.95, 1.9)); // spoiler-ish tail
+  }
+  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
+  const wheelMat = mat(0x111111);
+  const zs = kind === 'sedan' ? [-1.45, 1.45] : [-3.2, -1.2, 1.2, 3.2];
+  if (kind === 'bus') zs.length = 0, zs.push(-2.8, 2.8);
+  for (const z of zs) for (const x of [-0.92, 0.92]) {
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.z = Math.PI / 2; w.position.set(x, 0.38, z); g.add(w);
+  }
+  // headlights (front = -z) and taillights (rear = +z)
+  const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : -4.55);
+  const rear = -front;
+  for (const x of [-0.6, 0.6]) {
+    g.add(box(0.32, 0.18, 0.06, 0xfff6c8, x, 0.7, front));
+    g.add(box(0.32, 0.18, 0.06, 0xff2a3c, x, 0.7, rear));
+  }
+  // indicators on the rear corners, blinked by the sync loop
+  const sigL = box(0.3, 0.18, 0.06, 0xffb020, -0.6, 0.95, rear + 0.04);
+  const sigR = box(0.3, 0.18, 0.06, 0xffb020, 0.6, 0.95, rear + 0.04);
+  sigL.visible = sigR.visible = false;
+  g.add(sigL); g.add(sigR);
+  g.userData.signals = { left: sigL, right: sigR };
+  return g;
+}
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  $('c').appendChild(renderer.domElement);
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87b5e0);
+  scene.fog = new THREE.Fog(0x87b5e0, 30, 170);
+  camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 400);
+  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x3a4a2a, 0.95));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+  sun.position.set(20, 40, 10); scene.add(sun);
+
+  // road
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 400),
+    new THREE.MeshLambertMaterial({ color: 0x2b3038 }));
+  road.rotation.x = -Math.PI / 2; road.position.set(0, 0, -90); scene.add(road);
+  const grassL = new THREE.Mesh(new THREE.PlaneGeometry(60, 400), mat(0x4a7a3a));
+  grassL.rotation.x = -Math.PI / 2; grassL.position.set(-37.5, -0.05, -90); scene.add(grassL);
+  const grassR = grassL.clone(); grassR.position.x = 37.5; scene.add(grassR);
+  for (const x of [-5.45, 5.45]) {
+    const line = box(0.22, 0.02, 400, 0xffffff, x, 0.02, -90); scene.add(line);
+  }
+  // dashed lane dividers
+  for (const x of [-1.7, 1.7]) {
+    for (let i = 0; i < 16; i++) {
+      const d = box(0.16, 0.02, 3.2, 0xffffff, x, 0.02, -12 - i * 12);
+      scene.add(d); dashes.push(d);
+    }
+  }
+  // guard posts + side trees, recycled
+  for (let i = 0; i < 10; i++) {
+    for (const x of [-7.6, 7.6]) {
+      const p = box(0.25, 0.9, 0.25, 0xd8dee9, x, 0.45, -10 - i * 20);
+      scene.add(p); posts.push(p);
+    }
+  }
+  for (let i = 0; i < 22; i++) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const tree = new THREE.Group();
+    tree.add(box(0.5, 2.2, 0.5, 0x6b4a2a, 0, 1.1, 0));
+    tree.add(box(2.2, 2.2, 2.2, 0x2f6b2f, 0, 3.0, 0));
+    tree.position.set(side * (10 + Math.random() * 6), 0, -10 - i * 9);
+    scene.add(tree); trees.push(tree);
+  }
+  // rest-area buildings (right side, shown near the rest zone)
+  restGroup = new THREE.Group();
+  restGroup.add(box(10, 3, 8, 0xe8e2d2, 13, 1.5, 0));
+  restGroup.add(box(11, 0.5, 9, 0x2a6b4a, 13, 3.2, 0));
+  const restSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 4),
+    new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', 'KM 2,5') }));
+  restSign.position.set(13, 4.5, 0); restGroup.add(restSign);
+  restGroup.visible = false; scene.add(restGroup);
+  // exit gantry (shown near the finish)
+  exitGroup = new THREE.Group();
+  exitGroup.add(box(0.5, 6, 0.5, 0xdddddd, -7, 3, 0));
+  exitGroup.add(box(0.5, 6, 0.5, 0xdddddd, 7, 3, 0));
+  const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(10, 3.2),
+    new THREE.MeshBasicMaterial({ map: makeSignTexture('EXIT', 'TOL SELESAI') }));
+  exitSign.position.set(0, 5, 0); exitGroup.add(exitSign);
+  exitGroup.visible = false; scene.add(exitGroup);
+
+  playerMesh = makeCar('sedan', 0xff6a1a);
+  scene.add(playerMesh);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+function syncTrafficMeshes() {
+  const alive = new Set(st.traffic);
+  for (const [v, mesh] of trafficMeshes) {
+    if (!alive.has(v)) { scene.remove(mesh); trafficMeshes.delete(v); }
+  }
+  for (const v of st.traffic) {
+    let mesh = trafficMeshes.get(v);
+    if (!mesh) {
+      mesh = makeCar(v.kind, new THREE.Color().setHSL(v.color / 360, 0.55, 0.45).getHex());
+      scene.add(mesh); trafficMeshes.set(v, mesh);
+    }
+    const gap = v.s - st.dist;
+    mesh.position.set(v.x, 0, -gap);
+    mesh.visible = gap > -25 && gap < 190;
+    const sig = mesh.userData.signals;
+    const blinking = (v.signalT > 0 || v.moving) && (Math.floor(st.time * 4) % 2 === 0);
+    const toRight = v.targetLane > v.lane;
+    sig.left.visible = blinking && !toRight;
+    sig.right.visible = blinking && toRight;
+  }
+}
+
+// ---------- HUD / overlays ----------
+function updateHUD() {
+  $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, TR.MAX_HP - st.hp));
+  $('score').textContent = st.score.toLocaleString('id-ID');
+  $('speed').textContent = Math.round(st.speed * 3.6) + ' km/h';
+  const remain = Math.max(0, TR.ROUTE_LEN - st.dist) / 1000;
+  $('dist').textContent = t('left') + ' ' + remain.toFixed(1) + ' km';
+  $('progFill').style.width = Math.min(100, (st.dist / TR.ROUTE_LEN) * 100) + '%';
+  $('nitroFill').style.width = Math.round(st.nitro) + '%';
+  $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
+  const restGap = TR.REST_AT - st.dist;
+  let sign = '';
+  if (st.rest === 'open') sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
+  else if (TR.ROUTE_LEN - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(TR.ROUTE_LEN - st.dist) + ' m';
+  $('sign').textContent = sign;
+  $('restBtn').classList.toggle('show', st.rest === 'open');
+}
+function handleEvents() {
+  for (const e of st.events) {
+    if (e.t === 'crash') {
+      beep(120, 0.35, 'square', 0.3, 40);
+      const f = $('flash'); f.classList.add('show');
+      setTimeout(() => f.classList.remove('show'), 220);
+    } else if (e.t === 'near') {
+      beep(900, 0.18, 'sine', 0.18, 1500);
+      comboPop(t('combo') + e.combo + '  +' + e.pts);
+    } else if (e.t === 'restOpen') {
+      toast(t('restOpen')); beep(660, 0.15, 'sine', 0.2);
+    } else if (e.t === 'rest') {
+      toast(t('restDone')); beep(660, 0.15, 'sine', 0.2); setTimeout(() => beep(880, 0.2, 'sine', 0.2), 160);
+    } else if (e.t === 'restMissed') {
+      toast(t('restMissed'));
+    } else if (e.t === 'finish' || e.t === 'over') {
+      endGame(e.t === 'finish');
+    }
+  }
+  st.events.length = 0;
+}
+function endGame(finished) {
+  running = false; cgStop(); engineUpdate(0, false);
+  $('hud').classList.add('hidden'); $('controls').classList.add('hidden');
+  $('endKicker').textContent = finished ? t('finishSub') : t('overSub');
+  $('endTitle').textContent = finished ? t('finish') : t('over');
+  const isNewBest = st.score > bestScore();
+  if (isNewBest) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
+  $('endStats').innerHTML =
+    '<b>' + t('score') + ':</b> ' + st.score.toLocaleString('id-ID') +
+    (isNewBest ? ' ★' : '') + '<br><b>' + t('dist') + ':</b> ' +
+    (Math.min(TR.ROUTE_LEN, Math.floor(st.dist)) / 1000).toFixed(2) + ' km' +
+    '<br><b>HP:</b> ' + st.hp + '/' + TR.MAX_HP;
+  $('endOverlay').classList.remove('hidden');
+  updateBestLine();
+  if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
+}
+function startGame() {
+  for (const mesh of trafficMeshes.values()) scene.remove(mesh);
+  trafficMeshes.clear();
+  st = TR.createGame();
+  running = true;
+  $('startOverlay').classList.add('hidden');
+  $('endOverlay').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  $('controls').classList.remove('hidden');
+  engineStart(); cgStart(); updateHUD();
+}
+
+// ---------- input ----------
+function lane(dir) { if (running) { TR.moveLane(st, dir); beep(500, 0.06, 'sine', 0.08); } }
+function rest() { if (running && TR.tryRest(st)) { /* event toast handled in loop */ } }
+$('leftBtn').addEventListener('click', () => lane(-1));
+$('rightBtn').addEventListener('click', () => lane(1));
+$('restBtn').addEventListener('click', rest);
+function holdBtn(el, set) {
+  const on = (e) => { e.preventDefault(); if (running) set(true); };
+  const off = () => set(false);
+  el.addEventListener('pointerdown', on);
+  el.addEventListener('pointerup', off);
+  el.addEventListener('pointerleave', off);
+  el.addEventListener('pointercancel', off);
+}
+holdBtn($('brakeBtn'), (on) => TR.setBrake(st, on));
+holdBtn($('nitroBtn'), (on) => TR.setNitro(st, on));
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') lane(-1);
+  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') lane(1);
+  else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') TR.setBrake(st, true);
+  else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') TR.setNitro(st, true);
+  else if (e.key === 'r' || e.key === 'R') rest();
+  else if (e.key === 'Enter') {
+    if (!$('startOverlay').classList.contains('hidden')) startGame();
+    else if (!$('endOverlay').classList.contains('hidden')) requestMidgameAd(startGame);
+  }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') TR.setBrake(st, false);
+  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') TR.setNitro(st, false);
+});
+let touchX = null;
+$('c').addEventListener('touchstart', (e) => { touchX = e.changedTouches[0].clientX; }, { passive: true });
+$('c').addEventListener('touchend', (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  if (dx > 40) lane(1); else if (dx < -40) lane(-1);
+  touchX = null;
+}, { passive: true });
+$('startBtn').addEventListener('click', startGame);
+$('againBtn').addEventListener('click', () => requestMidgameAd(startGame));
+$('muteBtn').addEventListener('click', () => {
+  try { localStorage.setItem('tr_mute', isMuted() ? '0' : '1'); } catch (e) {}
+  syncMuteUI();
+});
+$('langBtn').addEventListener('click', () => {
+  lang = lang === 'id' ? 'en' : 'id';
+  try { localStorage.setItem('tr_lang', lang); } catch (e) {}
+  applyI18n();
+});
+
+// ---------- main loop ----------
+let lastT = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  if (!renderer) return;
+  if (running && st.status === 'play') {
+    TR.step(st, dt);
+    handleEvents();
+    // scroll world props with player speed
+    const move = st.speed * dt;
+    for (const d of dashes) { d.position.z += move; if (d.position.z > 12) d.position.z -= 192; }
+    for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
+    for (const tr of trees) { tr.position.z += move; if (tr.position.z > 12) { tr.position.z -= 198; tr.position.x = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 6); } }
+    // rest + exit set pieces follow their route position
+    const restGap = TR.REST_AT - st.dist;
+    restGroup.visible = restGap > -60 && restGap < 260;
+    restGroup.position.z = -restGap;
+    const exitGap = TR.ROUTE_LEN - st.dist;
+    exitGroup.visible = exitGap > -30 && exitGap < 260;
+    exitGroup.position.z = -exitGap;
+    // player mesh
+    playerMesh.position.set(st.player.x, 0, 0);
+    playerMesh.rotation.y = (TR.LANES[st.player.targetLane] - st.player.x) * -0.05;
+    playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
+    syncTrafficMeshes();
+    const shake = st.crashT > 0 ? (Math.random() - 0.5) * 0.3 : 0;
+    camera.position.set(st.player.x * 0.5 + shake, 5.4, 9);
+    camera.lookAt(st.player.x * 0.65, 0.8, -12);
+    engineUpdate(st.speed, true);
+    updateHUD();
+  } else {
+    // idle scene: slow drift so the start screen is not frozen
+    for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
+    camera.position.set(0, 5.4, 9);
+    camera.lookAt(0, 0.8, -12);
+  }
+  renderer.render(scene, camera);
+}
+
+// ---------- boot ----------
+applyI18n(); syncMuteUI();
+if (typeof THREE === 'undefined') {
+  document.querySelector('[data-i18n="tagline"]').textContent = t('threeMissing');
+} else {
+  initThree();
+  requestAnimationFrame(loop);
+}

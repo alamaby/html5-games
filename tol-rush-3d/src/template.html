@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<title>Tol Rush 3D</title>
+<script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; background:#0b1020; }
+  body { font-family:'Segoe UI', system-ui, -apple-system, sans-serif; color:#fff;
+         touch-action:none; user-select:none; -webkit-user-select:none; }
+  #c { position:fixed; inset:0; }
+  #c canvas { display:block; }
+  .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
+             justify-content:center; z-index:10; text-align:center; padding:24px;
+             background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
+  .overlay.hidden { display:none; }
+  .kicker { font-size:12px; letter-spacing:5px; color:#ffd76a; margin-bottom:10px; font-weight:700; }
+  h1.title { font-size:clamp(38px, 11vw, 68px); font-weight:900; line-height:.95; letter-spacing:1px;
+             background:linear-gradient(180deg,#ffe29a,#ff7a1a 60%,#ff3d5e);
+             -webkit-background-clip:text; background-clip:text; color:transparent;
+             filter:drop-shadow(0 4px 24px rgba(255,122,26,.4)); margin-bottom:8px; }
+  .subtitle { color:#cdd6f4; font-size:15px; margin:8px 0 20px; max-width:340px; line-height:1.55; }
+  .howto { display:flex; flex-direction:column; gap:8px; margin:2px 0 18px; max-width:340px; width:100%; }
+  .hrow { font-size:14px; color:#cdd6f4; background:rgba(255,255,255,.05);
+          border:1px solid rgba(255,255,255,.09); padding:9px 14px; border-radius:12px; line-height:1.45; }
+  .hrow b { color:#fff; }
+  .best { font-size:14px; color:#ffd76a; letter-spacing:1px; margin-bottom:20px; font-weight:700; }
+  .bigbtn { font-size:19px; font-weight:800; letter-spacing:3px; color:#111; background:#ffd76a;
+            border:0; border-radius:16px; padding:16px 34px; cursor:pointer; }
+  .bigbtn:active { transform:scale(.96); }
+  .bigbtn.secondary { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.2); }
+  #hud { position:fixed; top:0; left:0; right:0; z-index:5; padding:10px 12px 0;
+         padding-top:max(10px, env(safe-area-inset-top)); pointer-events:none; }
+  #hud.hidden, #controls.hidden { display:none; }
+  .hudrow { display:flex; justify-content:space-between; align-items:center; gap:8px; font-weight:800; }
+  #hp { color:#ff5a6e; font-size:20px; letter-spacing:2px; text-shadow:0 2px 8px rgba(0,0,0,.6); }
+  #score { font-size:26px; font-variant-numeric:tabular-nums; text-shadow:0 2px 8px rgba(0,0,0,.6); }
+  #speed { font-size:17px; text-shadow:0 2px 8px rgba(0,0,0,.6); }
+  #dist { font-size:14px; color:#ffd76a; text-shadow:0 2px 8px rgba(0,0,0,.6); }
+  #prog { height:8px; background:rgba(255,255,255,.18); border-radius:99px; margin-top:8px; overflow:hidden; }
+  #progFill { height:100%; width:0%; background:linear-gradient(90deg,#ffd76a,#ff7a1a); border-radius:99px; }
+  #sign { text-align:center; margin-top:8px; font-size:15px; font-weight:800; color:#7dff9a;
+          text-shadow:0 2px 8px rgba(0,0,0,.7); min-height:22px; }
+  #toast { position:fixed; top:110px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(20,26,52,.94);
+           border:1px solid rgba(255,215,106,.45); border-radius:14px; padding:10px 18px; font-weight:800;
+           font-size:15px; opacity:0; transition:opacity .3s; pointer-events:none; text-align:center; max-width:88vw; }
+  #toast.show { opacity:1; }
+  #comboPop { position:fixed; top:24%; left:0; right:0; text-align:center; z-index:6; font-size:30px;
+              font-weight:900; letter-spacing:2px; color:#ffd76a; text-shadow:0 0 22px rgba(255,180,60,.8);
+              opacity:0; pointer-events:none; }
+  #comboPop.show { animation:pop .9s ease-out; }
+  @keyframes pop { 0%{opacity:0; transform:scale(.5);} 18%{opacity:1; transform:scale(1.15);}
+                   35%{transform:scale(1);} 75%{opacity:1;} 100%{opacity:0; transform:scale(1) translateY(-14px);} }
+  #flash { position:fixed; inset:0; background:rgba(255,40,60,.35); opacity:0; pointer-events:none; z-index:7; transition:opacity .25s; }
+  #flash.show { opacity:1; }
+  .corner { position:fixed; z-index:20; display:flex; gap:10px; top:max(12px, env(safe-area-inset-top)); }
+  #topLeft { left:12px; } #topRight { right:12px; }
+  .iconbtn { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18);
+             background:rgba(15,22,45,.72); color:#fff; font-size:14px; font-weight:800;
+             display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .iconbtn:active { transform:scale(.92); }
+  #controls { position:fixed; left:0; right:0; bottom:0; z-index:6; display:flex; justify-content:space-between;
+              align-items:flex-end; padding:0 12px max(14px, env(safe-area-inset-bottom)); pointer-events:none; }
+  #controls button { pointer-events:auto; }
+  .ctlgroup { display:flex; gap:10px; align-items:flex-end; }
+  .ctl { width:62px; height:62px; border-radius:18px; border:1px solid rgba(255,255,255,.22);
+         background:rgba(15,22,45,.72); color:#fff; font-size:24px; font-weight:800; cursor:pointer; }
+  .ctl:active { transform:scale(.92); background:rgba(255,122,26,.5); }
+  .ctl.small { width:56px; height:56px; font-size:12px; letter-spacing:1px; }
+  #nitroWrap { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  #nitroBar { width:90px; height:10px; background:rgba(255,255,255,.18); border-radius:99px; overflow:hidden; }
+  #nitroFill { height:100%; width:50%; background:linear-gradient(90deg,#7df9ff,#4f7cff); }
+  #restBtn { display:none; background:#2fbf71; border-color:#7dff9a; font-size:11px; width:76px; height:62px; line-height:1.2; }
+  #restBtn.show { display:block; animation:pop 1s ease-in-out infinite; }
+  #rotate { display:none; position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:9;
+            background:rgba(15,22,45,.85); border:1px solid rgba(255,255,255,.2); border-radius:12px;
+            padding:8px 14px; font-size:13px; font-weight:700; pointer-events:none; text-align:center; }
+  @media (orientation: portrait) { #rotate { display:block; } }
+  #endStats { font-size:16px; line-height:1.9; color:#cdd6f4; margin:6px 0 22px; }
+  #endStats b { color:#fff; }
+  .foot { position:fixed; bottom:max(10px, env(safe-area-inset-bottom)); left:0; right:0;
+          text-align:center; font-size:11px; letter-spacing:3px; color:rgba(170,180,216,.5); z-index:5; pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="c"></div>
+
+<div id="hud" class="hidden">
+  <div class="hudrow"><span id="hp">♥♥♥</span><span id="score">0</span><span id="speed">0 km/h</span></div>
+  <div class="hudrow"><span id="dist"></span><span id="comboLabel"></span></div>
+  <div id="prog"><div id="progFill"></div></div>
+  <div id="sign"></div>
+</div>
+<div id="toast"></div>
+<div id="comboPop"></div>
+<div id="flash"></div>
+<div id="rotate">📱 <span data-i18n="rotate">Putar HP ke landscape untuk pengalaman terbaik</span></div>
+
+<div class="corner" id="topLeft"><button class="iconbtn" id="muteBtn">🔊</button></div>
+<div class="corner" id="topRight"><button class="iconbtn" id="langBtn">EN</button></div>
+
+<div id="controls" class="hidden">
+  <div class="ctlgroup">
+    <button class="ctl" id="leftBtn">◀</button>
+    <button class="ctl" id="rightBtn">▶</button>
+  </div>
+  <div class="ctlgroup">
+    <button class="ctl small" id="restBtn">REST AREA</button>
+    <div id="nitroWrap"><div id="nitroBar"><div id="nitroFill"></div></div>
+      <button class="ctl small" id="nitroBtn">NITRO</button></div>
+    <button class="ctl small" id="brakeBtn" data-i18n="brake">REM</button>
+  </div>
+</div>
+
+<div class="overlay" id="startOverlay">
+  <div class="kicker">HTML5 • THREE.JS • 3 JALUR</div>
+  <h1 class="title">TOL RUSH 3D</h1>
+  <p class="subtitle" data-i18n="tagline">Selesaikan rute tol 5 km, putuskan mampir rest area atau kejar bonus waktu, dan finis di exit.</p>
+  <div class="howto">
+    <div class="hrow" data-i18n="how1">◀ ▶ / swipe: pindah jalur — hindari mobil yang lebih lambat</div>
+    <div class="hrow" data-i18n="how2">⚠️ Sein berkedip = mobil itu akan pindah jalur. Jangan tutup semua jalur.</div>
+    <div class="hrow" data-i18n="how3">♥ 3x tabrakan = mogok. Mampir rest area untuk pulih penuh (+250).</div>
+    <div class="hrow" data-i18n="how4">Salip mepet = combo + nitro. REM untuk manuver sempit.</div>
+  </div>
+  <div class="best" id="bestLine"></div>
+  <button class="bigbtn" id="startBtn" data-i18n="start">▶ MULAI</button>
+</div>
+
+<div class="overlay hidden" id="endOverlay">
+  <div class="kicker" id="endKicker">FINIS</div>
+  <h1 class="title" id="endTitle">EXIT TERCAPAI</h1>
+  <div id="endStats"></div>
+  <button class="bigbtn" id="againBtn" data-i18n="again">↻ MAIN LAGI</button>
+</div>
+
+<div class="foot">TOL RUSH 3D • MVP</div>
+
+<script>/*__LOGIC_INLINE__*/</script>
+<script>/*__GAME_INLINE__*/</script>
+</body>
+</html>
