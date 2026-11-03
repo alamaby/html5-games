@@ -47,13 +47,24 @@ const TR = {
     const upgrades = { handling: lvl(up.handling), brake: lvl(up.brake), armor: lvl(up.armor), tank: lvl(up.tank) };
     const maxHp = TR.MAX_HP + upgrades.armor;
     const maxFuel = 100 + upgrades.tank * 20;
+    // Condition: day / night / rain; 'random' picks one per run, unknown falls back to day.
+    const conds = ['day', 'night', 'rain'];
+    let condition = conds.includes(o.condition) ? o.condition : 'day';
+    if (o.condition === 'random') condition = conds[Math.floor(Math.random() * conds.length)];
+    let moveTime = Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03);
+    let brakeFactor = 0.55 - upgrades.brake * 0.07;
+    let sightRange = 190;
+    if (condition === 'night') sightRange = 110; // headlight range: cars appear later
+    if (condition === 'rain') { moveTime += 0.04; brakeFactor = Math.min(0.9, brakeFactor * 1.15); } // wet grip: slower snap, weaker brakes
     return {
       status: 'play', // play | finished | over
       mode,
+      condition,
+      sightRange,
       routeLen: route.len,
       upgrades,
-      moveTime: Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03),
-      brakeFactor: 0.55 - upgrades.brake * 0.07,
+      moveTime,
+      brakeFactor,
       time: 0,
       dist: 0,
       speed: 20,

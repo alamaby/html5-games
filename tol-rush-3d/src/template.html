@@ -54,6 +54,19 @@
   .shopbuy { background:#ffd76a; color:#111; border:0; border-radius:10px; padding:8px 12px; font-weight:800; font-size:12px; cursor:pointer; white-space:nowrap; }
   .shopbuy:disabled { background:rgba(255,255,255,.12); color:rgba(255,255,255,.4); }
   #shopMsg { min-height:18px; font-size:12px; color:#7dff9a; margin-top:4px; }
+  .condrow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; margin-bottom:14px; }
+  .condlabel { font-size:13px; letter-spacing:1px; color:#ffd76a; font-weight:800; }
+  .condbtn { font-size:13px; padding:10px 12px; }
+  .condbtn.sel { background:#ffd76a; color:#111; }
+  #menuBtn { background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.3);
+             border-radius:8px; padding:6px 10px; font-size:12px; font-weight:800; margin-top:8px; cursor:pointer; pointer-events:auto; }
+  #restFuelBar { height:14px; background:rgba(255,255,255,.18); border-radius:99px; overflow:hidden;
+                 width:100%; max-width:320px; margin:14px 0 8px; }
+  #restFuelFill { height:100%; width:0%; background:linear-gradient(90deg,#ffd76a,#ff7a1a); }
+  #restFuelPct { font-size:28px; font-weight:900; color:#ffd76a; }
+  #restInfo { font-size:14px; color:#cdd6f4; margin-top:6px; }
+  #restSkipBtn { margin-top:18px; }
+  .restbox { width:100%; max-width:340px; text-align:center; }
   #sign { text-align:center; margin-top:8px; font-size:15px; font-weight:800; color:#7dff9a;
           text-shadow:0 2px 8px rgba(0,0,0,.7); min-height:22px; }
   #toast { position:fixed; top:110px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(20,26,52,.94);
@@ -105,6 +118,7 @@
   <div class="hudrow"><span id="dist"></span><span id="comboLabel"></span></div>
   <div id="prog"><div id="progFill"></div></div>
   <div id="fuelBar"><div id="fuelFill"></div></div>
+  <button id="menuBtn" data-i18n="menu">MENU</button>
   <div id="sign"></div>
 </div>
 <div id="toast"></div>
@@ -145,6 +159,12 @@
     <button class="bigbtn modebtn" data-mode="long" data-i18n="modeLong">RUTE 10 KM</button>
     <button class="bigbtn modebtn" data-mode="endless" data-i18n="modeEndless">ENDLESS</button>
   </div>
+  <div class="condrow"><span class="condlabel" data-i18n="condLabel">KONDISI:</span>
+    <button class="bigbtn condbtn" data-cond="day" data-i18n="condDay">SIANG</button>
+    <button class="bigbtn condbtn" data-cond="night" data-i18n="condNight">MALAM</button>
+    <button class="bigbtn condbtn" data-cond="rain" data-i18n="condRain">HUJAN</button>
+    <button class="bigbtn condbtn" data-cond="random" data-i18n="condRandom">ACAK</button>
+  </div>
   <div class="shop">
     <div class="shophead"><span data-i18n="shopTitle">UPGRADE</span> · <span id="coinLine"></span></div>
     <div id="shopList"></div>
@@ -157,6 +177,18 @@
   <h1 class="title" id="endTitle">EXIT TERCAPAI</h1>
   <div id="endStats"></div>
   <button class="bigbtn" id="againBtn" data-i18n="again">↻ MAIN LAGI</button>
+  <button class="bigbtn" id="menuBtn2" data-i18n="menu">MENU</button>
+</div>
+
+<div class="overlay hidden" id="restOverlay">
+  <div class="kicker" data-i18n="restTitle">REST AREA</div>
+  <h1 class="title" style="font-size:clamp(28px,8vw,44px)" data-i18n="restSub">Belok kiri • isi bensin</h1>
+  <div class="restbox">
+    <div id="restFuelBar"><div id="restFuelFill"></div></div>
+    <div id="restFuelPct">0%</div>
+    <div id="restInfo" data-i18n="restInfo">HP penuh + bensin penuh (+250)</div>
+    <button class="bigbtn" id="restSkipBtn" data-i18n="restSkip">SKIP ⏭</button>
+  </div>
 </div>
 
 <div class="foot">TOL RUSH 3D • MVP</div>

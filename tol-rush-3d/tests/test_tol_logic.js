@@ -229,5 +229,25 @@ function quiet(st) { st.spawnT = 9999; }
   eq('no upgrades brake', def.brakeFactor, 0.55);
 }
 
+// Conditions: day default, night shortens sight range, rain slows snap + weakens brakes
+{
+  const day = TR.createGame();
+  eq('default condition is day', day.condition, 'day');
+  eq('day sight range', day.sightRange, 190);
+  const night = TR.createGame({ condition: 'night' });
+  eq('night condition', night.condition, 'night');
+  eq('night sight range', night.sightRange, 110);
+  const rain = TR.createGame({ condition: 'rain' });
+  eq('rain condition', rain.condition, 'rain');
+  ok('rain lane change slower', rain.moveTime > TR.createGame().moveTime);
+  ok('rain brakes weaker', rain.brakeFactor > TR.createGame().brakeFactor);
+  const unk = TR.createGame({ condition: 'salju' });
+  eq('unknown condition falls back to day', unk.condition, 'day');
+  const seen = new Set();
+  for (let i = 0; i < 30; i++) seen.add(TR.createGame({ condition: 'random' }).condition);
+  ok('random picks a real condition', [...seen].every((c) => ['day', 'night', 'rain'].includes(c)));
+  ok('random varies', seen.size > 1);
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -51,6 +51,9 @@ const I18N = {
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
+    condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
+    menu: 'MENU', restTitle: 'REST AREA', restSub: 'Belok kiri • isi bensin',
+    restInfo: 'HP penuh + bensin penuh (+250)', restSkip: 'SKIP ⏭',
     how4: 'Salip mepet = combo + nitro. REM untuk manuver sempit.',
     start: '▶ MULAI', again: '↻ MAIN LAGI', brake: 'REM',
     modePick: 'Pilih rute:', modeShort: 'RUTE 5 KM', modeLong: 'RUTE 10 KM', modeEndless: 'ENDLESS',
@@ -75,6 +78,9 @@ const I18N = {
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
+    condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
+    menu: 'MENU', restTitle: 'REST AREA', restSub: 'Turn left • refuel',
+    restInfo: 'Full HP + full fuel (+250)', restSkip: 'SKIP ⏭',
     how4: 'Close overtake = combo + nitro. BRAKE for tight gaps.',
     start: '▶ START', again: '↻ PLAY AGAIN', brake: 'BRAKE',
     modePick: 'Pick a route:', modeShort: 'ROUTE 5 KM', modeLong: 'ROUTE 10 KM', modeEndless: 'ENDLESS',
@@ -95,11 +101,20 @@ const I18N = {
 let lang = 'id';
 try { lang = localStorage.getItem('tr_lang') || 'id'; } catch (e) {}
 function t(k) { return (I18N[lang] && I18N[lang][k]) || I18N.id[k] || k; }
+let currentCondition = 'day';
+try {
+  const c = localStorage.getItem('tr_condition');
+  if (['day', 'night', 'rain', 'random'].includes(c)) currentCondition = c;
+} catch (e) {}
+function updateConditionUI() {
+  document.querySelectorAll('[data-cond]').forEach((btn) => btn.classList.toggle('sel', btn.dataset.cond === currentCondition));
+}
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
   $('langBtn').textContent = lang === 'id' ? 'EN' : 'ID';
   updateBestLine();
   renderShop();
+  updateConditionUI();
 }
 
 // ---------- upgrades + coins (localStorage, no server) ----------
@@ -227,6 +242,7 @@ function comboPop(msg) {
 
 // ---------- THREE scene ----------
 let renderer, scene, camera, playerMesh;
+let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoints = null;
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
 const dashes = [], posts = [], trees = [];
@@ -270,12 +286,15 @@ function makeCar(kind, colorHex) {
     const w = new THREE.Mesh(wheelGeo, wheelMat);
     w.rotation.z = Math.PI / 2; w.position.set(x, 0.38, z); g.add(w);
   }
-  // headlights (front = -z) and taillights (rear = +z)
+  // headlights (front = -z) and taillights (rear = +z); basic material so they
+  // glow at night instead of going dark with the scene lights
   const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : -4.55);
   const rear = -front;
   for (const x of [-0.6, 0.6]) {
-    g.add(box(0.32, 0.18, 0.06, 0xfff6c8, x, 0.7, front));
-    g.add(box(0.32, 0.18, 0.06, 0xff2a3c, x, 0.7, rear));
+    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }));
+    hl.position.set(x, 0.7, front); g.add(hl);
+    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xff2a3c }));
+    tl.position.set(x, 0.7, rear); g.add(tl);
   }
   // indicators on the rear corners, blinked by the sync loop
   const sigL = box(0.3, 0.18, 0.06, 0xffb020, -0.6, 0.95, rear + 0.04);
@@ -294,13 +313,14 @@ function initThree() {
   scene.background = new THREE.Color(0x87b5e0);
   scene.fog = new THREE.Fog(0x87b5e0, 30, 170);
   camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 400);
-  scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x3a4a2a, 0.95));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.7);
-  sun.position.set(20, 40, 10); scene.add(sun);
+  hemiLight = new THREE.HemisphereLight(0xcfe8ff, 0x3a4a2a, 0.95);
+  scene.add(hemiLight);
+  sunLight = new THREE.DirectionalLight(0xffffff, 0.7);
+  sunLight.position.set(20, 40, 10); scene.add(sunLight);
 
   // road
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 400),
-    new THREE.MeshLambertMaterial({ color: 0x2b3038 }));
+  roadMat = new THREE.MeshLambertMaterial({ color: 0x2b3038 });
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 400), roadMat);
   road.rotation.x = -Math.PI / 2; road.position.set(0, 0, -90); scene.add(road);
   const grassL = new THREE.Mesh(new THREE.PlaneGeometry(60, 400), mat(0x4a7a3a));
   grassL.rotation.x = -Math.PI / 2; grassL.position.set(-37.5, -0.05, -90); scene.add(grassL);
@@ -350,11 +370,52 @@ function initThree() {
   playerMesh = makeCar('sedan', 0xff6a1a);
   scene.add(playerMesh);
 
+  // player headlight beam (night only; intensity set by applyCondition)
+  headlight = new THREE.SpotLight(0xfff2c8, 0, 70, 0.55, 0.4, 1);
+  headlight.position.set(0, 1.2, 0);
+  scene.add(headlight); scene.add(headlight.target);
+  // rain particles (rain only; positions recycled in the loop)
+  const rainGeo = new THREE.BufferGeometry();
+  const rainPos = new Float32Array(700 * 3);
+  for (let i = 0; i < 700; i++) {
+    rainPos[i * 3] = (Math.random() - 0.5) * 50;
+    rainPos[i * 3 + 1] = Math.random() * 16;
+    rainPos[i * 3 + 2] = -80 + Math.random() * 90;
+  }
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  rainPoints = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: 0xbcd6ff, size: 0.18, transparent: true, opacity: 0.75 }));
+  rainPoints.visible = false;
+  scene.add(rainPoints);
+
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+}
+// Sky, fog, lights and road for a condition; also called on the start screen
+// so the menu previews the saved condition (random previews as day).
+function applyCondition(cond) {
+  if (!scene || !hemiLight || !sunLight) return;
+  if (cond === 'night') {
+    scene.background.set(0x0b1226); scene.fog.color.set(0x0b1226); scene.fog.near = 20; scene.fog.far = 120;
+    hemiLight.intensity = 0.25; sunLight.intensity = 0.15;
+    if (roadMat) roadMat.color.set(0x23262c);
+    if (headlight) headlight.intensity = 1.6;
+    if (rainPoints) rainPoints.visible = false;
+  } else if (cond === 'rain') {
+    scene.background.set(0x5a6a7d); scene.fog.color.set(0x5a6a7d); scene.fog.near = 25; scene.fog.far = 130;
+    hemiLight.intensity = 0.6; sunLight.intensity = 0.35;
+    if (roadMat) roadMat.color.set(0x1d2126);
+    if (headlight) headlight.intensity = 0;
+    if (rainPoints) rainPoints.visible = true;
+  } else {
+    scene.background.set(0x87b5e0); scene.fog.color.set(0x87b5e0); scene.fog.near = 30; scene.fog.far = 170;
+    hemiLight.intensity = 0.95; sunLight.intensity = 0.7;
+    if (roadMat) roadMat.color.set(0x2b3038);
+    if (headlight) headlight.intensity = 0;
+    if (rainPoints) rainPoints.visible = false;
+  }
 }
 function syncTrafficMeshes() {
   const alive = new Set(st.traffic);
@@ -369,7 +430,7 @@ function syncTrafficMeshes() {
     }
     const gap = v.s - st.dist;
     mesh.position.set(v.x, 0, -gap);
-    mesh.visible = gap > -25 && gap < 190;
+    mesh.visible = gap > -25 && gap < (st.sightRange || 190);
     const sig = mesh.userData.signals;
     const blinking = (v.signalT > 0 || v.moving) && (Math.floor(st.time * 4) % 2 === 0);
     const toRight = v.targetLane > v.lane;
@@ -392,7 +453,7 @@ function syncPickups() {
     }
     const gap = pk.s - st.dist;
     mesh.position.set(pk.x, 0, -gap);
-    mesh.visible = gap > -25 && gap < 190;
+    mesh.visible = gap > -25 && gap < (st.sightRange || 190);
     mesh.rotation.y = st.time * 2;
   }
 }
@@ -473,13 +534,80 @@ function endGame(finished) {
   renderShop();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
+// Back to the start screen (= the upgrade shop). Mid-run, the run is abandoned:
+// no coins for an unfinished run, but a beaten best score is still saved.
+function goToMenu() {
+  if (restAnim) { restAnim = null; $('restOverlay').classList.add('hidden'); }
+  if (st && st.score > bestScore()) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
+  running = false; cgStop(); engineUpdate(0, false);
+  if (playerMesh) { playerMesh.position.set(0, 0, 0); playerMesh.rotation.set(0, 0, 0); }
+  $('hud').classList.add('hidden'); $('controls').classList.add('hidden'); $('endOverlay').classList.add('hidden');
+  $('startOverlay').classList.remove('hidden');
+  updateBestLine(); renderShop();
+  applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
+}
+
+// ---------- rest-area animation ----------
+// The game pauses while the car turns left, fuel fills, then it merges back.
+// Effects (heal, refill, +250, traffic clear) are applied by TR.tryRest at the
+// end of the animation or on SKIP — the fill bar is the visual for that refill.
+let restAnim = null;
+function startRestAnim() {
+  const stop = TR.openRestStop(st);
+  if (!stop) return false;
+  restAnim = { t: 0, stop, fromX: st.player.x, fromFuel: st.fuel, halfBeep: false };
+  $('restFuelFill').style.width = Math.round((st.fuel / st.maxFuel) * 100) + '%';
+  $('restFuelPct').textContent = Math.round((st.fuel / st.maxFuel) * 100) + '%';
+  $('restOverlay').classList.remove('hidden');
+  beep(600, 0.1, 'sine', 0.12);
+  return true;
+}
+function finishRestAnim() {
+  if (!restAnim) return;
+  restAnim = null;
+  $('restOverlay').classList.add('hidden');
+  if (playerMesh) { playerMesh.position.set(st.player.x, 0, 0); playerMesh.rotation.set(0, 0, 0); }
+  TR.tryRest(st); // toast for the +250/rest event is handled by handleEvents next frame
+}
+function updateRestAnim(dt) {
+  restAnim.t += dt;
+  const t = restAnim.t;
+  const ease = (k) => 1 - Math.pow(1 - k, 2);
+  if (t < 0.8) {
+    // turn left off the toll road
+    const k = ease(t / 0.8);
+    playerMesh.position.x = restAnim.fromX + (-8 - restAnim.fromX) * k;
+    playerMesh.rotation.y = 0.6 * k;
+  } else if (t < 2.6) {
+    // fuel filling
+    playerMesh.position.x = -8; playerMesh.rotation.y = 0.6;
+    const p = (t - 0.8) / 1.8;
+    const pct = Math.round(((restAnim.fromFuel / st.maxFuel) + (1 - restAnim.fromFuel / st.maxFuel) * p) * 100);
+    $('restFuelFill').style.width = pct + '%';
+    $('restFuelPct').textContent = pct + '%';
+    if (p > 0.5 && !restAnim.halfBeep) { restAnim.halfBeep = true; beep(760, 0.1, 'sine', 0.12); }
+  } else if (t < 3.4) {
+    // merge back onto the toll road
+    const k = ease((t - 2.6) / 0.8);
+    playerMesh.position.x = -8 + (st.player.x + 8) * k;
+    playerMesh.rotation.y = 0.6 * (1 - k);
+    $('restFuelFill').style.width = '100%'; $('restFuelPct').textContent = '100%';
+  } else {
+    finishRestAnim();
+  }
+  // keep the car in frame while it pulls off and merges back
+  camera.position.set(playerMesh.position.x * 0.5, 5.4, 9);
+  camera.lookAt(playerMesh.position.x * 0.65, 0.8, -12);
+}
 function startGame(mode) {
   currentMode = TR.ROUTES[mode] ? mode : 'short';
+  restAnim = null; $('restOverlay').classList.add('hidden');
   for (const mesh of trafficMeshes.values()) scene.remove(mesh);
   trafficMeshes.clear();
   for (const mesh of pickupMeshes.values()) scene.remove(mesh);
   pickupMeshes.clear();
-  st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades() });
+  st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition });
+  applyCondition(st.condition);
   running = true;
   $('startOverlay').classList.add('hidden');
   $('endOverlay').classList.add('hidden');
@@ -489,13 +617,13 @@ function startGame(mode) {
 }
 
 // ---------- input ----------
-function lane(dir) { if (running) { TR.moveLane(st, dir); beep(500, 0.06, 'sine', 0.08); } }
-function rest() { if (running && TR.tryRest(st)) { /* event toast handled in loop */ } }
+function lane(dir) { if (running && !restAnim) { TR.moveLane(st, dir); beep(500, 0.06, 'sine', 0.08); } }
+function rest() { if (running && !restAnim) startRestAnim(); }
 $('leftBtn').addEventListener('click', () => lane(-1));
 $('rightBtn').addEventListener('click', () => lane(1));
 $('restBtn').addEventListener('click', rest);
 function holdBtn(el, set) {
-  const on = (e) => { e.preventDefault(); if (running) set(true); };
+  const on = (e) => { e.preventDefault(); if (running && !restAnim) set(true); };
   const off = () => set(false);
   el.addEventListener('pointerdown', on);
   el.addEventListener('pointerup', off);
@@ -505,7 +633,8 @@ function holdBtn(el, set) {
 holdBtn($('brakeBtn'), (on) => TR.setBrake(st, on));
 holdBtn($('nitroBtn'), (on) => TR.setNitro(st, on));
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') lane(-1);
+  if (e.key === 'Escape') { if (restAnim) finishRestAnim(); else if (running) goToMenu(); }
+  else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') lane(-1);
   else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') lane(1);
   else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') TR.setBrake(st, true);
   else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') TR.setNitro(st, true);
@@ -530,7 +659,19 @@ $('c').addEventListener('touchend', (e) => {
 document.querySelectorAll('[data-mode]').forEach((btn) => {
   btn.addEventListener('click', () => startGame(btn.dataset.mode));
 });
+document.querySelectorAll('[data-cond]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    currentCondition = btn.dataset.cond;
+    try { localStorage.setItem('tr_condition', currentCondition); } catch (e) {}
+    updateConditionUI();
+    if (!running) applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
+    beep(500, 0.06, 'sine', 0.08);
+  });
+});
 $('againBtn').addEventListener('click', () => requestMidgameAd(() => startGame(currentMode)));
+$('menuBtn').addEventListener('click', goToMenu);
+$('menuBtn2').addEventListener('click', goToMenu);
+$('restSkipBtn').addEventListener('click', finishRestAnim);
 $('muteBtn').addEventListener('click', () => {
   try { localStorage.setItem('tr_mute', isMuted() ? '0' : '1'); } catch (e) {}
   syncMuteUI();
@@ -548,6 +689,7 @@ function loop(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   if (!renderer) return;
   if (running && st.status === 'play') {
+    if (restAnim) { updateRestAnim(dt); } else {
     TR.step(st, dt);
     handleEvents();
     // scroll world props with player speed
@@ -569,11 +711,26 @@ function loop(now) {
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
     syncPickups();
+    if (headlight && st.condition === 'night') {
+      headlight.position.set(st.player.x, 1.2, 0);
+      headlight.target.position.set(st.player.x, 0.5, -40);
+      headlight.target.updateMatrixWorld();
+    }
+    if (rainPoints && rainPoints.visible) {
+      const pos = rainPoints.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i) - 34 * dt;
+        if (y < 0) { y = 16; pos.setX(i, (Math.random() - 0.5) * 50); pos.setZ(i, -80 + Math.random() * 90); }
+        pos.setY(i, y);
+      }
+      pos.needsUpdate = true;
+    }
     const shake = st.crashT > 0 ? (Math.random() - 0.5) * 0.3 : 0;
     camera.position.set(st.player.x * 0.5 + shake, 5.4, 9);
     camera.lookAt(st.player.x * 0.65, 0.8, -12);
     engineUpdate(st.speed, true);
     updateHUD();
+    }
   } else {
     // idle scene: slow drift so the start screen is not frozen
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
@@ -589,5 +746,6 @@ if (typeof THREE === 'undefined') {
   document.querySelector('[data-i18n="tagline"]').textContent = t('threeMissing');
 } else {
   initThree();
+  applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
   requestAnimationFrame(loop);
 }
