@@ -52,6 +52,7 @@ const I18N = {
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
     missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!',
+    pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
@@ -83,6 +84,7 @@ const I18N = {
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
     missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!',
+    pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
@@ -837,6 +839,7 @@ function handleEvents() {
 }
 function endGame(finished) {
   foldOdometer();
+  paused = false; $('pauseOverlay').classList.add('hidden');
   running = false; cgStop(); engineUpdate(0, false);
   $('hud').classList.add('hidden'); $('controls').classList.add('hidden');
   $('endKicker').textContent = finished ? t('finishSub') : t('overSub');
@@ -873,9 +876,33 @@ function endGame(finished) {
   renderAchievements();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
+// ---------- pause / resume (Fase 2J) ----------
+// Pausing freezes the loop: no logic stepping, no world scroll, no engine
+// hum, no rest-animation progress. Nothing is saved or granted on pause;
+// resume continues the exact same run, so no coins can be lost or gained.
+let paused = false;
+function setPaused(on) {
+  if (!running || st.status !== 'play') return;
+  if (on === paused) return;
+  paused = on;
+  $('pauseOverlay').classList.toggle('hidden', !paused);
+  $('hud').classList.toggle('hidden', paused);
+  $('controls').classList.toggle('hidden', paused);
+  if (paused) {
+    TR.setBrake(st, false); TR.setNitro(st, false);
+    engineUpdate(0, false);
+    beep(500, 0.1, 'sine', 0.15);
+  } else {
+    beep(700, 0.1, 'sine', 0.15);
+  }
+}
+function togglePause() {
+  if (running && st.status === 'play' && !restAnim) setPaused(!paused);
+}
 // Back to the start screen (= the upgrade shop). Mid-run, the run is abandoned:
 // no coins for an unfinished run, but a beaten best score is still saved.
 function goToMenu() {
+  paused = false; $('pauseOverlay').classList.add('hidden');
   if (restAnim) { restAnim = null; $('restOverlay').classList.add('hidden'); }
   if (st && st.score > bestScore()) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
   if (running) foldOdometer();
@@ -955,6 +982,7 @@ function startGame(mode) {
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition, car: loadSelectedCar() });
   refreshPlayerMesh();
   missionToasted = new Set();
+  paused = false; $('pauseOverlay').classList.add('hidden');
   odoRunStart = odoSaved;
   applyCondition(st.condition);
   setLaneMarkings(st.laneCount);
@@ -968,7 +996,7 @@ function startGame(mode) {
 
 // ---------- input ----------
 function lane(dir) {
-  if (!running || restAnim) return;
+  if (!running || restAnim || paused) return;
   // Moving into a roadwork-closed lane is refused with an explanation,
   // instead of silently doing nothing.
   const zone = TR.zoneAt(st, st.dist);
@@ -979,12 +1007,12 @@ function lane(dir) {
   }
   TR.moveLane(st, dir); beep(500, 0.06, 'sine', 0.08);
 }
-function rest() { if (running && !restAnim) startRestAnim(); }
+function rest() { if (running && !restAnim && !paused) startRestAnim(); }
 $('leftBtn').addEventListener('click', () => lane(-1));
 $('rightBtn').addEventListener('click', () => lane(1));
 $('restBtn').addEventListener('click', rest);
 function holdBtn(el, set) {
-  const on = (e) => { e.preventDefault(); if (running && !restAnim) set(true); };
+  const on = (e) => { e.preventDefault(); if (running && !restAnim && !paused) set(true); };
   const off = () => set(false);
   el.addEventListener('pointerdown', on);
   el.addEventListener('pointerup', off);
@@ -994,7 +1022,8 @@ function holdBtn(el, set) {
 holdBtn($('brakeBtn'), (on) => TR.setBrake(st, on));
 holdBtn($('nitroBtn'), (on) => TR.setNitro(st, on));
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { if (restAnim) finishRestAnim(); else if (running) goToMenu(); }
+  if (e.key === 'Escape') { if (paused) setPaused(false); else if (restAnim) finishRestAnim(); else if (running) goToMenu(); }
+  else if (e.key === 'p' || e.key === 'P') togglePause();
   else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') lane(-1);
   else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') lane(1);
   else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') TR.setBrake(st, true);
@@ -1031,6 +1060,9 @@ document.querySelectorAll('[data-cond]').forEach((btn) => {
 });
 $('againBtn').addEventListener('click', () => requestMidgameAd(() => startGame(currentMode)));
 $('menuBtn').addEventListener('click', goToMenu);
+$('pauseBtn').addEventListener('click', togglePause);
+$('resumeBtn').addEventListener('click', () => setPaused(false));
+$('menuBtn3').addEventListener('click', goToMenu);
 $('menuBtn2').addEventListener('click', goToMenu);
 $('restSkipBtn').addEventListener('click', finishRestAnim);
 $('muteBtn').addEventListener('click', () => {
@@ -1049,7 +1081,7 @@ function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   if (!renderer) return;
-  if (running && st.status === 'play') {
+  if (running && !paused && st.status === 'play') {
     if (restAnim) { updateRestAnim(dt); } else {
     TR.step(st, dt);
     handleEvents();
@@ -1104,8 +1136,9 @@ function loop(now) {
     engineUpdate(st.speed, true);
     updateHUD();
     }
-  } else {
+  } else if (!paused) {
     // idle scene: slow drift so the start screen is not frozen
+    // (skipped while paused so the frame stays frozen, not drifting)
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
     camera.position.set(0, 5.4, 9);
     camera.lookAt(0, 0.8, -12);

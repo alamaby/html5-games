@@ -70,7 +70,7 @@
   #startOverlay .best { margin-bottom:8px; }
   #startOverlay .shop { margin-bottom:12px; }
   #startOverlay .moderow { margin-bottom:10px; }
-  #menuBtn { background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.3);
+  #menuBtn, #pauseBtn { background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.3);
              border-radius:8px; padding:6px 10px; font-size:12px; font-weight:800; margin-top:8px; cursor:pointer; pointer-events:auto; }
   #restFuelBar { height:14px; background:rgba(255,255,255,.18); border-radius:99px; overflow:hidden;
                  width:100%; max-width:320px; margin:14px 0 8px; }
@@ -135,6 +135,7 @@
   <div id="prog"><div id="progFill"></div></div>
   <div id="fuelBar"><div id="fuelFill"></div></div>
   <button id="menuBtn" data-i18n="menu">MENU</button>
+  <button id="pauseBtn">⏸</button>
   <div id="sign"></div>
   <div id="speedo">
     <svg viewBox="0 0 120 120" width="120" height="120">
@@ -230,6 +231,14 @@
     <div id="restInfo" data-i18n="restInfo">HP penuh + bensin penuh (+250)</div>
     <button class="bigbtn" id="restSkipBtn" data-i18n="restSkip">SKIP ⏭</button>
   </div>
+</div>
+
+<div class="overlay hidden" id="pauseOverlay">
+  <div class="kicker" data-i18n="pauseTitle">JEDA</div>
+  <h1 class="title" style="font-size:clamp(28px,8vw,44px)" data-i18n="pauseSub">Run dijeda</h1>
+  <p class="subtitle" data-i18n="pauseNote">Tidak ada koin yang hilang — lanjutkan kapan saja.</p>
+  <button class="bigbtn" id="resumeBtn" data-i18n="resume">▶ LANJUT</button>
+  <button class="bigbtn secondary" id="menuBtn3" data-i18n="menu" style="margin-top:12px">MENU</button>
 </div>
 
 <div class="foot">TOL RUSH 3D • MVP</div>
