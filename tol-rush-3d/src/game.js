@@ -53,6 +53,7 @@ const I18N = {
     missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
+    shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
@@ -85,6 +86,7 @@ const I18N = {
     missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
+    shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
@@ -451,6 +453,7 @@ let renderer, scene, camera, playerMesh;
 let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoints = null;
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
+let shieldMesh = null; // translucent bubble around the player while shielded
 const roadworkMeshes = new Map(); // zone object -> group
 let coneGeo = null, coneMat = null;
 function buildRoadworkGroup(zone) {
@@ -661,6 +664,10 @@ function initThree() {
 
   { const _sc = TR.CARS[loadSelectedCar()]; playerMesh = makeCar(_sc.kind, _sc.color); }
   scene.add(playerMesh);
+  // shield bubble (Fase 2K): shown only while st.shield, synced in the loop
+  shieldMesh = new THREE.Mesh(new THREE.SphereGeometry(1.9, 20, 14),
+    new THREE.MeshBasicMaterial({ color: 0x37e0ff, transparent: true, opacity: 0.22, depthWrite: false }));
+  shieldMesh.visible = false; scene.add(shieldMesh);
 
   // player headlight beam (night only; intensity set by applyCondition)
   headlight = new THREE.SpotLight(0xfff2c8, 0, 70, 0.55, 0.4, 1);
@@ -739,8 +746,15 @@ function syncPickups() {
     let mesh = pickupMeshes.get(pk);
     if (!mesh) {
       mesh = new THREE.Group();
-      mesh.add(box(0.9, 0.7, 0.5, 0xffc21a, 0, 0.55, 0));
-      mesh.add(box(0.4, 0.25, 0.3, 0xd92b2b, 0, 1.0, 0));
+      if (pk.kind === 'shield') {
+        // cyan octahedron, floats above the road so it reads as special
+        const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.8),
+          new THREE.MeshBasicMaterial({ color: 0x37e0ff, transparent: true, opacity: 0.9 }));
+        m.position.y = 0.9; mesh.add(m);
+      } else {
+        mesh.add(box(0.9, 0.7, 0.5, 0xffc21a, 0, 0.55, 0));
+        mesh.add(box(0.4, 0.25, 0.3, 0xd92b2b, 0, 1.0, 0));
+      }
       scene.add(mesh); pickupMeshes.set(pk, mesh);
     }
     const gap = pk.s - st.dist;
@@ -753,6 +767,7 @@ function syncPickups() {
 // ---------- HUD / overlays ----------
 function updateHUD() {
   $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, st.maxHp - st.hp));
+  $('shieldLine').classList.toggle('hidden', !st.shield);
   $('score').textContent = st.score.toLocaleString('id-ID');
   // speedometer: needle 0-180 km/h over a 240° sweep, plus digital readout
   const kmh = Math.round(st.speed * 3.6);
@@ -825,6 +840,12 @@ function handleEvents() {
       toast(t('convoyToast')); beep(700, 0.15, 'square', 0.15);
     } else if (e.t === 'nudged') {
       toast(t('nudgedToast')); beep(500, 0.15, 'square', 0.15);
+    } else if (e.t === 'shield') {
+      toast(t('shieldToast')); beep(880, 0.12, 'sine', 0.2); setTimeout(() => beep(1320, 0.15, 'sine', 0.2), 130);
+    } else if (e.t === 'shieldDup') {
+      toast(t('shieldDup')); beep(880, 0.12, 'sine', 0.2);
+    } else if (e.t === 'shieldSave') {
+      toast(t('shieldSaveToast')); beep(880, 0.15, 'sine', 0.25); setTimeout(() => beep(1320, 0.2, 'sine', 0.25), 140);
     } else if (e.t === 'fuel') {
       toast(t('fuelPlus')); beep(880, 0.12, 'sine', 0.2);
     } else if (e.t === 'fuelLow') {
@@ -863,6 +884,7 @@ function endGame(finished) {
     (isNewBest ? ' ★' : '') + '<br><b>' + t('dist') + ':</b> ' +
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
+    (st.shieldSaves ? '<br><b>🛡:</b> ' + st.shieldSaves + 'x' : '') +
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
     (missionNew.length ? '<br><b>' + t('missionLabel') + ':</b> ' + missionNew.map(missionName).join(', ') + ' (+' + missionCoins + ')' : '') +
     (achNew.length ? '<br><b>' + t('achLabel') + ':</b> ' + achNew.map((k) => '🏆 ' + achName(k)).join(', ') + ' (+' + achCoins + ')' : '') +
@@ -1109,8 +1131,12 @@ function loop(now) {
         lanesSignMat.map = lanesTex[nextSeg.lanes]; lanesSignMat.needsUpdate = true;
       }
     }
-    // player mesh
+    // player mesh (+ shield bubble while shielded)
     playerMesh.position.set(st.player.x, 0, 0);
+    if (shieldMesh) {
+      shieldMesh.visible = !!st.shield;
+      shieldMesh.position.set(st.player.x, 1.0, 0);
+    }
     playerMesh.rotation.y = (st.laneXs[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
@@ -1139,6 +1165,7 @@ function loop(now) {
   } else if (!paused) {
     // idle scene: slow drift so the start screen is not frozen
     // (skipped while paused so the frame stays frozen, not drifting)
+    if (shieldMesh) shieldMesh.visible = false;
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
     camera.position.set(0, 5.4, 9);
     camera.lookAt(0, 0.8, -12);

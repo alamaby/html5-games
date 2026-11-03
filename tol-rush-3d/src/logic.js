@@ -46,6 +46,8 @@ const TR = {
   ROADWORK_LEN: 220, ROADWORK_GAP_MIN: 1500, ROADWORK_GAP_MAX: 2600,
   ROADWORK_FIRST: 1200, ROADWORK_WARN: 300,
   CONVOY_FIRST: 1800, CONVOY_GAP_MIN: 2500, CONVOY_GAP_MAX: 4500,
+  // Shield pickup (Fase 2K): rare, absorbs exactly one crash, never stacks.
+  SHIELD_FIRST: 900, SHIELD_GAP_MIN: 2500, SHIELD_GAP_MAX: 4500, SHIELD_DUP_BONUS: 25,
   // Cars: cost in coins; speed/move/fuel are multipliers on the base values,
   // hp is bonus max HP on top of the Armor upgrade.
   CARS: {
@@ -100,6 +102,8 @@ const TR = {
       maxFuel,
       pickups: [],
       nextPickupAt: 700 + Math.random() * 300,
+      shield: false, shieldPickups: 0, shieldSaves: 0,
+      nextShieldAt: TR.SHIELD_FIRST + Math.random() * 300,
       fuelLow: false,
       fuelCritical: false,
       score: 0,
@@ -412,11 +416,32 @@ const TR = {
         const pkZone = TR.zoneAt(st, s);
         const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane);
         if (!blocked) {
-          st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false });
+          st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false, kind: 'fuel' });
           break;
         }
       }
       st.nextPickupAt = st.dist + 900 + Math.random() * 600;
+    }
+
+    // Shield pickup spawner (Fase 2K): separate from fuel so it never
+    // starves the fuel economy, and at most one live shield on the road.
+    // Same fairness guards as fuel: never on a car, never in a closed lane.
+    if (st.dist >= st.nextShieldAt) {
+      const hasLiveShield = st.pickups.some((pk) => !pk.taken && pk.kind === 'shield');
+      if (!hasLiveShield) {
+        const startLane = Math.floor(Math.random() * st.laneCount);
+        for (let k = 0; k < st.laneCount; k++) {
+          const lane = (startLane + k) % st.laneCount;
+          const s = st.dist + 180 + Math.random() * 60;
+          const pkZone = TR.zoneAt(st, s);
+          const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane);
+          if (!blocked) {
+            st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false, kind: 'shield' });
+            break;
+          }
+        }
+      }
+      st.nextShieldAt = st.dist + TR.SHIELD_GAP_MIN + Math.random() * (TR.SHIELD_GAP_MAX - TR.SHIELD_GAP_MIN);
     }
 
     // Roadwork spawner: zones are created 400 m ahead so the 300 m warning
@@ -482,6 +507,17 @@ const TR = {
       const gap = v.s - st.dist;
       const dx = Math.abs(st.player.x - v.x);
       if (st.invuln <= 0 && Math.abs(gap) < (v.len / 2 + 2.2) && dx < 1.7) {
+        if (st.shield) {
+          // Shield absorbs exactly one crash: no HP loss, no crash count,
+          // combo survives. Brief shake + invulnerability so the same car
+          // cannot hit twice; the car is dropped behind like a real crash.
+          st.shield = false; st.shieldSaves += 1;
+          st.crashT = 0.6; st.invuln = TR.CRASH_INVULN;
+          st.events.push({ t: 'shieldSave' });
+          v.passed = true;
+          v.s = st.dist - 100;
+          continue;
+        }
         st.hp -= 1;
         st.crashes += 1;
         st.crashT = 1.0;
@@ -512,16 +548,23 @@ const TR = {
     }
     st.traffic = st.traffic.filter((v) => (v.s - st.dist) > -30);
 
-    // Fuel pickup collection: same lane, close gap.
+    // Pickup collection: same lane, close gap. Fuel restores fuel;
+    // a shield arms (once — a second shield while armed is +25 instead).
     for (const pk of st.pickups) {
       if (pk.taken) continue;
       const gap = pk.s - st.dist;
       if (Math.abs(gap) < 4 && Math.abs(st.player.x - pk.x) < 1.7) {
         pk.taken = true;
-        st.pickupCount += 1;
-        st.fuel = Math.min(st.maxFuel, st.fuel + TR.FUEL_PICKUP);
-        st.bonus += 25;
-        st.events.push({ t: 'fuel', fuel: st.fuel });
+        if (pk.kind === 'shield') {
+          st.shieldPickups += 1;
+          if (st.shield) { st.bonus += TR.SHIELD_DUP_BONUS; st.events.push({ t: 'shieldDup' }); }
+          else { st.shield = true; st.events.push({ t: 'shield' }); }
+        } else {
+          st.pickupCount += 1;
+          st.fuel = Math.min(st.maxFuel, st.fuel + TR.FUEL_PICKUP);
+          st.bonus += 25;
+          st.events.push({ t: 'fuel', fuel: st.fuel });
+        }
       }
     }
     st.pickups = st.pickups.filter((pk) => !pk.taken && (pk.s - st.dist) > -30);

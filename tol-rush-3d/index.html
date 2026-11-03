@@ -130,7 +130,7 @@
 <div id="c"></div>
 
 <div id="hud" class="hidden">
-  <div class="hudrow"><span id="hp">♥♥♥</span><span id="score">0</span></div>
+  <div class="hudrow"><span id="hp">♥♥♥</span><span id="score">0</span><span id="shieldLine" class="hidden">🛡</span></div>
   <div class="hudrow"><span id="dist"></span><span id="laneLabel"></span><span id="comboLabel"></span></div>
   <div id="prog"><div id="progFill"></div></div>
   <div id="fuelBar"><div id="fuelFill"></div></div>
@@ -292,6 +292,8 @@ const TR = {
   ROADWORK_LEN: 220, ROADWORK_GAP_MIN: 1500, ROADWORK_GAP_MAX: 2600,
   ROADWORK_FIRST: 1200, ROADWORK_WARN: 300,
   CONVOY_FIRST: 1800, CONVOY_GAP_MIN: 2500, CONVOY_GAP_MAX: 4500,
+  // Shield pickup (Fase 2K): rare, absorbs exactly one crash, never stacks.
+  SHIELD_FIRST: 900, SHIELD_GAP_MIN: 2500, SHIELD_GAP_MAX: 4500, SHIELD_DUP_BONUS: 25,
   // Cars: cost in coins; speed/move/fuel are multipliers on the base values,
   // hp is bonus max HP on top of the Armor upgrade.
   CARS: {
@@ -346,6 +348,8 @@ const TR = {
       maxFuel,
       pickups: [],
       nextPickupAt: 700 + Math.random() * 300,
+      shield: false, shieldPickups: 0, shieldSaves: 0,
+      nextShieldAt: TR.SHIELD_FIRST + Math.random() * 300,
       fuelLow: false,
       fuelCritical: false,
       score: 0,
@@ -658,11 +662,32 @@ const TR = {
         const pkZone = TR.zoneAt(st, s);
         const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane);
         if (!blocked) {
-          st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false });
+          st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false, kind: 'fuel' });
           break;
         }
       }
       st.nextPickupAt = st.dist + 900 + Math.random() * 600;
+    }
+
+    // Shield pickup spawner (Fase 2K): separate from fuel so it never
+    // starves the fuel economy, and at most one live shield on the road.
+    // Same fairness guards as fuel: never on a car, never in a closed lane.
+    if (st.dist >= st.nextShieldAt) {
+      const hasLiveShield = st.pickups.some((pk) => !pk.taken && pk.kind === 'shield');
+      if (!hasLiveShield) {
+        const startLane = Math.floor(Math.random() * st.laneCount);
+        for (let k = 0; k < st.laneCount; k++) {
+          const lane = (startLane + k) % st.laneCount;
+          const s = st.dist + 180 + Math.random() * 60;
+          const pkZone = TR.zoneAt(st, s);
+          const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane);
+          if (!blocked) {
+            st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false, kind: 'shield' });
+            break;
+          }
+        }
+      }
+      st.nextShieldAt = st.dist + TR.SHIELD_GAP_MIN + Math.random() * (TR.SHIELD_GAP_MAX - TR.SHIELD_GAP_MIN);
     }
 
     // Roadwork spawner: zones are created 400 m ahead so the 300 m warning
@@ -728,6 +753,17 @@ const TR = {
       const gap = v.s - st.dist;
       const dx = Math.abs(st.player.x - v.x);
       if (st.invuln <= 0 && Math.abs(gap) < (v.len / 2 + 2.2) && dx < 1.7) {
+        if (st.shield) {
+          // Shield absorbs exactly one crash: no HP loss, no crash count,
+          // combo survives. Brief shake + invulnerability so the same car
+          // cannot hit twice; the car is dropped behind like a real crash.
+          st.shield = false; st.shieldSaves += 1;
+          st.crashT = 0.6; st.invuln = TR.CRASH_INVULN;
+          st.events.push({ t: 'shieldSave' });
+          v.passed = true;
+          v.s = st.dist - 100;
+          continue;
+        }
         st.hp -= 1;
         st.crashes += 1;
         st.crashT = 1.0;
@@ -758,16 +794,23 @@ const TR = {
     }
     st.traffic = st.traffic.filter((v) => (v.s - st.dist) > -30);
 
-    // Fuel pickup collection: same lane, close gap.
+    // Pickup collection: same lane, close gap. Fuel restores fuel;
+    // a shield arms (once — a second shield while armed is +25 instead).
     for (const pk of st.pickups) {
       if (pk.taken) continue;
       const gap = pk.s - st.dist;
       if (Math.abs(gap) < 4 && Math.abs(st.player.x - pk.x) < 1.7) {
         pk.taken = true;
-        st.pickupCount += 1;
-        st.fuel = Math.min(st.maxFuel, st.fuel + TR.FUEL_PICKUP);
-        st.bonus += 25;
-        st.events.push({ t: 'fuel', fuel: st.fuel });
+        if (pk.kind === 'shield') {
+          st.shieldPickups += 1;
+          if (st.shield) { st.bonus += TR.SHIELD_DUP_BONUS; st.events.push({ t: 'shieldDup' }); }
+          else { st.shield = true; st.events.push({ t: 'shield' }); }
+        } else {
+          st.pickupCount += 1;
+          st.fuel = Math.min(st.maxFuel, st.fuel + TR.FUEL_PICKUP);
+          st.bonus += 25;
+          st.events.push({ t: 'fuel', fuel: st.fuel });
+        }
       }
     }
     st.pickups = st.pickups.filter((pk) => !pk.taken && (pk.s - st.dist) > -30);
@@ -878,6 +921,7 @@ const I18N = {
     missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
+    shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
@@ -910,6 +954,7 @@ const I18N = {
     missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
+    shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
@@ -1276,6 +1321,7 @@ let renderer, scene, camera, playerMesh;
 let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoints = null;
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
+let shieldMesh = null; // translucent bubble around the player while shielded
 const roadworkMeshes = new Map(); // zone object -> group
 let coneGeo = null, coneMat = null;
 function buildRoadworkGroup(zone) {
@@ -1486,6 +1532,10 @@ function initThree() {
 
   { const _sc = TR.CARS[loadSelectedCar()]; playerMesh = makeCar(_sc.kind, _sc.color); }
   scene.add(playerMesh);
+  // shield bubble (Fase 2K): shown only while st.shield, synced in the loop
+  shieldMesh = new THREE.Mesh(new THREE.SphereGeometry(1.9, 20, 14),
+    new THREE.MeshBasicMaterial({ color: 0x37e0ff, transparent: true, opacity: 0.22, depthWrite: false }));
+  shieldMesh.visible = false; scene.add(shieldMesh);
 
   // player headlight beam (night only; intensity set by applyCondition)
   headlight = new THREE.SpotLight(0xfff2c8, 0, 70, 0.55, 0.4, 1);
@@ -1564,8 +1614,15 @@ function syncPickups() {
     let mesh = pickupMeshes.get(pk);
     if (!mesh) {
       mesh = new THREE.Group();
-      mesh.add(box(0.9, 0.7, 0.5, 0xffc21a, 0, 0.55, 0));
-      mesh.add(box(0.4, 0.25, 0.3, 0xd92b2b, 0, 1.0, 0));
+      if (pk.kind === 'shield') {
+        // cyan octahedron, floats above the road so it reads as special
+        const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.8),
+          new THREE.MeshBasicMaterial({ color: 0x37e0ff, transparent: true, opacity: 0.9 }));
+        m.position.y = 0.9; mesh.add(m);
+      } else {
+        mesh.add(box(0.9, 0.7, 0.5, 0xffc21a, 0, 0.55, 0));
+        mesh.add(box(0.4, 0.25, 0.3, 0xd92b2b, 0, 1.0, 0));
+      }
       scene.add(mesh); pickupMeshes.set(pk, mesh);
     }
     const gap = pk.s - st.dist;
@@ -1578,6 +1635,7 @@ function syncPickups() {
 // ---------- HUD / overlays ----------
 function updateHUD() {
   $('hp').textContent = '♥'.repeat(Math.max(0, st.hp)) + '♡'.repeat(Math.max(0, st.maxHp - st.hp));
+  $('shieldLine').classList.toggle('hidden', !st.shield);
   $('score').textContent = st.score.toLocaleString('id-ID');
   // speedometer: needle 0-180 km/h over a 240° sweep, plus digital readout
   const kmh = Math.round(st.speed * 3.6);
@@ -1650,6 +1708,12 @@ function handleEvents() {
       toast(t('convoyToast')); beep(700, 0.15, 'square', 0.15);
     } else if (e.t === 'nudged') {
       toast(t('nudgedToast')); beep(500, 0.15, 'square', 0.15);
+    } else if (e.t === 'shield') {
+      toast(t('shieldToast')); beep(880, 0.12, 'sine', 0.2); setTimeout(() => beep(1320, 0.15, 'sine', 0.2), 130);
+    } else if (e.t === 'shieldDup') {
+      toast(t('shieldDup')); beep(880, 0.12, 'sine', 0.2);
+    } else if (e.t === 'shieldSave') {
+      toast(t('shieldSaveToast')); beep(880, 0.15, 'sine', 0.25); setTimeout(() => beep(1320, 0.2, 'sine', 0.25), 140);
     } else if (e.t === 'fuel') {
       toast(t('fuelPlus')); beep(880, 0.12, 'sine', 0.2);
     } else if (e.t === 'fuelLow') {
@@ -1688,6 +1752,7 @@ function endGame(finished) {
     (isNewBest ? ' ★' : '') + '<br><b>' + t('dist') + ':</b> ' +
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
+    (st.shieldSaves ? '<br><b>🛡:</b> ' + st.shieldSaves + 'x' : '') +
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
     (missionNew.length ? '<br><b>' + t('missionLabel') + ':</b> ' + missionNew.map(missionName).join(', ') + ' (+' + missionCoins + ')' : '') +
     (achNew.length ? '<br><b>' + t('achLabel') + ':</b> ' + achNew.map((k) => '🏆 ' + achName(k)).join(', ') + ' (+' + achCoins + ')' : '') +
@@ -1934,8 +1999,12 @@ function loop(now) {
         lanesSignMat.map = lanesTex[nextSeg.lanes]; lanesSignMat.needsUpdate = true;
       }
     }
-    // player mesh
+    // player mesh (+ shield bubble while shielded)
     playerMesh.position.set(st.player.x, 0, 0);
+    if (shieldMesh) {
+      shieldMesh.visible = !!st.shield;
+      shieldMesh.position.set(st.player.x, 1.0, 0);
+    }
     playerMesh.rotation.y = (st.laneXs[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
@@ -1964,6 +2033,7 @@ function loop(now) {
   } else if (!paused) {
     // idle scene: slow drift so the start screen is not frozen
     // (skipped while paused so the frame stays frozen, not drifting)
+    if (shieldMesh) shieldMesh.visible = false;
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
     camera.position.set(0, 5.4, 9);
     camera.lookAt(0, 0.8, -12);

@@ -478,5 +478,61 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   ok('convoy generator advanced', cv.nextConvoyAt > 100);
 }
 
+// Shield pickup (Fase 2K): arms on pickup, no stacking, absorbs one crash
+{
+  const st = TR.createGame(); quiet(st);
+  st.nextPickupAt = 99999; st.nextShieldAt = 99999;
+  st.pickups.push({ lane: 1, s: st.dist + 2, x: 0, taken: false, kind: 'shield' });
+  TR.step(st, 1 / 60);
+  eq('shield pickup arms shield', st.shield, true);
+  eq('shield pickup counted', st.shieldPickups, 1);
+  ok('shield event fired', st.events.some((e) => e.t === 'shield'));
+  const bonusBefore = st.bonus;
+  st.pickups.push({ lane: 1, s: st.dist + 2, x: 0, taken: false, kind: 'shield' });
+  TR.step(st, 1 / 60);
+  eq('second shield does not stack', st.shield, true);
+  eq('second shield pays +25 instead', st.bonus, bonusBefore + TR.SHIELD_DUP_BONUS);
+  ok('shieldDup event fired', st.events.some((e) => e.t === 'shieldDup'));
+
+  // shield absorbs a crash: no HP loss, no crash count, combo survives
+  st.combo = 3; st.invuln = 0;
+  const v = TR.spawnVehicle(st, { lane: 1, gapAhead: 3, kind: 'sedan', speed: 15 });
+  v.s = st.dist + 1;
+  TR.step(st, 1 / 60);
+  eq('shield save keeps HP', st.hp, 3);
+  eq('shield save is not a crash', st.crashes, 0);
+  eq('shield consumed', st.shield, false);
+  eq('shield save counted', st.shieldSaves, 1);
+  eq('shield save keeps combo', st.combo, 3);
+  ok('shieldSave event fired', st.events.some((e) => e.t === 'shieldSave'));
+  // the next crash, unshielded, costs HP again
+  st.invuln = 0;
+  const v2 = TR.spawnVehicle(st, { lane: 1, gapAhead: 3, kind: 'sedan', speed: 15 });
+  v2.s = st.dist + 1;
+  TR.step(st, 1 / 60);
+  eq('unshielded crash costs HP', st.hp, 2);
+}
+
+// Shield spawner: rare, single live shield, never in a closed lane
+{
+  const st = TR.createGame(); quiet(st);
+  st.nextPickupAt = 99999; st.nextShieldAt = st.dist;
+  TR.step(st, 1 / 60);
+  const shields = st.pickups.filter((pk) => pk.kind === 'shield');
+  eq('one shield spawned', shields.length, 1);
+  ok('shield generator advanced 2.5 km+', st.nextShieldAt >= st.dist + TR.SHIELD_GAP_MIN);
+  st.nextShieldAt = st.dist; // generator fires again while one is live
+  TR.step(st, 1 / 60);
+  eq('no duplicate live shield', st.pickups.filter((pk) => pk.kind === 'shield').length, 1);
+
+  const zw = TR.createGame(); quiet(zw);
+  zw.nextPickupAt = 99999; zw.nextShieldAt = zw.dist;
+  zw.roadworks.push({ at: zw.dist + 180, len: 220, lane: 1 }); // closes lane 1 across the spawn window
+  TR.step(zw, 1 / 60);
+  const zwShield = zw.pickups.find((pk) => pk.kind === 'shield');
+  ok('shield spawned despite closed lane', !!zwShield);
+  ok('shield avoids closed lane', zwShield && zwShield.lane !== 1);
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
