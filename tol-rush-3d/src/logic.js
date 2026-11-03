@@ -41,6 +41,11 @@ const TR = {
   FUEL_LIMP_SPEED: 8,       // crawl speed on an empty tank (not instant death)
   UPGRADE_COSTS: [60, 120, 200, 300], // per level 1..3, same for every track
   UPGRADE_MAX: 3,
+  // Roadworks + convoys (Fase 2I): a roadwork zone closes ONE lane over a
+  // stretch; convoys are slow truck/bus groups leaving exactly one gap lane.
+  ROADWORK_LEN: 220, ROADWORK_GAP_MIN: 1500, ROADWORK_GAP_MAX: 2600,
+  ROADWORK_FIRST: 1200, ROADWORK_WARN: 300,
+  CONVOY_FIRST: 1800, CONVOY_GAP_MIN: 2500, CONVOY_GAP_MAX: 4500,
   // Cars: cost in coins; speed/move/fuel are multipliers on the base values,
   // hp is bonus max HP on top of the Armor upgrade.
   CARS: {
@@ -110,6 +115,9 @@ const TR = {
       traffic: [],
       spawnT: 1.2,
       restStops: route.rests.map((at) => ({ at, state: 'upcoming' })),
+      roadworks: [],
+      nextRoadworkAt: TR.ROADWORK_FIRST,
+      nextConvoyAt: TR.CONVOY_FIRST,
       crashT: 0,
       invuln: 0,
       events: [],
@@ -150,12 +158,25 @@ const TR = {
 
   laneX(lane) { return TR.LANES[lane]; },
 
+  // Roadwork zone covering position s, or null. A zone only counts where
+  // its closed lane still exists in the lane layout at s (a segment line
+  // inside a zone can shrink the road below the closed lane's index).
+  zoneAt(st, s) {
+    return st.roadworks.find((z) => s >= z.at && s < z.at + z.len && z.lane < TR.laneCountAt(st, s)) || null;
+  },
+  nextRoadwork(st) {
+    return st.roadworks.find((z) => z.at > st.dist) || null;
+  },
+
   moveLane(st, dir) {
     if (st.status !== 'play') return false;
     const p = st.player;
     if (p.moveT < 1) return false; // already snapping; input is short (0.22 s)
     const next = Math.max(0, Math.min(st.laneCount - 1, p.targetLane + dir));
     if (next === p.targetLane) return false;
+    // Cannot move into a lane closed by roadworks at the player's position.
+    const zone = TR.zoneAt(st, st.dist);
+    if (zone && next === zone.lane) return false;
     p.startX = p.x;
     p.targetLane = next;
     p.moveT = 0;
@@ -186,18 +207,27 @@ const TR = {
   // lanes other than `lane` occupied within 25 metres? (2 lanes: the other
   // lane alone is a wall; 4 lanes: all three others must be blocked.)
   wallAt(st, s, lane, exclude) {
+    // Open lanes at s: a roadwork-closed lane is neither an escape lane nor
+    // an occupied lane for fairness purposes.
+    const zone = TR.zoneAt(st, s);
+    const lanes = TR.laneCountAt(st, s);
+    const openCount = zone ? lanes - 1 : lanes;
     const occupied = new Set();
     for (const v of st.traffic) {
       if (v === exclude) continue;
+      if (zone && v.lane === zone.lane) continue;
       if (Math.abs(v.s - s) <= 25 && v.lane !== lane) occupied.add(v.lane);
       // A car mid-change also occupies its target lane for fairness purposes.
-      if (v.moving && Math.abs(v.s - s) <= 25 && v.targetLane !== lane) occupied.add(v.targetLane);
+      if (v.moving && Math.abs(v.s - s) <= 25 && v.targetLane !== lane && !(zone && v.targetLane === zone.lane)) occupied.add(v.targetLane);
     }
-    return occupied.size >= st.laneCount - 1;
+    return occupied.size >= openCount - 1;
   },
 
   canChangeLane(st, v, target) {
     if (target < 0 || target > st.laneCount - 1 || target === v.lane) return false;
+    // Sedans never change into a roadwork-closed lane.
+    const zone = TR.zoneAt(st, v.s);
+    if (zone && target === zone.lane) return false;
     for (const o of st.traffic) {
       if (o === v) continue;
       if (o.lane === target && Math.abs(o.s - v.s) < 45) return false;
@@ -218,6 +248,9 @@ const TR = {
     const lane = o.lane !== undefined ? o.lane : Math.floor(Math.random() * st.laneCount);
     const gapAhead = o.gapAhead !== undefined ? o.gapAhead : 180 + Math.random() * 80;
     const s = st.dist + gapAhead;
+    // Never spawn traffic inside a roadwork-closed lane.
+    const zoneAtS = TR.zoneAt(st, s);
+    if (zoneAtS && lane === zoneAtS.lane) return null;
     for (const v of st.traffic) {
       if (v.lane === lane && Math.abs(v.s - s) < 40) return null;
       if (v.moving && v.targetLane === lane && Math.abs(v.s - s) < 40) return null;
@@ -318,6 +351,21 @@ const TR = {
       if (p.moveT >= 1) p.lane = p.targetLane;
     }
 
+    // Entering a roadwork zone while sitting in the closed lane: auto-nudge
+    // to the nearest open lane. The 300 m warning gave time to move first,
+    // so this only fires for players who ignored it (or were mid-change).
+    const zoneNow = TR.zoneAt(st, st.dist);
+    if (zoneNow && p.lane === zoneNow.lane && p.targetLane === zoneNow.lane) {
+      let best = -1, bestD = 99;
+      for (let l = 0; l < st.laneCount; l++) {
+        if (l !== zoneNow.lane && Math.abs(l - zoneNow.lane) < bestD) { best = l; bestD = Math.abs(l - zoneNow.lane); }
+      }
+      if (best >= 0) {
+        p.lane = best; p.targetLane = best; p.x = st.laneXs[best]; p.moveT = 1;
+        st.events.push({ t: 'nudged', lane: best });
+      }
+    }
+
     // Rest-area windows (one per stop; endless mode appends new stops).
     for (const stop of st.restStops) {
       if (stop.state === 'upcoming' && st.dist > stop.at + TR.REST_CLOSE_AFTER) {
@@ -354,19 +402,54 @@ const TR = {
       st.spawnT = TR.spawnInterval(st.dist) * (0.8 + Math.random() * 0.4);
     }
 
-    // Fuel pickup spawner: never on top of a car in the same lane.
+    // Fuel pickup spawner: never on top of a car in the same lane, and
+    // never inside a roadwork-closed lane (the player cannot enter it).
     if (st.dist >= st.nextPickupAt) {
       const startLane = Math.floor(Math.random() * st.laneCount);
       for (let k = 0; k < st.laneCount; k++) {
         const lane = (startLane + k) % st.laneCount;
         const s = st.dist + 180 + Math.random() * 60;
-        const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25);
+        const pkZone = TR.zoneAt(st, s);
+        const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane);
         if (!blocked) {
           st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false });
           break;
         }
       }
       st.nextPickupAt = st.dist + 900 + Math.random() * 600;
+    }
+
+    // Roadwork spawner: zones are created 400 m ahead so the 300 m warning
+    // always precedes them. Only where the road has >= 3 lanes (closing one
+    // must leave at least 2 open), and only if the whole zone fits before
+    // a mission route's exit.
+    if (st.dist + 400 >= st.nextRoadworkAt) {
+      const at = st.nextRoadworkAt;
+      const lanes = TR.laneCountAt(st, at);
+      const fits = st.mode === 'endless' || at + TR.ROADWORK_LEN < st.routeLen;
+      if (lanes >= 3 && fits) {
+        st.roadworks.push({ at, len: TR.ROADWORK_LEN, lane: Math.floor(Math.random() * lanes) });
+      }
+      st.nextRoadworkAt = at + TR.ROADWORK_LEN + TR.ROADWORK_GAP_MIN + Math.random() * (TR.ROADWORK_GAP_MAX - TR.ROADWORK_GAP_MIN);
+    }
+    st.roadworks = st.roadworks.filter((z) => z.at + z.len > st.dist - 50);
+
+    // Convoy spawner: slow trucks/buses in every lane except one gap lane.
+    // Trucks and buses never change lanes, so the formation holds.
+    if (st.dist + (st.sightRange || 190) >= st.nextConvoyAt) {
+      const at = st.nextConvoyAt;
+      const lanes = TR.laneCountAt(st, at);
+      const fits = st.mode === 'endless' || at < st.routeLen - 100;
+      if (lanes >= 2 && fits) {
+        const gapLane = Math.floor(Math.random() * lanes);
+        for (let l = 0; l < lanes; l++) {
+          if (l === gapLane) continue;
+          const v = TR.spawnVehicle(st, { lane: l, gapAhead: at - st.dist + (Math.random() * 20 - 10), kind: Math.random() < 0.6 ? 'truck' : 'bus', speed: 11 + Math.random() * 2 });
+          if (v) v.convoy = true;
+        }
+        st.events.push({ t: 'convoy', at });
+      }
+      st.nextConvoyAt = at + TR.CONVOY_GAP_MIN + Math.random() * (TR.CONVOY_GAP_MAX - TR.CONVOY_GAP_MIN);
     }
 
     // Traffic update, lane changes, collisions, overtakes.

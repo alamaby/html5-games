@@ -51,6 +51,7 @@ const I18N = {
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
     missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai',
+    roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
@@ -81,6 +82,7 @@ const I18N = {
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
     missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete',
+    roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
@@ -447,6 +449,54 @@ let renderer, scene, camera, playerMesh;
 let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoints = null;
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
+const roadworkMeshes = new Map(); // zone object -> group
+let coneGeo = null, coneMat = null;
+function buildRoadworkGroup(zone) {
+  // Two rows of cones flanking the closed lane, plus a striped barrier
+  // board across the lane entrance. Group origin = zone start; children
+  // extend backwards (negative z = ahead of the player).
+  if (!coneGeo) coneGeo = new THREE.ConeGeometry(0.35, 0.9, 10);
+  if (!coneMat) coneMat = new THREE.MeshLambertMaterial({ color: 0xff6a1a });
+  const g = new THREE.Group();
+  const laneX = st.laneXs[zone.lane];
+  const step = 15, count = Math.floor(zone.len / step);
+  for (let k = 0; k <= count; k++) {
+    for (const side of [-1.7, 1.7]) {
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.position.set(laneX + side, 0.45, -k * step);
+      g.add(cone);
+    }
+  }
+  g.add(box(3.2, 0.5, 0.15, 0xffc21a, laneX, 0.9, 0)); // barrier board
+  g.add(box(0.15, 0.9, 0.15, 0x223044, laneX - 1.5, 0.45, 0));
+  g.add(box(0.15, 0.9, 0.15, 0x223044, laneX + 1.5, 0.45, 0));
+  return g;
+}
+function syncRoadworkMeshes() {
+  const sight = st.sightRange || 190;
+  for (const [zone, group] of roadworkMeshes) {
+    if (!st.roadworks.includes(zone) || zone.at + zone.len < st.dist - 30) {
+      scene.remove(group); roadworkMeshes.delete(zone);
+    }
+  }
+  for (const zone of st.roadworks) {
+    if (zone.lane >= st.laneCount) continue; // closed lane not in current layout
+    const gap = zone.at - st.dist;
+    if (gap > sight + 50 || zone.at + zone.len < st.dist - 30) continue;
+    let group = roadworkMeshes.get(zone);
+    // Rebuild if the lane layout moved under the zone (segment change).
+    if (group && group.userData.laneX !== st.laneXs[zone.lane]) {
+      scene.remove(group); roadworkMeshes.delete(zone); group = null;
+    }
+    if (!group) {
+      group = buildRoadworkGroup(zone);
+      group.userData.laneX = st.laneXs[zone.lane];
+      scene.add(group); roadworkMeshes.set(zone, group);
+    }
+    group.position.set(0, 0, -gap);
+    group.visible = gap < sight;
+  }
+}
 let dashes = [];
 const posts = [], trees = [];
 let restGroup = null, exitGroup = null, lanesGroup = null, lanesSignMat = null;
@@ -736,7 +786,12 @@ function updateHUD() {
   const nextSeg = TR.nextSegmentChange(st);
   const segGap = nextSeg ? nextSeg.at - st.dist : Infinity;
   let sign = '';
-  if (nextSeg && segGap > 0 && segGap <= 300) sign = '▶ ' + t('lanesBecome') + ' ' + nextSeg.lanes + ' ' + t('lanes') + ' ' + Math.round(segGap) + ' m';
+  const zoneNow = TR.zoneAt(st, st.dist);
+  const nextRw = TR.nextRoadwork(st);
+  const rwGap = nextRw ? nextRw.at - st.dist : Infinity;
+  if (zoneNow) sign = '⚠️ ' + t('roadworkWarn') + ' — ' + t('laneWord') + ' ' + (zoneNow.lane + 1) + ' ' + t('closedWord');
+  else if (nextRw && rwGap > 0 && rwGap <= TR.ROADWORK_WARN) sign = '▶ ' + t('roadworkWarn') + ' — ' + t('laneWord') + ' ' + (nextRw.lane + 1) + ' ' + t('closedWord') + ' ' + Math.round(rwGap) + ' m';
+  else if (nextSeg && segGap > 0 && segGap <= 300) sign = '▶ ' + t('lanesBecome') + ' ' + nextSeg.lanes + ' ' + t('lanes') + ' ' + Math.round(segGap) + ' m';
   else if (st.dist - st.laneChangedDist < 150) sign = t('lanesNow') + ' ' + st.laneCount + ' ' + t('lanes');
   else if (TR.openRestStop(st)) sign = '▶ ' + t('restSoon') + ' ' + Math.max(0, Math.round(restGap)) + ' m';
   else if (nextRest && restGap > 0 && restGap <= 300) sign = '▶ ' + t('restSoon') + ' ' + Math.round(restGap) + ' m';
@@ -764,6 +819,10 @@ function handleEvents() {
       toast(t('lanesNow') + ' ' + e.lanes + ' ' + t('lanes'));
     } else if (e.t === 'restMissed') {
       toast(t('restMissed'));
+    } else if (e.t === 'convoy') {
+      toast(t('convoyToast')); beep(700, 0.15, 'square', 0.15);
+    } else if (e.t === 'nudged') {
+      toast(t('nudgedToast')); beep(500, 0.15, 'square', 0.15);
     } else if (e.t === 'fuel') {
       toast(t('fuelPlus')); beep(880, 0.12, 'sine', 0.2);
     } else if (e.t === 'fuelLow') {
@@ -821,6 +880,8 @@ function goToMenu() {
   if (st && st.score > bestScore()) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
   if (running) foldOdometer();
   running = false; cgStop(); engineUpdate(0, false);
+  for (const mesh of roadworkMeshes.values()) scene.remove(mesh);
+  roadworkMeshes.clear();
   if (playerMesh) { playerMesh.position.set(0, 0, 0); playerMesh.rotation.set(0, 0, 0); }
   $('hud').classList.add('hidden'); $('controls').classList.add('hidden'); $('endOverlay').classList.add('hidden');
   $('startOverlay').classList.remove('hidden');
@@ -889,6 +950,8 @@ function startGame(mode) {
   trafficMeshes.clear();
   for (const mesh of pickupMeshes.values()) scene.remove(mesh);
   pickupMeshes.clear();
+  for (const mesh of roadworkMeshes.values()) scene.remove(mesh);
+  roadworkMeshes.clear();
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition, car: loadSelectedCar() });
   refreshPlayerMesh();
   missionToasted = new Set();
@@ -904,7 +967,18 @@ function startGame(mode) {
 }
 
 // ---------- input ----------
-function lane(dir) { if (running && !restAnim) { TR.moveLane(st, dir); beep(500, 0.06, 'sine', 0.08); } }
+function lane(dir) {
+  if (!running || restAnim) return;
+  // Moving into a roadwork-closed lane is refused with an explanation,
+  // instead of silently doing nothing.
+  const zone = TR.zoneAt(st, st.dist);
+  const next = Math.max(0, Math.min(st.laneCount - 1, st.player.targetLane + dir));
+  if (zone && next === zone.lane && next !== st.player.targetLane) {
+    toast(t('laneClosedToast')); beep(200, 0.15, 'square', 0.15);
+    return;
+  }
+  TR.moveLane(st, dir); beep(500, 0.06, 'sine', 0.08);
+}
 function rest() { if (running && !restAnim) startRestAnim(); }
 $('leftBtn').addEventListener('click', () => lane(-1));
 $('rightBtn').addEventListener('click', () => lane(1));
@@ -1009,6 +1083,7 @@ function loop(now) {
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
     syncTrafficMeshes();
     syncPickups();
+    syncRoadworkMeshes();
     if (headlight && st.condition === 'night') {
       headlight.position.set(st.player.x, 1.2, 0);
       headlight.target.position.set(st.player.x, 0.5, -40);

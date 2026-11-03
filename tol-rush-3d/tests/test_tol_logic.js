@@ -9,7 +9,7 @@ function eq(name, got, want) {
   else { fail++; console.log('  FAIL ' + name + ' — got ' + g + ', want ' + w); }
 }
 function ok(name, cond) { eq(name, !!cond, true); }
-function quiet(st) { st.spawnT = 9999; }
+function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyAt = 99999; }
 
 // Boot + lane snap
 {
@@ -403,6 +403,79 @@ function quiet(st) { st.spawnT = 9999; }
   eq('unlocked excluded', TR.checkAchievements(full, true, { odoKm: 150, ownedCars: 4 }, ['finis1']).length, 7);
   eq('odo100 needs 100 km', TR.checkAchievements(full, true, { odoKm: 99, ownedCars: 4 }, []).includes('odo100'), false);
   eq('kolektor needs 4 cars', TR.checkAchievements(full, true, { odoKm: 150, ownedCars: 3 }, []).includes('kolektor'), false);
+}
+
+// --- roadworks + convoys (Fase 2I) ---
+{
+  // zone lookup + next
+  const z = TR.createGame({ mode: 'short' }); quiet(z);
+  z.roadworks.push({ at: 1500, len: 220, lane: 1 });
+  eq('zoneAt inside', TR.zoneAt(z, 1600) !== null, true);
+  eq('zoneAt before', TR.zoneAt(z, 1400), null);
+  eq('zoneAt at end', TR.zoneAt(z, 1720), null);
+  z.dist = 1400;
+  eq('nextRoadwork', TR.nextRoadwork(z).at, 1500);
+
+  // moveLane into a closed lane is refused; open moves still work
+  const m = TR.createGame({ mode: 'short' }); quiet(m);
+  m.roadworks.push({ at: 1500, len: 220, lane: 1 });
+  m.dist = 1600; m.laneCount = 4; m.laneXs = TR.LANE_X[4];
+  m.player.lane = m.player.targetLane = 2; m.player.x = m.laneXs[2];
+  ok('move into closed lane refused', !TR.moveLane(m, -1));
+  m.player.lane = m.player.targetLane = 3; m.player.x = m.laneXs[3];
+  ok('move into open lane accepted', TR.moveLane(m, -1));
+
+  // auto-nudge when the zone starts under the player
+  const n = TR.createGame({ mode: 'short' }); quiet(n);
+  n.roadworks.push({ at: 1000, len: 220, lane: 1 });
+  n.dist = 999.9; n.player.lane = n.player.targetLane = 1; n.player.x = 0;
+  TR.step(n, 1);
+  eq('nudged out of closed lane', n.player.lane, 0);
+  ok('nudged event fired', n.events.some((e) => e.t === 'nudged'));
+
+  // spawn exclusion inside a closed lane
+  const s = TR.createGame({ mode: 'short' }); quiet(s);
+  s.roadworks.push({ at: 1500, len: 220, lane: 1 });
+  s.dist = 1400;
+  eq('spawn in closed lane blocked', TR.spawnVehicle(s, { lane: 1, gapAhead: 100 }), null);
+  ok('spawn in open lane allowed', TR.spawnVehicle(s, { lane: 0, gapAhead: 100 }) !== null);
+
+  // wall rule counts only open lanes: cars in lanes 2+3 wall lane 0
+  // even though lane 1 is closed (not an escape lane)
+  const w = TR.createGame({ mode: 'short' }); quiet(w);
+  w.roadworks.push({ at: 1600, len: 220, lane: 1 });
+  w.traffic.push({ lane: 2, targetLane: 2, s: 1600, x: 1.7, moving: false });
+  w.traffic.push({ lane: 3, targetLane: 3, s: 1600, x: 5.1, moving: false });
+  ok('open lanes all occupied = wall', TR.wallAt(w, 1600, 0, null));
+  w.traffic.pop();
+  ok('one open lane free = no wall', !TR.wallAt(w, 1600, 0, null));
+
+  // sedans never change into a closed lane
+  const c = TR.createGame({ mode: 'short' }); quiet(c);
+  c.roadworks.push({ at: 1600, len: 220, lane: 1 });
+  c.dist = 1400;
+  const v = { lane: 0, targetLane: 0, s: 1600, x: -5.1, moving: false };
+  ok('sedan change into closed lane refused', !TR.canChangeLane(c, v, 1));
+
+  // zone generation skipped where the road has only 2 lanes
+  const g = TR.createGame({ mode: 'short' }); quiet(g);
+  g.nextRoadworkAt = 3100; g.nextConvoyAt = 99999;
+  g.dist = 2800;
+  TR.step(g, 1 / 60);
+  ok('no zone on 2-lane stretch', !g.roadworks.some((rz) => rz.at === 3100));
+  ok('generator advanced past skipped zone', g.nextRoadworkAt > 3100);
+
+  // convoy: one gap lane, trucks/buses only, convoy event fired
+  // (spawned 100 m ahead so no member can collide with the player mid-test)
+  const cv = TR.createGame({ mode: 'short' }); quiet(cv);
+  cv.nextConvoyAt = cv.dist + 100; cv.nextRoadworkAt = 99999;
+  TR.step(cv, 1 / 60);
+  const members = cv.traffic.filter((t) => t.convoy);
+  eq('convoy members = lanes - 1', members.length, 2);
+  ok('convoy kinds are truck/bus', members.every((t) => t.kind === 'truck' || t.kind === 'bus'));
+  eq('convoy leaves one gap lane', new Set(members.map((t) => t.lane)).size, 2);
+  ok('convoy event fired', cv.events.some((e) => e.t === 'convoy'));
+  ok('convoy generator advanced', cv.nextConvoyAt > 100);
 }
 
 console.log(pass + ' passed, ' + fail + ' failed');
