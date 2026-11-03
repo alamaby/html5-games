@@ -54,10 +54,22 @@
   .shopbuy { background:#ffd76a; color:#111; border:0; border-radius:10px; padding:8px 12px; font-weight:800; font-size:12px; cursor:pointer; white-space:nowrap; }
   .shopbuy:disabled { background:rgba(255,255,255,.12); color:rgba(255,255,255,.4); }
   #shopMsg { min-height:18px; font-size:12px; color:#7dff9a; margin-top:4px; }
-  .condrow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; margin-bottom:14px; }
+  .condrow { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; margin-bottom:12px; }
   .condlabel { font-size:13px; letter-spacing:1px; color:#ffd76a; font-weight:800; }
-  .condbtn { font-size:13px; padding:10px 12px; }
-  .condbtn.sel { background:#ffd76a; color:#111; }
+  /* condition buttons must look UNselected by default: .bigbtn is gold, so
+     without this override the .sel state was invisible (all buttons gold) */
+  .condbtn { font-size:13px; padding:10px 12px; background:rgba(255,255,255,.12); color:#fff;
+             border:1px solid rgba(255,255,255,.2); }
+  .condbtn.sel { background:#ffd76a; color:#111; border-color:#ffd76a; }
+  /* the start menu grew long (routes + condition + 2 shops + missions):
+     let it scroll from the top instead of centring and clipping */
+  #startOverlay { justify-content:flex-start; overflow-y:auto; padding:20px 24px 48px; }
+  #startOverlay .subtitle { margin:8px 0 14px; }
+  #startOverlay .howto { gap:6px; margin:2px 0 12px; }
+  #startOverlay .hrow { padding:8px 12px; }
+  #startOverlay .best { margin-bottom:8px; }
+  #startOverlay .shop { margin-bottom:12px; }
+  #startOverlay .moderow { margin-bottom:10px; }
   #menuBtn { background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.3);
              border-radius:8px; padding:6px 10px; font-size:12px; font-weight:800; margin-top:8px; cursor:pointer; pointer-events:auto; }
   #restFuelBar { height:14px; background:rgba(255,255,255,.18); border-radius:99px; overflow:hidden;
@@ -190,6 +202,14 @@
     <div class="shophead"><span data-i18n="shopTitle">UPGRADE</span> · <span id="coinLine"></span></div>
     <div id="shopList"></div>
     <div id="shopMsg"></div>
+  </div>
+  <div class="shop">
+    <div class="shophead"><span data-i18n="missionTitle">MISI HARI INI</span></div>
+    <div id="missionList"></div>
+  </div>
+  <div class="shop">
+    <div class="shophead"><span data-i18n="achTitle">ACHIEVEMENT</span></div>
+    <div id="achList"></div>
   </div>
 </div>
 

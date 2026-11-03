@@ -99,6 +99,8 @@ const TR = {
       fuelCritical: false,
       score: 0,
       bonus: 0,
+      // run metrics for missions + achievements (Fase 2H)
+      crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, fuelEmpty: false,
       combo: 0,
       comboT: 0,
       nitro: 50,
@@ -169,6 +171,7 @@ const TR = {
     const stop = TR.openRestStop(st);
     if (!stop) return false;
     stop.state = 'used';
+    st.restCount += 1;
     st.hp = st.maxHp;
     st.fuel = st.maxFuel;
     st.bonus += 250;
@@ -263,6 +266,7 @@ const TR = {
     if (st.fuel > 0) {
       const rate = (nitroActive ? TR.FUEL_DRAIN_NITRO : (st.brake ? TR.FUEL_DRAIN_BRAKE : TR.FUEL_DRAIN)) * st.fuelFactor;
       st.fuel = Math.max(0, st.fuel - travelled * rate);
+      if (st.fuel === 0) st.fuelEmpty = true;
     }
     if (!st.fuelLow && st.fuel <= st.maxFuel * 0.25) {
       st.fuelLow = true;
@@ -396,6 +400,7 @@ const TR = {
       const dx = Math.abs(st.player.x - v.x);
       if (st.invuln <= 0 && Math.abs(gap) < (v.len / 2 + 2.2) && dx < 1.7) {
         st.hp -= 1;
+        st.crashes += 1;
         st.crashT = 1.0;
         st.invuln = TR.CRASH_INVULN;
         st.combo = 0; st.comboT = 0;
@@ -412,6 +417,8 @@ const TR = {
         v.passed = true;
         if (dx >= 1.7 && dx <= 4.5) {
           st.combo = Math.min(5, st.combo + 1);
+          st.nearMisses += 1;
+          if (st.combo > st.maxCombo) st.maxCombo = st.combo;
           st.comboT = 6;
           const pts = 50 * st.combo;
           st.bonus += pts;
@@ -428,6 +435,7 @@ const TR = {
       const gap = pk.s - st.dist;
       if (Math.abs(gap) < 4 && Math.abs(st.player.x - pk.x) < 1.7) {
         pk.taken = true;
+        st.pickupCount += 1;
         st.fuel = Math.min(st.maxFuel, st.fuel + TR.FUEL_PICKUP);
         st.bonus += 25;
         st.events.push({ t: 'fuel', fuel: st.fuel });
@@ -444,6 +452,41 @@ const TR = {
       st.status = 'finished';
       st.events.push({ t: 'finish', score: st.score, hp: st.hp });
     }
+  },
+
+  // ---------- daily missions + achievements (Fase 2H, pure) ----------
+  // Missions: 3 per day, deterministic rotation over the 8-pool. Offsets
+  // 0, 3, 5 stay distinct mod 8, so the three are never the same mission.
+  MISSION_DEFS: [
+    { key: 'jeriken3', coins: 25, check: (st) => st.pickupCount >= 3 },
+    { key: 'combo3', coins: 25, check: (st) => st.maxCombo >= 3 },
+    { key: 'mepet5', coins: 25, check: (st) => st.nearMisses >= 5 },
+    { key: 'jauh5', coins: 25, check: (st) => st.dist >= 5000 },
+    { key: 'bersih', coins: 25, check: (st, finished) => finished && st.crashes === 0 },
+    { key: 'rest1', coins: 25, check: (st) => st.restCount >= 1 },
+    { key: 'hemat3', coins: 25, check: (st) => st.dist >= 3000 && !st.fuelEmpty },
+    { key: 'hujan2', coins: 25, check: (st) => st.condition === 'rain' && st.dist >= 2000 },
+  ],
+  todaysMissions(dayNum) {
+    return [0, 3, 5].map((off) => TR.MISSION_DEFS[(dayNum + off) % TR.MISSION_DEFS.length].key);
+  },
+  // today's missions completed in this run, excluding ones already done today
+  checkMissions(st, finished, dayNum, doneToday) {
+    const today = new Set(TR.todaysMissions(dayNum));
+    return TR.MISSION_DEFS.filter((m) => today.has(m.key) && m.check(st, finished) && !doneToday.includes(m.key)).map((m) => m.key);
+  },
+  ACH_DEFS: [
+    { key: 'finis1', coins: 50, check: (st, finished) => finished },
+    { key: 'bersihFinis', coins: 100, check: (st, finished) => finished && st.crashes === 0 },
+    { key: 'jeriken5', coins: 50, check: (st) => st.pickupCount >= 5 },
+    { key: 'kombo5', coins: 100, check: (st) => st.maxCombo >= 5 },
+    { key: 'mepet10', coins: 100, check: (st) => st.nearMisses >= 10 },
+    { key: 'jauh10', coins: 100, check: (st) => st.dist >= 10000 },
+    { key: 'odo100', coins: 200, check: (st, finished, ctx) => ctx.odoKm >= 100 },
+    { key: 'kolektor', coins: 200, check: (st, finished, ctx) => ctx.ownedCars >= 4 },
+  ],
+  checkAchievements(st, finished, ctx, unlocked) {
+    return TR.ACH_DEFS.filter((a) => a.check(st, finished, ctx) && !unlocked.includes(a.key)).map((a) => a.key);
   },
 };
 

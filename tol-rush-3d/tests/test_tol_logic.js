@@ -353,5 +353,57 @@ function quiet(st) { st.spawnT = 9999; }
   ok('car costs ordered', TR.CARS.lincah.cost > 0 && TR.CARS.suv.cost > TR.CARS.lincah.cost && TR.CARS.sport.cost > TR.CARS.suv.cost);
 }
 
+// --- missions + achievements (Fase 2H) ---
+{
+  // metrics are tracked during a run
+  const m = TR.createGame({ mode: 'short' }); quiet(m);
+  eq('metrics start at zero', [m.crashes, m.pickupCount, m.nearMisses, m.maxCombo, m.restCount].join(','), '0,0,0,0,0');
+  eq('fuelEmpty starts false', m.fuelEmpty, false);
+  m.fuel = 0.01; TR.step(m, 1);
+  eq('fuelEmpty set when tank hits zero', m.fuelEmpty, true);
+  // pickup + near-miss + crash metrics via driven state
+  const p = TR.createGame({ mode: 'short' }); quiet(p);
+  p.pickups.push({ s: p.dist + 2, x: 0, taken: false });
+  TR.step(p, 1 / 60);
+  eq('pickup counted', p.pickupCount, 1);
+  const n = TR.createGame({ mode: 'short' }); quiet(n);
+  n.traffic.push({ lane: 0, targetLane: 0, s: n.dist - 10, x: -3.4, len: 4.4, kind: 'sedan', passed: false, moving: false });
+  TR.step(n, 1 / 60);
+  eq('near-miss counted', n.nearMisses, 1);
+  eq('maxCombo tracks combo', n.maxCombo, 1);
+  const c = TR.createGame({ mode: 'short' }); quiet(c);
+  c.traffic.push({ lane: 1, targetLane: 1, s: c.dist + 1, x: 0, len: 4.4, kind: 'sedan', passed: false, moving: false });
+  TR.step(c, 1 / 60);
+  eq('crash counted', c.crashes, 1);
+  const r = TR.createGame({ mode: 'short' }); quiet(r);
+  r.restStops[0].state = 'open';
+  ok('rest counted', TR.tryRest(r) && r.restCount === 1);
+
+  // daily missions: 3 distinct valid keys, deterministic per day, rotate
+  const t0 = TR.todaysMissions(0);
+  eq('3 missions per day', t0.length, 3);
+  eq('missions distinct', new Set(t0).size, 3);
+  ok('missions are real keys', t0.every((k) => TR.MISSION_DEFS.some((d) => d.key === k)));
+  eq('same day same missions', TR.todaysMissions(0).join(','), t0.join(','));
+  ok('missions rotate next day', TR.todaysMissions(1).join(',') !== t0.join(','));
+
+  // checkMissions: all-satisfied run completes exactly today's 3
+  const full = TR.createGame({ mode: 'short' });
+  Object.assign(full, { pickupCount: 99, maxCombo: 5, nearMisses: 99, dist: 99999, crashes: 0, restCount: 9, fuelEmpty: false, condition: 'rain' });
+  eq('all-satisfied run completes today 3', TR.checkMissions(full, true, 0, []).sort().join(','), t0.slice().sort().join(','));
+  eq('already-done today excluded', TR.checkMissions(full, true, 0, [t0[0]]).length, 2);
+  // day 4 includes bersih (index 4): finish-gated, excluded when not finished
+  const t4 = TR.todaysMissions(4);
+  ok('day 4 includes bersih', t4.includes('bersih'));
+  ok('bersih excluded when not finished', !TR.checkMissions(full, false, 4, []).includes('bersih'));
+  ok('bersih included when finished', TR.checkMissions(full, true, 4, []).includes('bersih'));
+
+  // checkAchievements: all-satisfied run unlocks all 8; unlocked ones excluded
+  eq('all 8 achievements', TR.checkAchievements(full, true, { odoKm: 150, ownedCars: 4 }, []).length, 8);
+  eq('unlocked excluded', TR.checkAchievements(full, true, { odoKm: 150, ownedCars: 4 }, ['finis1']).length, 7);
+  eq('odo100 needs 100 km', TR.checkAchievements(full, true, { odoKm: 99, ownedCars: 4 }, []).includes('odo100'), false);
+  eq('kolektor needs 4 cars', TR.checkAchievements(full, true, { odoKm: 150, ownedCars: 3 }, []).includes('kolektor'), false);
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

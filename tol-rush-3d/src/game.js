@@ -50,6 +50,7 @@ const I18N = {
     how3: '♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).',
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
+    missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
     condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
@@ -79,6 +80,7 @@ const I18N = {
     how3: '♥ 3 HP, empty tank = crawl. Rest area: full HP + full fuel (+250).',
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
+    missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
     condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
@@ -119,6 +121,8 @@ function applyI18n() {
   updateBestLine();
   renderShop();
   renderCars();
+  renderMissions();
+  renderAchievements();
   updateConditionUI();
 }
 
@@ -248,6 +252,8 @@ function buyCar(key) {
   saveOwnedCars(loadOwnedCars().concat([key]));
   saveSelectedCar(key);
   renderCars(); renderShop(); refreshPlayerMesh();
+  if (loadOwnedCars().length >= 4) unlockAchievement('kolektor');
+  renderAchievements();
   const msg = $('carMsg'); if (msg) msg.textContent = t('bought');
   beep(880, 0.12, 'sine', 0.2); setTimeout(() => beep(1174, 0.15, 'sine', 0.2), 120);
 }
@@ -256,6 +262,83 @@ function selectCar(key) {
   saveSelectedCar(key);
   renderCars(); refreshPlayerMesh();
   beep(660, 0.08, 'sine', 0.15);
+}
+// ---------- daily missions + achievements (Fase 2H) ----------
+const MISSION_TEXT = {
+  jeriken3: { id: 'Kumpulkan 3 jeriken', en: 'Collect 3 jerrycans' },
+  combo3: { id: 'Capai combo x3', en: 'Reach combo x3' },
+  mepet5: { id: '5x salip mepet', en: '5 near-misses' },
+  jauh5: { id: 'Tempuh 5 km dalam satu run', en: 'Drive 5 km in one run' },
+  bersih: { id: 'Finis tanpa tabrakan (rute misi)', en: 'Finish without crashing (mission route)' },
+  rest1: { id: 'Mampir 1 rest area', en: 'Stop at 1 rest area' },
+  hemat3: { id: 'Tempuh 3 km tanpa bensin habis', en: 'Drive 3 km without running dry' },
+  hujan2: { id: 'Tempuh 2 km di hujan', en: 'Drive 2 km in the rain' },
+};
+const ACH_TEXT = {
+  finis1: { id: 'Finis Pertama', en: 'First Finish', descId: 'Finis di exit tol', descEn: 'Finish at a toll exit' },
+  bersihFinis: { id: 'Finis Bersih', en: 'Clean Finish', descId: 'Finis tanpa satu pun tabrakan', descEn: 'Finish without a single crash' },
+  jeriken5: { id: 'Pemburu Jeriken', en: 'Jerrycan Hunter', descId: '5 jeriken dalam satu run', descEn: '5 jerrycans in one run' },
+  kombo5: { id: 'Kombo Penuh', en: 'Full Combo', descId: 'Capai combo x5', descEn: 'Reach combo x5' },
+  mepet10: { id: 'Raja Salip Mepet', en: 'Near-Miss King', descId: '10 salip mepet dalam satu run', descEn: '10 near-misses in one run' },
+  jauh10: { id: 'Penjelajah 10 km', en: '10 km Explorer', descId: '10 km dalam satu run', descEn: '10 km in one run' },
+  odo100: { id: 'Odometer 100 km', en: '100 km Odometer', descId: 'Total 100 km di semua run', descEn: '100 km across all runs' },
+  kolektor: { id: 'Kolektor Mobil', en: 'Car Collector', descId: 'Miliki semua 4 mobil', descEn: 'Own all 4 cars' },
+};
+function dayKey(d) { const p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+function dayNum(d) { return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000); }
+function loadMissionState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('tr_missions_v1') || '{}');
+    if (s.day === dayKey(new Date()) && Array.isArray(s.done)) return s;
+  } catch (e) {}
+  return { day: dayKey(new Date()), done: [] };
+}
+function saveMissionState(s) { try { localStorage.setItem('tr_missions_v1', JSON.stringify(s)); } catch (e) {} }
+function loadAchievements() {
+  try { const a = JSON.parse(localStorage.getItem('tr_achievements_v1') || '[]'); return a.filter((k) => TR.ACH_DEFS.some((d) => d.key === k)); } catch (e) { return []; }
+}
+function saveAchievements(a) { try { localStorage.setItem('tr_achievements_v1', JSON.stringify(a)); } catch (e) {} }
+function missionName(key) { const m = MISSION_TEXT[key]; return m ? (lang === 'id' ? m.id : m.en) : key; }
+function achName(key) { const a = ACH_TEXT[key]; return a ? (lang === 'id' ? a.id : a.en) : key; }
+function renderMissions() {
+  const list = $('missionList'); if (!list) return;
+  const done = loadMissionState().done;
+  const today = TR.todaysMissions(dayNum(new Date()));
+  list.innerHTML = today.map((k) => {
+    const def = TR.MISSION_DEFS.find((d) => d.key === k);
+    const isDone = done.includes(k);
+    return '<div class="shoprow"><span>' + (isDone ? '✓ ' : '○ ') + missionName(k) + '</span><span class="lvl">' + (isDone ? '✓' : '+' + def.coins) + '</span></div>';
+  }).join('');
+}
+function renderAchievements() {
+  const list = $('achList'); if (!list) return;
+  const unlocked = loadAchievements();
+  list.innerHTML = TR.ACH_DEFS.map((d) => {
+    const a = ACH_TEXT[d.key]; const isU = unlocked.includes(d.key);
+    const name = lang === 'id' ? a.id : a.en; const desc = lang === 'id' ? a.descId : a.descEn;
+    return '<div class="shoprow"><span>' + (isU ? '🏆 ' : '🔒 ') + '<b>' + name + '</b> — ' + desc + '</span><span class="lvl">' + (isU ? '✓' : '+' + d.coins) + '</span></div>';
+  }).join('');
+}
+// unlock one achievement outside a run (menu context): persist, grant coins, toast
+function unlockAchievement(key) {
+  const unlocked = loadAchievements();
+  if (unlocked.includes(key)) return false;
+  const def = TR.ACH_DEFS.find((d) => d.key === key); if (!def) return false;
+  unlocked.push(key); saveAchievements(unlocked);
+  saveCoins(loadCoins() + def.coins);
+  toast('🏆 ' + achName(key) + ' (+' + def.coins + ')');
+  beep(880, 0.12, 'sine', 0.2); setTimeout(() => beep(1174, 0.2, 'sine', 0.2), 130);
+  return true;
+}
+let missionToasted = new Set();
+function checkMissionsLive() {
+  if (!st || !running) return;
+  const ms = loadMissionState();
+  for (const k of TR.todaysMissions(dayNum(new Date()))) {
+    if (ms.done.includes(k) || missionToasted.has(k)) continue;
+    const def = TR.MISSION_DEFS.find((d) => d.key === k);
+    if (def && def.check(st, false)) { missionToasted.add(k); toast('✓ ' + t('missionToast') + ': ' + missionName(k)); beep(880, 0.1, 'sine', 0.15); }
+  }
 }
 function bestScore() { try { return parseInt(localStorage.getItem('tr_best_score') || '0', 10) || 0; } catch (e) { return 0; } }
 function updateBestLine() {
@@ -274,7 +357,11 @@ try { odoSaved = parseFloat(localStorage.getItem('tr_odometer_m') || '0') || 0; 
 function saveOdometer(v) { odoSaved = v; try { localStorage.setItem('tr_odometer_m', String(v)); } catch (e) {} }
 function fmtKm(m) { return (m / 1000).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' km'; }
 function currentOdometer() { return running && st ? odoRunStart + st.dist : odoSaved; }
-function foldOdometer() { if (st) saveOdometer(odoRunStart + st.dist); }
+function foldOdometer() {
+  if (st) saveOdometer(odoRunStart + st.dist);
+  // lifetime milestone: checked here so it also fires on an abandoned run
+  if (odoSaved >= 100000) unlockAchievement('odo100');
+}
 window.addEventListener('pagehide', () => { if (running) foldOdometer(); });
 
 // ---------- speedometer ticks (0-180 km/h, -120° to +120°) ----------
@@ -656,6 +743,7 @@ function updateHUD() {
   else if (!endless && st.routeLen - st.dist < 300) sign = '▶ ' + t('exitSoon') + ' ' + Math.round(st.routeLen - st.dist) + ' m';
   $('sign').textContent = sign;
   $('restBtn').classList.toggle('show', !!TR.openRestStop(st));
+  checkMissionsLive();
 }
 function handleEvents() {
   for (const e of st.events) {
@@ -696,7 +784,16 @@ function endGame(finished) {
   $('endTitle').textContent = finished ? t('finish') : t('over');
   const isNewBest = st.score > bestScore();
   if (isNewBest) { try { localStorage.setItem('tr_best_score', String(st.score)); } catch (e) {} }
-  const coinsEarned = Math.floor(st.score / 50) + (finished ? 50 : 0);
+  // missions + achievements completed this run (granted once each)
+  const ms = loadMissionState();
+  const missionNew = TR.checkMissions(st, finished, dayNum(new Date()), ms.done);
+  const missionCoins = missionNew.reduce((s, k) => s + TR.MISSION_DEFS.find((d) => d.key === k).coins, 0);
+  if (missionNew.length) { ms.done = ms.done.concat(missionNew); saveMissionState(ms); }
+  const achCtx = { odoKm: odoSaved / 1000, ownedCars: loadOwnedCars().length };
+  const achNew = TR.checkAchievements(st, finished, achCtx, loadAchievements());
+  const achCoins = achNew.reduce((s, k) => s + TR.ACH_DEFS.find((d) => d.key === k).coins, 0);
+  if (achNew.length) saveAchievements(loadAchievements().concat(achNew));
+  const coinsEarned = Math.floor(st.score / 50) + (finished ? 50 : 0) + missionCoins + achCoins;
   const coinsTotal = loadCoins() + coinsEarned;
   saveCoins(coinsTotal);
   $('endStats').innerHTML =
@@ -705,12 +802,16 @@ function endGame(finished) {
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
+    (missionNew.length ? '<br><b>' + t('missionLabel') + ':</b> ' + missionNew.map(missionName).join(', ') + ' (+' + missionCoins + ')' : '') +
+    (achNew.length ? '<br><b>' + t('achLabel') + ':</b> ' + achNew.map((k) => '🏆 ' + achName(k)).join(', ') + ' (+' + achCoins + ')' : '') +
     '<br><b>' + t('carTitle') + ':</b> ' + carName(st.car) +
     '<br><b>ODO:</b> ' + fmtKm(odoSaved);
   $('endOverlay').classList.remove('hidden');
   updateBestLine();
   renderShop();
   renderCars();
+  renderMissions();
+  renderAchievements();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
 // Back to the start screen (= the upgrade shop). Mid-run, the run is abandoned:
@@ -725,7 +826,7 @@ function goToMenu() {
   $('startOverlay').classList.remove('hidden');
   setLaneMarkings(3);
   if (lanesGroup) lanesGroup.visible = false;
-  updateBestLine(); renderShop(); renderCars(); refreshPlayerMesh();
+  updateBestLine(); renderShop(); renderCars(); renderMissions(); renderAchievements(); refreshPlayerMesh();
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
 }
 
@@ -790,6 +891,7 @@ function startGame(mode) {
   pickupMeshes.clear();
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition, car: loadSelectedCar() });
   refreshPlayerMesh();
+  missionToasted = new Set();
   odoRunStart = odoSaved;
   applyCondition(st.condition);
   setLaneMarkings(st.laneCount);
