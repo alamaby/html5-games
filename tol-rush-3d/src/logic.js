@@ -18,11 +18,12 @@ const TR = {
   // Lane-centre x per lane count (spacing stays 3.4 m, road stays centred).
   LANE_X: { 2: [-1.7, 1.7], 3: [-3.4, 0, 3.4], 4: [-5.1, -1.7, 1.7, 5.1] },
   SEGMENT_WARN: 300, // gantry/HUD warning this far before a lane-count change
+  TRANSITION_LEN: 200, // taper zone before a lane-count line: centres interpolate over this distance
   ROUTE_LEN: 5000, // default (short) route, kept for callers/tests
   REST_AT: 2500,   // default (short) route rest area, kept for callers/tests
   ROUTES: {
     // segments: lane count from `at` (metres) until the next segment line
-    short: { len: 5000, rests: [2500], segments: [{ at: 0, lanes: 3 }, { at: 1500, lanes: 4 }, { at: 3000, lanes: 2 }, { at: 4000, lanes: 3 }] },
+    short: { len: 5000, rests: [2500], segments: [{ at: 0, lanes: 3 }, { at: 1500, lanes: 4 }, { at: 3000, lanes: 3 }, { at: 4000, lanes: 2 }] },
     long: { len: 10000, rests: [3000, 6500], segments: [{ at: 0, lanes: 3 }, { at: 2000, lanes: 4 }, { at: 4500, lanes: 3 }, { at: 6000, lanes: 2 }, { at: 8000, lanes: 4 }] },
     endless: { len: Infinity, rests: [2500], restEvery: 3500, segments: [{ at: 0, lanes: 3 }] },
   },
@@ -142,6 +143,17 @@ const TR = {
     return st.restStops.find((s) => s.state === 'upcoming' || s.state === 'open') || null;
   },
 
+  // True when `lane` at route position `s` is a lane about to vanish: the
+  // next decrease line after `s` lies within warning distance ahead of it.
+  // (The line considered is the first one after `s`, not after the player,
+  // so spawns and cars ahead of the player are judged by their own spot.)
+  isDoomedLaneAt(st, lane, s) {
+    if (lane !== 0) return false;
+    const seg = st.segments.find((sg) => sg.at > s);
+    if (!seg) return false;
+    return seg.lanes < TR.laneCountAt(st, s) && seg.at - s <= TR.SEGMENT_WARN;
+  },
+
   // Lane count at a distance (last segment line at or before it).
   laneCountAt(st, dist) {
     let lanes = st.segments[0].lanes;
@@ -154,6 +166,69 @@ const TR = {
   // The next lane-count change ahead of the player, or null.
   nextSegmentChange(st) {
     return st.segments.find((seg) => seg.at > st.dist) || null;
+  },
+
+  // ---------- gradual lane-count transitions (Fase 2Q) ----------
+  // The road stays centred on a 3.4 m lattice, so a one-step change shifts
+  // every lane centre by 1.7 m. Mapping across a line:
+  //   -1: the LEFTMOST lane (index 0) closes; survivors shift down one index.
+  //   +1: a lane opens on the RIGHT; old indices stay.
+  //   +2: one lane opens on EACH side (only 2 -> 4); old indices shift +1.
+  // A decrease of 2+ never occurs: the route tables and a test guard forbid it.
+  mapLane(from, to, oldLane) {
+    if (to === from - 1) return oldLane === 0 ? -1 : oldLane - 1;
+    if (to === from + 1) return oldLane;
+    if (to === from + 2) return oldLane + 1;
+    return oldLane;
+  },
+
+  // The transition being approached (within warning distance) or tapered
+  // through, or null. `p` is taper progress: 0 during approach, 0..1 in the
+  // 200 m zone, and the caller handles the line itself via laneCountAt.
+  // `doomed` is the vanishing lane index in the OLD layout, or -1.
+  transitionInfo(st) {
+    const next = TR.nextSegmentChange(st);
+    if (!next || next.lanes === st.laneCount) return null;
+    const gap = next.at - st.dist;
+    if (gap > TR.SEGMENT_WARN) return null;
+    const p = gap <= 0 ? 1 : Math.max(0, 1 - gap / TR.TRANSITION_LEN);
+    return { from: st.laneCount, to: next.lanes, line: next.at, p, doomed: next.lanes < st.laneCount ? 0 : -1 };
+  },
+
+  // Lane centres (OLD-indexed) at taper progress p: each surviving lane
+  // interpolates to its new centre; the doomed lane converges onto the new
+  // lane 0, i.e. it merges into its neighbour over the zone.
+  taperLaneXs(from, to, p) {
+    const fromXs = TR.LANE_X[from], toXs = TR.LANE_X[to];
+    const out = [];
+    for (let i = 0; i < from; i++) {
+      const j = TR.mapLane(from, to, i);
+      const dest = j < 0 ? toXs[0] : toXs[j];
+      out.push(fromXs[i] + (dest - fromXs[i]) * p);
+    }
+    return out;
+  },
+
+  // Marking lines for the taper visuals: each [xAtZoneStart, xAtLine].
+  // Edges always interpolate; the doomed divider pinches into the new left
+  // edge on a decrease; a new divider forks from the old right edge on a
+  // +1; on a +2 the new dividers start pinched at the old edges.
+  MARKINGS: { 2: { edges: [-3.4, 3.4], dividers: [0] }, 3: { edges: [-5.1, 5.1], dividers: [-1.7, 1.7] }, 4: { edges: [-6.8, 6.8], dividers: [-3.4, 0, 3.4] } },
+  taperLines(from, to) {
+    const M = TR.MARKINGS, o = M[from], n = M[to];
+    const lines = [[o.edges[0], n.edges[0]], [o.edges[1], n.edges[1]]];
+    if (to === from - 1) {
+      lines.push([o.dividers[0], n.edges[0]]);
+      for (let i = 1; i < o.dividers.length; i++) lines.push([o.dividers[i], n.dividers[i - 1]]);
+    } else if (to === from + 1) {
+      for (let i = 0; i < o.dividers.length; i++) lines.push([o.dividers[i], n.dividers[i]]);
+      lines.push([o.edges[1], n.dividers[n.dividers.length - 1]]);
+    } else if (to === from + 2) {
+      lines.push([o.dividers[0], n.dividers[1]]);
+      lines.push([o.edges[0], n.dividers[0]]);
+      lines.push([o.edges[1], n.dividers[2]]);
+    }
+    return lines;
   },
 
   baseSpeed(dist) {
@@ -187,6 +262,9 @@ const TR = {
     // Cannot move into a lane closed by roadworks at the player's position.
     const zone = TR.zoneAt(st, st.dist);
     if (zone && next === zone.lane) return false;
+    // Cannot move into a lane that is about to vanish (decrease approach/taper).
+    const info = TR.transitionInfo(st);
+    if (info && info.doomed >= 0 && next === info.doomed) return false;
     p.startX = p.x;
     p.targetLane = next;
     p.moveT = 0;
@@ -218,17 +296,21 @@ const TR = {
   // lane alone is a wall; 4 lanes: all three others must be blocked.)
   wallAt(st, s, lane, exclude) {
     // Open lanes at s: a roadwork-closed lane is neither an escape lane nor
-    // an occupied lane for fairness purposes.
+    // an occupied lane for fairness purposes. A lane about to vanish counts
+    // the same way during a decrease approach (it is no escape lane).
     const zone = TR.zoneAt(st, s);
     const lanes = TR.laneCountAt(st, s);
-    const openCount = zone ? lanes - 1 : lanes;
+    const doomed = TR.isDoomedLaneAt(st, 0, s) ? 0 : -1;
+    const closedCount = (zone ? 1 : 0) + (doomed >= 0 ? 1 : 0);
+    const openCount = lanes - closedCount;
     const occupied = new Set();
     for (const v of st.traffic) {
       if (v === exclude) continue;
       if (zone && v.lane === zone.lane) continue;
+      if (doomed >= 0 && v.lane === doomed) continue;
       if (Math.abs(v.s - s) <= 25 && v.lane !== lane) occupied.add(v.lane);
       // A car mid-change also occupies its target lane for fairness purposes.
-      if (v.moving && Math.abs(v.s - s) <= 25 && v.targetLane !== lane && !(zone && v.targetLane === zone.lane)) occupied.add(v.targetLane);
+      if (v.moving && Math.abs(v.s - s) <= 25 && v.targetLane !== lane && !(zone && v.targetLane === zone.lane) && v.targetLane !== doomed) occupied.add(v.targetLane);
     }
     return occupied.size >= openCount - 1;
   },
@@ -238,6 +320,8 @@ const TR = {
     // Sedans never change into a roadwork-closed lane.
     const zone = TR.zoneAt(st, v.s);
     if (zone && target === zone.lane) return false;
+    // Never change into a lane that is about to vanish (decrease approach).
+    if (TR.isDoomedLaneAt(st, target, v.s)) return false;
     for (const o of st.traffic) {
       if (o === v) continue;
       if (o.lane === target && Math.abs(o.s - v.s) < 45) return false;
@@ -261,6 +345,8 @@ const TR = {
     // Never spawn traffic inside a roadwork-closed lane.
     const zoneAtS = TR.zoneAt(st, s);
     if (zoneAtS && lane === zoneAtS.lane) return null;
+    // Never spawn in a lane that is about to vanish (decrease approach/taper).
+    if (TR.isDoomedLaneAt(st, lane, s)) return null;
     for (const v of st.traffic) {
       if (v.lane === lane && Math.abs(v.s - s) < 40) return null;
       if (v.moving && v.targetLane === lane && Math.abs(v.s - s) < 40) return null;
@@ -320,7 +406,8 @@ const TR = {
       st.events.push({ t: 'fuelCritical', fuel: st.fuel });
     }
 
-    // Lane-count segments: warn 300 m ahead, then switch at the segment line.
+    // Lane-count segments (Fase 2Q): warn 300 m ahead, taper the lane
+    // centres over the last 200 m, then remap indices at the segment line.
     // The warning was computed from the previous step's segments, which for
     // endless already extend 3000 m ahead, so the next change is always known.
     const nextSeg = TR.nextSegmentChange(st);
@@ -330,26 +417,59 @@ const TR = {
     }
     const newCount = TR.laneCountAt(st, st.dist);
     if (newCount !== st.laneCount) {
-      st.laneCount = newCount;
-      st.laneXs = TR.LANE_X[newCount];
+      // Line crossed: remap every lane index across it. The taper already
+      // drifted every x to (almost) its new centre, so this is not a snap
+      // except for the safety nets below.
+      const from = st.laneCount, to = newCount;
+      const crossedSeg = [...st.segments].reverse().find((sg) => sg.at <= st.dist);
+      const line = crossedSeg ? crossedSeg.at : st.dist;
+      st.laneCount = to;
+      st.laneXs = TR.LANE_X[to];
       st.laneChangedDist = st.dist;
-      // Clamp the player into the new road (the 300 m warning is the fair
-      // chance to move first; this is only the safety net).
-      if (st.player.lane >= newCount || st.player.targetLane >= newCount) {
-        st.player.lane = st.player.targetLane = newCount - 1;
-        st.player.x = st.laneXs[newCount - 1];
-        st.player.moveT = 1;
-      }
-      // Drop traffic in lanes that no longer exist; re-seat the rest on the
-      // new lane centres (mid-change moves are cancelled at the line).
-      st.traffic = st.traffic.filter((v) => v.lane < newCount && v.targetLane < newCount);
+      // Player: remap indices. A doomed lane merges into new lane 0 (not
+      // the old clamp-to-last-lane); a doomed target means stay in the
+      // remapped current lane; out-of-range indices clamp to the last lane.
+      // A clean mid-move keeps animating to its remapped target, which it
+      // already nearly reached during the taper.
+      const p0 = st.player;
+      const pl = TR.mapLane(from, to, p0.lane), pt = TR.mapLane(from, to, p0.targetLane);
+      const nl = pl < 0 ? 0 : Math.min(pl, to - 1);
+      const nt = pt < 0 ? nl : Math.min(pt, to - 1);
+      const changed = (nl !== pl || nt !== pt);
+      p0.lane = nl; p0.targetLane = nt;
+      if (p0.moveT >= 1 || changed) { p0.x = st.laneXs[nl]; if (changed) p0.moveT = 1; }
+      // Traffic: remap; a doomed-lane car still before the line vanishes
+      // (rare fallback — forced merges normally vacate it during approach).
+      // A doomed-lane car already beyond the line is already in new lane 0.
+      const kept = [];
       for (const v of st.traffic) {
-        v.x = v.startX = st.laneXs[v.lane];
-        v.targetLane = v.lane; v.moveT = 1; v.moving = false; v.signalT = 0;
+        const nl = TR.mapLane(from, to, v.lane), nt = TR.mapLane(from, to, v.targetLane);
+        if (nl >= to || nt >= to) continue;
+        if ((nl < 0 || nt < 0) && v.s < line) continue;
+        v.lane = nl < 0 ? 0 : nl;
+        v.targetLane = nt < 0 ? 0 : nt;
+        if (!v.moving && v.signalT <= 0) { v.x = v.startX = st.laneXs[v.lane]; }
+        kept.push(v);
       }
-      st.pickups = st.pickups.filter((pk) => pk.lane < newCount);
+      st.traffic = kept;
+      // Pickups: same remap (doomed-lane pickups before the line go away).
+      st.pickups = st.pickups.filter((pk) => {
+        const nl = TR.mapLane(from, to, pk.lane);
+        if (nl < 0 && pk.s < line) return false;
+        if (nl >= to) return false;
+        pk.lane = nl < 0 ? 0 : nl; pk.x = st.laneXs[pk.lane];
+        return true;
+      });
+      st.events.push({ t: 'lanesChanged', lanes: to });
+    } else if (nextSeg && nextSeg.lanes !== st.laneCount && nextSeg.at - st.dist <= TR.TRANSITION_LEN) {
+      // Inside the taper zone: interpolate centres (old-indexed) and drift
+      // everything idle along with them, so the whole road bends smoothly.
+      const p = 1 - (nextSeg.at - st.dist) / TR.TRANSITION_LEN;
+      st.laneXs = TR.taperLaneXs(st.laneCount, nextSeg.lanes, p);
+      const pp = st.player;
+      if (pp.moveT >= 1) pp.x = st.laneXs[pp.lane];
+      for (const v of st.traffic) if (!v.moving) { v.x = st.laneXs[v.lane]; v.startX = v.x; }
       for (const pk of st.pickups) pk.x = st.laneXs[pk.lane];
-      st.events.push({ t: 'lanesChanged', lanes: newCount });
     }
 
     // Player lane snap.
@@ -396,8 +516,9 @@ const TR = {
         last = { at: last.at + every, state: 'upcoming' };
         st.restStops.push(last);
       }
-      // Endless lane cycle: 3 -> 4 -> 2 -> 3 ... every 2000 m.
-      const cycle = [4, 2, 3];
+      // Endless lane cycle: 3 -> 4 -> 3 -> 2 ... every 2000 m.
+      // (Fase 2Q: decreases are at most 1, so 4 -> 2 is gone.)
+      const cycle = [4, 3, 2];
       let lastSeg = st.segments[st.segments.length - 1];
       while (lastSeg.at < st.dist + 3000) {
         lastSeg = { at: lastSeg.at + 2000, lanes: cycle[(st.segments.length - 1) % 3] };
@@ -420,7 +541,7 @@ const TR = {
         const lane = (startLane + k) % st.laneCount;
         const s = st.dist + 180 + Math.random() * 60;
         const pkZone = TR.zoneAt(st, s);
-        const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane);
+        const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane) || TR.isDoomedLaneAt(st, lane, s);
         if (!blocked) {
           st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false, kind: 'fuel' });
           break;
@@ -440,7 +561,7 @@ const TR = {
           const lane = (startLane + k) % st.laneCount;
           const s = st.dist + 180 + Math.random() * 60;
           const pkZone = TR.zoneAt(st, s);
-          const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane);
+          const blocked = st.traffic.some((v) => v.lane === lane && Math.abs(v.s - s) < 25) || (pkZone && lane === pkZone.lane) || TR.isDoomedLaneAt(st, lane, s);
           if (!blocked) {
             st.pickups.push({ lane, s, x: st.laneXs[lane], taken: false, kind: 'shield' });
             break;
@@ -495,6 +616,31 @@ const TR = {
         const e = v.moveT * v.moveT * (3 - 2 * v.moveT);
         v.x = v.startX + (st.laneXs[v.targetLane] - v.startX) * e;
         if (v.moveT >= 1) { v.lane = v.targetLane; v.moving = false; }
+      } else if (v.s >= st.dist && TR.isDoomedLaneAt(st, v.lane, v.s) && st.status === 'play') {
+        // Forced merge (Fase 2Q): ANY vehicle stuck in a vanishing lane
+        // must vacate it with a proper signal, whatever its kind (trucks
+        // and buses included — the old sedan-only rule would strand them).
+        // No speed tricks are needed: the deadline is the PLAYER crossing
+        // the line (300 m of player travel from the warning), so a blocked
+        // car simply waits and retries. Clearance mirrors canChangeLane
+        // minus the wall rule (the lane is going away) but keeps the 45 m
+        // gap and the player-proximity guard.
+        const target = 1; // the doomed lane is always 0; its survivor is 1
+        let clear = true;
+        for (const o of st.traffic) {
+          if (o === v) continue;
+          if (o.lane === target && Math.abs(o.s - v.s) < 45) { clear = false; break; }
+          if (o.moving && o.targetLane === target && Math.abs(o.s - v.s) < 45) { clear = false; break; }
+        }
+        const fz = TR.zoneAt(st, v.s);
+        if (fz && target === fz.lane) clear = false;
+        const gapToPlayer = v.s - st.dist;
+        if (target === st.player.targetLane && gapToPlayer > -5 && gapToPlayer < 40) clear = false;
+        if (clear) {
+          v.targetLane = target;
+          v.signalT = TR.SIGNAL_TIME;
+          st.events.push({ t: 'signal', lane: v.lane, target });
+        }
       } else if ((v.kind === 'sedan') && st.status === 'play') {
         // Only sedans change lanes, and only after signalling.
         v.changeCd -= dt;

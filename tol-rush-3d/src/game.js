@@ -69,7 +69,7 @@ const I18N = {
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
     missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai',
-    roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!',
+    roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!', laneClosingToast: 'Jalur akan ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
     shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
@@ -103,7 +103,7 @@ const I18N = {
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
     missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete',
-    roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!',
+    roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!', laneClosingToast: 'Lane closing ahead!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
     shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
@@ -584,6 +584,31 @@ function setLaneMarkings(count) {
   for (const c of [2, 3, 4]) if (markingGroups[c]) markingGroups[c].visible = c === count;
   if (dashesByCount[count]) dashes = dashesByCount[count];
   currentMarkings = count;
+}
+
+// Taper markings (Fase 2Q): shown INSTEAD of the static groups while the
+// road tapers into a new lane count. The group sits at the segment line
+// (like the gantry) and extends 200 m toward the camera plus 100 m beyond
+// the line at the new layout; each line is cut into short segments running
+// from its new-layout x (at the line) to its old-layout x (at the zone
+// start), so dividers visibly converge or fork instead of swapping instantly.
+let taperGroup = null, taperKey = '';
+function syncTaperGroup(from, to) {
+  const key = from + '>' + to;
+  if (taperGroup && taperKey === key) return;
+  if (taperGroup) scene.remove(taperGroup);
+  taperGroup = new THREE.Group();
+  const SEG = 10, LEN = TR.TRANSITION_LEN / SEG;
+  for (const [x0, x1] of TR.taperLines(from, to)) {
+    // k = -5..-1 extends 100 m BEYOND the line at the new layout (so the
+    // road ahead of the line keeps its markings while the zone tapers).
+    for (let k = -5; k < SEG; k++) {
+      const f = Math.max(0, (k + 0.5) / SEG); // 0 at/beyond the line, 1 at the zone start
+      taperGroup.add(box(0.18, 0.02, LEN, 0xffffff, x1 + (x0 - x1) * f, 0.02, (k + 0.5) * LEN));
+    }
+  }
+  taperGroup.visible = false; scene.add(taperGroup);
+  taperKey = key;
 }
 
 function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
@@ -1290,6 +1315,14 @@ function lane(dir) {
     toast(t('laneClosedToast')); beep(200, 0.15, 'square', 0.15);
     return;
   }
+  // Fase 2Q: moving into a lane that is about to vanish is refused with an
+  // explanation, instead of silently doing nothing (TR.moveLane also refuses
+  // it as a backstop; this branch is what tells the player why).
+  const info = TR.transitionInfo(st);
+  if (info && info.doomed >= 0 && next === info.doomed && next !== st.player.targetLane) {
+    toast(t('laneClosingToast')); beep(200, 0.15, 'square', 0.15);
+    return;
+  }
   TR.moveLane(st, dir); beep(500, 0.06, 'sine', 0.08);
 }
 function rest() { if (running && !restAnim && !paused) startRestAnim(); }
@@ -1372,8 +1405,23 @@ function loop(now) {
     if (restAnim) { updateRestAnim(dt); } else {
     TR.step(st, dt);
     handleEvents();
+    // Lane-count taper visuals (Fase 2Q): during the 200 m zone the static
+    // marking groups hide and the taper group takes over, positioned at
+    // the segment line like the gantry; otherwise the static group for the
+    // current count shows as before.
+    const tapSeg = TR.nextSegmentChange(st);
+    const tapGap = tapSeg ? tapSeg.at - st.dist : Infinity;
+    const tapering = !!tapSeg && tapSeg.lanes !== st.laneCount && tapGap <= TR.TRANSITION_LEN && tapGap > -30;
+    if (tapering) {
+      syncTaperGroup(st.laneCount, tapSeg.lanes);
+      taperGroup.visible = true;
+      taperGroup.position.z = -tapGap;
+      for (const c of [2, 3, 4]) if (markingGroups[c]) markingGroups[c].visible = false;
+    } else {
+      if (taperGroup) taperGroup.visible = false;
+      if (st.laneCount !== currentMarkings) setLaneMarkings(st.laneCount);
+    }
     // scroll world props with player speed
-    if (st.laneCount !== currentMarkings) setLaneMarkings(st.laneCount);
     const move = st.speed * dt;
     for (const d of dashes) { d.position.z += move; if (d.position.z > 12) d.position.z -= 192; }
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }

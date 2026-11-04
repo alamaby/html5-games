@@ -263,14 +263,15 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   ok('random varies', seen.size > 1);
 }
 
-// Lane-count segments: short route changes 3 -> 4 -> 2 -> 3
+// Lane-count segments: short route changes 3 -> 4 -> 3 -> 2 (Fase 2Q:
+// decreases are at most 1, so the old 4 -> 2 jump is gone)
 {
   const st = TR.createGame({ mode: 'short' }); quiet(st);
   eq('short starts 3 lanes', st.laneCount, 3);
   eq('laneCountAt 0 m', TR.laneCountAt(st, 0), 3);
   eq('laneCountAt 1500 m', TR.laneCountAt(st, 1500), 4);
-  eq('laneCountAt 3000 m', TR.laneCountAt(st, 3000), 2);
-  eq('laneCountAt 4000 m', TR.laneCountAt(st, 4000), 3);
+  eq('laneCountAt 3000 m', TR.laneCountAt(st, 3000), 3);
+  eq('laneCountAt 4000 m', TR.laneCountAt(st, 4000), 2);
   eq('next change from start', TR.nextSegmentChange(st).lanes, 4);
 
   // warning fires 300 m before the line
@@ -282,25 +283,35 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   TR.step(w, 1 / 60);
   ok('warning within 300 m', w.events.some((e) => e.t === 'lanesAhead'));
 
-  // transition clamps the player into the narrower road
+  // line remap: old lane 3 -> new lane 2 (4 -> 3 closes the leftmost lane)
   const n = TR.createGame({ mode: 'short' }); quiet(n);
   n.dist = 2000; TR.step(n, 1 / 60); // onto the 4-lane stretch
   eq('4 lanes at 2000 m', n.laneCount, 4);
   n.player.lane = 3; n.player.targetLane = 3; n.player.x = 5.1; n.player.moveT = 1;
   n.dist = 2999.8; TR.step(n, 1 / 60); // crosses the 3000 m line
-  eq('player clamped to 2 lanes', n.player.lane, 1);
-  eq('player x on new centre', n.player.x, 1.7);
-  ok('lanesChanged event', n.events.some((e) => e.t === 'lanesChanged' && e.lanes === 2));
+  eq('player remapped to new lane 2', n.player.lane, 2);
+  eq('player x on new centre', n.player.x, 3.4);
+  ok('lanesChanged event', n.events.some((e) => e.t === 'lanesChanged' && e.lanes === 3));
 
-  // traffic in a disappearing lane is dropped at the line
+  // safety net: a player still in the doomed lane at the line merges
+  const d = TR.createGame({ mode: 'short' }); quiet(d);
+  d.dist = 2000; TR.step(d, 1 / 60);
+  d.player.lane = 0; d.player.targetLane = 0; d.player.x = -5.1; d.player.moveT = 1;
+  d.dist = 2999.8; TR.step(d, 1 / 60);
+  eq('doomed-lane player merged to new lane 0', d.player.lane, 0);
+  eq('merged player x on new centre', d.player.x, -3.4);
+
+  // traffic remap: beyond-line cars remap (lane 3 -> 2, lane 1 -> 0);
+  // a doomed-lane car still BEFORE the line is the rare fallback drop
   const t = TR.createGame({ mode: 'short' }); quiet(t);
   t.dist = 2000; TR.step(t, 1 / 60); // 4 lanes
-  const mkCar = (lane, x) => ({ kind: 'sedan', lane, targetLane: lane, s: 3200, x, startX: x, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 });
-  t.traffic.push(mkCar(3, 5.1), mkCar(1, 0));
-  eq('traffic kept on 4-lane stretch', t.traffic.length, 2);
+  const mkCar = (lane, x, s) => ({ kind: 'sedan', lane, targetLane: lane, s, x, startX: x, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 });
+  t.traffic.push(mkCar(3, 5.1, 3200), mkCar(1, 0, 3200), mkCar(0, -5.1, 2900));
+  eq('traffic kept on 4-lane stretch', t.traffic.length, 3);
   t.dist = 2999.8; TR.step(t, 1 / 60);
-  eq('vanishing-lane traffic dropped', t.traffic.length, 1);
-  eq('remaining traffic reseated', t.traffic[0].lane, 1);
+  eq('beyond-line traffic remapped, before-line doomed dropped', t.traffic.length, 2);
+  eq('old lane 3 is now lane 2', t.traffic.find((v) => v.s === 3200 && v.x === 3.4).lane, 2);
+  eq('old lane 1 is now lane 0', t.traffic.find((v) => v.s === 3200 && v.x === -3.4).lane, 0);
 
   // moveLane clamps to the current lane count
   const m = TR.createGame({ mode: 'short' }); quiet(m);
@@ -313,24 +324,31 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   ok('can move to lane 3', TR.moveLane(m, 1));
   m.player.moveT = 1; m.player.lane = m.player.targetLane = 3;
   ok('cannot move past lane 3', !TR.moveLane(m, 1));
-  m.dist = 3100; TR.step(m, 1 / 60); // now 2 lanes, player auto-clamped
+  m.dist = 3100; TR.step(m, 1 / 60); // now 3 lanes, player remapped
+  eq('3 lanes after line', m.laneCount, 3);
+  eq('player remapped', m.player.lane, 2);
+  ok('cannot move past lane 2 on 3-lane road', !TR.moveLane(m, 1));
+  m.dist = 4100; TR.step(m, 1 / 60); // now 2 lanes
   eq('2 lanes after line', m.laneCount, 2);
-  eq('player auto-clamped', m.player.lane, 1);
-  ok('cannot move past lane 1 on 2-lane road', !TR.moveLane(m, 1));
+  eq('player remapped to lane 1', m.player.lane, 1);
 
   // wall rule generalises: on 2 lanes, the single other lane blocked = wall
   const wl = TR.createGame({ mode: 'short' }); quiet(wl);
-  wl.dist = 3100; TR.step(wl, 1 / 60);
+  wl.dist = 4100; TR.step(wl, 1 / 60);
   wl.traffic.push({ lane: 1, targetLane: 1, s: wl.dist + 180, x: 1.7, moving: false });
   ok('2-lane wall blocks spawn', TR.spawnVehicle(wl, { lane: 0, gapAhead: 180 }) === null);
 
-  // endless lane cycle: 3 -> 4 -> 2 -> 3 every 2000 m
+  // endless lane cycle: 3 -> 4 -> 3 -> 2 every 2000 m
   const e = TR.createGame({ mode: 'endless' }); quiet(e);
   const drive = (st, target) => { let guard = 0; while (st.dist < target && guard++ < 2000) TR.step(st, 1); };
   drive(e, 2100);
   eq('endless 4 lanes at ~2100 m', e.laneCount, 4);
+  drive(e, 4100);
+  eq('endless 3 lanes at ~4100 m', e.laneCount, 3);
   drive(e, 6100);
-  eq('endless back to 3 lanes at ~6100 m', e.laneCount, 3);
+  eq('endless 2 lanes at ~6100 m', e.laneCount, 2);
+  drive(e, 8100);
+  eq('endless 4 lanes again at ~8100 m', e.laneCount, 4);
 }
 
 // --- cars (Fase 2G) ---
@@ -473,10 +491,10 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
 
   // zone generation skipped where the road has only 2 lanes
   const g = TR.createGame({ mode: 'short' }); quiet(g);
-  g.nextRoadworkAt = 3100; g.nextConvoyAt = 99999;
-  g.dist = 2800;
+  g.nextRoadworkAt = 4100; g.nextConvoyAt = 99999;
+  g.dist = 3800;
   TR.step(g, 1 / 60);
-  ok('no zone on 2-lane stretch', !g.roadworks.some((rz) => rz.at === 3100));
+  ok('no zone on 2-lane stretch', !g.roadworks.some((rz) => rz.at === 4100));
   ok('generator advanced past skipped zone', g.nextRoadworkAt > 3100);
 
   // convoy: one gap lane, trucks/buses only, convoy event fired
@@ -546,6 +564,106 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   const zwShield = zw.pickups.find((pk) => pk.kind === 'shield');
   ok('shield spawned despite closed lane', !!zwShield);
   ok('shield avoids closed lane', zwShield && zwShield.lane !== 1);
+}
+
+// --- gradual lane-count transitions (Fase 2Q) ---
+{
+  // mapLane across every transition shape
+  eq('mapLane 4->3 closes lane 0', TR.mapLane(4, 3, 0), -1);
+  eq('mapLane 4->3 shifts lane 3 to 2', TR.mapLane(4, 3, 3), 2);
+  eq('mapLane 3->4 keeps lane 1', TR.mapLane(3, 4, 1), 1);
+  eq('mapLane 2->4 shifts lane 0 to 1', TR.mapLane(2, 4, 0), 1);
+  eq('mapLane 2->4 shifts lane 1 to 2', TR.mapLane(2, 4, 1), 2);
+
+  // taperLaneXs interpolates centres; the doomed lane converges onto new lane 0
+  eq('taper midpoint 4->3', TR.taperLaneXs(4, 3, 0.5), [-4.25, -2.55, 0.85, 4.25]);
+  eq('taper end 4->3', TR.taperLaneXs(4, 3, 1), [-3.4, -3.4, 0, 3.4]);
+  eq('taper 2->4 keeps old lanes', TR.taperLaneXs(2, 4, 1), [-1.7, 1.7]);
+
+  // taperLines: 4->3 pinches the doomed divider into the new left edge;
+  // 3->4 forks a divider from the old right edge; 2->4 keeps the middle
+  const l43 = TR.taperLines(4, 3);
+  ok('4->3 pinch line', l43.some((l) => l[0] === -3.4 && l[1] === -5.1));
+  const l34 = TR.taperLines(3, 4);
+  ok('3->4 fork line', l34.some((l) => l[0] === 5.1 && l[1] === 3.4));
+  const l24 = TR.taperLines(2, 4);
+  ok('2->4 middle divider stays', l24.some((l) => l[0] === 0 && l[1] === 0));
+  ok('2->4 left divider pinched at old edge', l24.some((l) => l[0] === -3.4 && l[1] === -3.4));
+
+  // moveLane refuses the doomed lane during approach, allows leaving it
+  const r = TR.createGame({ mode: 'short' }); quiet(r);
+  r.dist = 2000; TR.step(r, 1 / 60); // 4 lanes, next line 3000 (4->3)
+  r.dist = 2800; TR.step(r, 1 / 60); // inside the 300 m approach
+  r.player.lane = 1; r.player.targetLane = 1; r.player.moveT = 1;
+  ok('move into doomed lane refused', !TR.moveLane(r, -1));
+  r.player.lane = 0; r.player.targetLane = 0; r.player.moveT = 1;
+  ok('move out of doomed lane allowed', TR.moveLane(r, 1));
+
+  // no spawn in the doomed lane during approach/taper
+  const sp = TR.createGame({ mode: 'short' }); quiet(sp);
+  sp.dist = 2800; TR.step(sp, 1 / 60);
+  eq('doomed-lane spawn blocked', TR.spawnVehicle(sp, { lane: 0, gapAhead: 150, kind: 'sedan', speed: 15 }), null);
+  ok('survivor-lane spawn allowed', !!TR.spawnVehicle(sp, { lane: 1, gapAhead: 150, kind: 'sedan', speed: 15 }));
+
+  // forced merge: a TRUCK in the doomed lane signals right and moves out
+  const f = TR.createGame({ mode: 'short' }); quiet(f);
+  f.dist = 2000; TR.step(f, 1 / 60);
+  f.dist = 2800; TR.step(f, 1 / 60);
+  const truck = { kind: 'truck', lane: 0, targetLane: 0, s: 2900, x: -5.1, startX: -5.1, speed: 12, len: 10, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 };
+  f.traffic.push(truck);
+  TR.step(f, 1 / 60);
+  eq('forced merge signals right', truck.targetLane, 1);
+  ok('forced merge signal on', truck.signalT > 0);
+  for (let i = 0; i < 120; i++) TR.step(f, 1 / 60); // signal 0.9 s + move 0.9 s
+  eq('forced merge completed', truck.lane, 1);
+
+  // forced merge waits when the survivor lane is blocked, then goes
+  const b = TR.createGame({ mode: 'short' }); quiet(b);
+  b.dist = 2000; TR.step(b, 1 / 60);
+  b.dist = 2800; TR.step(b, 1 / 60);
+  const stuck = { kind: 'sedan', lane: 0, targetLane: 0, s: 2900, x: -5.1, startX: -5.1, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 };
+  const blocker = { kind: 'sedan', lane: 1, targetLane: 1, s: 2910, x: -1.7, startX: -1.7, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 };
+  b.traffic.push(stuck, blocker);
+  TR.step(b, 1 / 60);
+  eq('blocked forced merge waits', stuck.signalT, 0);
+  b.traffic = b.traffic.filter((v) => v !== blocker);
+  TR.step(b, 1 / 60);
+  ok('forced merge starts once clear', stuck.signalT > 0);
+
+  // taper smoothness: idle player + car drift gradually, no snap at the line
+  const sm = TR.createGame({ mode: 'short' }); quiet(sm);
+  sm.dist = 2000; TR.step(sm, 1 / 60);
+  sm.player.lane = 2; sm.player.targetLane = 2; sm.player.x = 1.7; sm.player.moveT = 1;
+  const smCar = { kind: 'sedan', lane: 3, targetLane: 3, s: 3500, x: 5.1, startX: 5.1, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 };
+  sm.traffic.push(smCar);
+  sm.dist = 2800;
+  let maxJump = 0, prevPx = sm.player.x, prevCx = smCar.x, beforeLine = null;
+  for (let i = 0; i < 6000 && sm.dist < 3000; i++) {
+    TR.step(sm, 1 / 60);
+    maxJump = Math.max(maxJump, Math.abs(sm.player.x - prevPx), Math.abs(smCar.x - prevCx));
+    prevPx = sm.player.x; prevCx = smCar.x;
+    if (sm.dist < 3000) beforeLine = { px: sm.player.x, cx: smCar.x };
+  }
+  TR.step(sm, 1 / 60); // cross the line
+  ok('taper drift is smooth', maxJump < 0.1);
+  ok('no snap at the line', Math.abs(sm.player.x - beforeLine.px) < 0.1 && Math.abs(smCar.x - beforeLine.cx) < 0.1);
+  eq('player ends on new centre', sm.player.x, 0);
+  eq('car ends on new centre', smCar.x, 3.4);
+
+  // guard: no route ever decreases by 2+ (short, long, endless to 20 km)
+  for (const mode of ['short', 'long']) {
+    const g = TR.createGame({ mode }); quiet(g);
+    let prev = g.segments[0].lanes;
+    for (const sg of g.segments.slice(1)) { ok(mode + ' step down at most 1', sg.lanes >= prev - 1); prev = sg.lanes; }
+  }
+  const ge = TR.createGame({ mode: 'endless' }); quiet(ge);
+  let guard = 0;
+  while (ge.dist < 20000 && guard++ < 3000) {
+    const before = ge.laneCount;
+    TR.step(ge, 1);
+    if (ge.laneCount !== before) { ok('endless step down at most 1', ge.laneCount >= before - 1); }
+  }
+  ok('endless driven to 20 km', ge.dist >= 20000);
 }
 
 console.log(pass + ' passed, ' + fail + ' failed');
