@@ -319,7 +319,11 @@ const TR = {
     let condition = conds.includes(o.condition) ? o.condition : 'day';
     if (o.condition === 'random') condition = conds[Math.floor(Math.random() * conds.length)];
     let moveTime = Math.max(0.10, Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03) * car.move);
-    let brakeFactor = 0.55 - upgrades.brake * 0.07;
+    // Fase 2N balance: base brake must hold behind the slowest truck (12)
+    // even at max base speed (32): 32 * 0.36 = 11.5 < 12. The old 0.55 gave
+    // 17.6 at max speed, so braking behind a truck still closed in at
+    // ~5 m/s and walls became unavoidable crashes.
+    let brakeFactor = 0.36 - upgrades.brake * 0.04;
     let sightRange = 190;
     if (condition === 'night') sightRange = 110; // headlight range: cars appear later
     if (condition === 'rain') { moveTime += 0.04; brakeFactor = Math.min(0.9, brakeFactor * 1.15); } // wet grip: slower snap, weaker brakes
@@ -403,7 +407,9 @@ const TR = {
   },
 
   spawnInterval(dist) {
-    return Math.max(0.65, 1.5 - dist / 6000);
+    // Fase 2N balance: sparser traffic (was 1.5 s -> 0.65 s floor) so
+    // all-lanes-blocked walls form less often and leave real gaps.
+    return Math.max(1.0, 1.9 - dist / 6000);
   },
 
   laneX(lane) { return TR.LANES[lane]; },

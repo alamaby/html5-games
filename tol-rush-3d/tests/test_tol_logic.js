@@ -216,7 +216,7 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
 {
   const up = TR.createGame({ upgrades: { handling: 3, brake: 3, armor: 2, tank: 2 } });
   eq('handling lvl3 move time', up.moveTime, 0.13);
-  eq('brake lvl3 factor', up.brakeFactor, 0.34);
+  eq('brake lvl3 factor', up.brakeFactor, 0.24);
   eq('armor lvl2 max HP', up.maxHp, 5);
   eq('armor lvl2 HP', up.hp, 5);
   eq('tank lvl2 max fuel', up.maxFuel, 140);
@@ -226,7 +226,21 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   eq('armor clamped HP', over.maxHp, 6);
   const def = TR.createGame();
   eq('no upgrades = defaults', def.moveTime, 0.22);
-  eq('no upgrades brake', def.brakeFactor, 0.55);
+  eq('no upgrades brake', def.brakeFactor, 0.36);
+
+// Fase 2N balance: braking must hold behind the slowest truck (speed 12)
+// even at max base speed (32), and spawn must stay sparser than before
+{
+  const maxBase = 20 + 12; // baseSpeed cap
+  for (let lvl = 0; lvl <= 3; lvl++) {
+    const g = TR.createGame({ upgrades: { brake: lvl } });
+    ok('brake lvl' + lvl + ' holds behind slowest truck at max speed',
+      maxBase * g.brakeFactor < 12);
+  }
+  eq('spawn interval at start', TR.spawnInterval(0), 1.9);
+  eq('spawn interval floor', TR.spawnInterval(99999), 1.0);
+  ok('spawn sparser than old floor', TR.spawnInterval(99999) > 0.65);
+}
 }
 
 // Conditions: day default, night shortens sight range, rain slows snap + weakens brakes
