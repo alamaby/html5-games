@@ -79,13 +79,18 @@
   #restInfo { font-size:14px; color:#cdd6f4; margin-top:6px; }
   #restSkipBtn { margin-top:18px; }
   .restbox { width:100%; max-width:340px; text-align:center; }
-  #speedo { position:fixed; top:54px; right:12px; z-index:5; text-align:center; pointer-events:none; }
-  #speedo svg { display:block; margin:0 auto; }
+  /* Fase 2O: speedo leaves the crowded top zone and docks bottom-right,
+     above the right control cluster, where it covers only near-field road.
+     Same spot in portrait and landscape; only its size changes. */
+  #speedo { position:fixed; right:12px; bottom:150px; z-index:5; text-align:center; pointer-events:none; }
+  #speedo svg { display:block; margin:0 auto; width:96px; height:96px; }
+  @media (orientation: landscape) { #speedo svg { width:110px; height:110px; } }
   #odo { font-size:12px; font-weight:800; letter-spacing:1px; color:#fff; margin-top:2px;
          background:rgba(10,16,32,.55); border-radius:8px; padding:3px 8px; }
   #sign { text-align:center; margin-top:8px; font-size:15px; font-weight:800; color:#7dff9a;
           text-shadow:0 2px 8px rgba(0,0,0,.7); min-height:22px; }
-  #toast { position:fixed; top:110px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(20,26,52,.94);
+  /* Fase 2O: toast sits below the whole top stack (~124px), never over the speedo. */
+  #toast { position:fixed; top:170px; left:50%; transform:translateX(-50%); z-index:8; background:rgba(20,26,52,.94);
            border:1px solid rgba(255,215,106,.45); border-radius:14px; padding:10px 18px; font-weight:800;
            font-size:15px; opacity:0; transition:opacity .3s; pointer-events:none; text-align:center; max-width:88vw; }
   #toast.show { opacity:1; }
@@ -120,6 +125,19 @@
             background:rgba(15,22,45,.85); border:1px solid rgba(255,255,255,.2); border-radius:12px;
             padding:8px 14px; font-size:13px; font-weight:700; pointer-events:none; text-align:center; }
   @media (orientation: portrait) { #rotate { display:block; } }
+  /* Fase 2O: the rotate hint and the corner buttons are menu-only. While a
+     run is active (body.playing, kept through pause and the end screen) they
+     hide, so nothing floats over the game; mute lives in the HUD top row. */
+  body.playing #rotate, body.playing .corner { display:none; }
+  /* Fase 2O: labelled bar rows — each bar gets its own row + icon, so the
+     route-progress and fuel bars can never be mistaken for each other. */
+  .barrow { display:flex; align-items:center; gap:8px; margin-top:6px; }
+  .barrow #prog, .barrow #fuelBar { flex:1; margin-top:0; }
+  .barico { font-size:13px; line-height:1; }
+  .iconbtn.small { width:36px; height:36px; border-radius:10px; font-size:13px; pointer-events:auto; }
+  /* menu/pause buttons used to sit below the bars (margin-top:8px); in the
+     top row they must align with the score instead. */
+  #hud .hudrow:first-child #menuBtn, #hud .hudrow:first-child #pauseBtn { margin-top:0; }
   #endStats { font-size:16px; line-height:1.9; color:#cdd6f4; margin:6px 0 22px; }
   #endStats b { color:#fff; }
   .foot { position:fixed; bottom:max(10px, env(safe-area-inset-bottom)); left:0; right:0;
@@ -130,12 +148,11 @@
 <div id="c"></div>
 
 <div id="hud" class="hidden">
-  <div class="hudrow"><span id="hp">♥♥♥</span><span id="score">0</span><span id="shieldLine" class="hidden">🛡</span></div>
+  <div class="hudrow"><span><button id="menuBtn" data-i18n="menu">MENU</button>
+    <button id="pauseBtn">⏸</button></span><span id="score">0</span><span><span id="hp">♥♥♥</span><span id="shieldLine" class="hidden">🛡</span><button class="iconbtn small" id="muteBtn2">🔊</button></span></div>
   <div class="hudrow"><span id="dist"></span><span id="laneLabel"></span><span id="comboLabel"></span></div>
-  <div id="prog"><div id="progFill"></div></div>
-  <div id="fuelBar"><div id="fuelFill"></div></div>
-  <button id="menuBtn" data-i18n="menu">MENU</button>
-  <button id="pauseBtn">⏸</button>
+  <div class="barrow"><span class="barico">🏁</span><div id="prog"><div id="progFill"></div></div></div>
+  <div class="barrow"><span class="barico">⛽</span><div id="fuelBar"><div id="fuelFill"></div></div></div>
   <div id="sign"></div>
   <div id="speedo">
     <svg viewBox="0 0 120 120" width="120" height="120">

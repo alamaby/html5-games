@@ -418,7 +418,12 @@ function isMuted() {
   if (CG.muted) return true;
   try { return localStorage.getItem('tr_mute') === '1'; } catch (e) { return false; }
 }
-function syncMuteUI() { $('muteBtn').textContent = isMuted() ? '🔇' : '🔊'; }
+function syncMuteUI() {
+  const ico = isMuted() ? '🔇' : '🔊';
+  $('muteBtn').textContent = ico;
+  const m2 = $('muteBtn2');
+  if (m2) m2.textContent = ico; // Fase 2O: in-HUD mute mirrors the corner one
+}
 function beep(freq, dur, type, vol, slideTo) {
   if (isMuted()) return;
   const c = ac(); if (!c) return;
@@ -1075,6 +1080,7 @@ function goToMenu() {
   if (playerMesh) { playerMesh.position.set(0, 0, 0); playerMesh.rotation.set(0, 0, 0); }
   $('hud').classList.add('hidden'); $('controls').classList.add('hidden'); $('endOverlay').classList.add('hidden');
   $('startOverlay').classList.remove('hidden');
+  document.body.classList.remove('playing'); // Fase 2O: menu-only UI returns
   setLaneMarkings(3);
   if (lanesGroup) lanesGroup.visible = false;
   updateBestLine(); renderShop(); renderCars(); renderMissions(); renderAchievements(); refreshPlayerMesh();
@@ -1151,6 +1157,7 @@ function startGame(mode) {
   applyCondition(st.condition);
   setLaneMarkings(st.laneCount);
   running = true;
+  document.body.classList.add('playing'); // Fase 2O: hide rotate + corners in-game
   $('startOverlay').classList.add('hidden');
   $('endOverlay').classList.add('hidden');
   $('hud').classList.remove('hidden');
@@ -1229,10 +1236,12 @@ $('resumeBtn').addEventListener('click', () => setPaused(false));
 $('menuBtn3').addEventListener('click', goToMenu);
 $('menuBtn2').addEventListener('click', goToMenu);
 $('restSkipBtn').addEventListener('click', finishRestAnim);
-$('muteBtn').addEventListener('click', () => {
+function toggleMute() {
   try { localStorage.setItem('tr_mute', isMuted() ? '0' : '1'); } catch (e) {}
   syncMuteUI();
-});
+}
+$('muteBtn').addEventListener('click', toggleMute);
+$('muteBtn2').addEventListener('click', toggleMute);
 $('langBtn').addEventListener('click', () => {
   lang = lang === 'id' ? 'en' : 'id';
   try { localStorage.setItem('tr_lang', lang); } catch (e) {}
