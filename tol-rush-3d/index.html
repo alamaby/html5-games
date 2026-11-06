@@ -43,9 +43,9 @@
   #speed { font-size:17px; text-shadow:0 2px 8px rgba(0,0,0,.6); }
   #dist { font-size:14px; color:#ffd76a; text-shadow:0 2px 8px rgba(0,0,0,.6); }
   #prog { height:8px; background:rgba(255,255,255,.18); border-radius:99px; margin-top:8px; overflow:hidden; }
-  #progFill { height:100%; width:0%; background:linear-gradient(90deg,#ffd76a,#ff7a1a); border-radius:99px; }
+  #progFill { height:100%; width:var(--fill, 0%); background:linear-gradient(90deg,#ffd76a,#ff7a1a); border-radius:99px; }
   #fuelBar { height:8px; background:rgba(255,255,255,.18); border-radius:99px; margin-top:6px; overflow:hidden; }
-  #fuelFill { height:100%; width:100%; background:#ffb020; border-radius:99px; }
+  #fuelFill { height:100%; width:var(--fill, 100%); background:#ffb020; border-radius:99px; }
   .shop { width:100%; max-width:340px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09);
           border-radius:12px; padding:12px 14px; margin-bottom:18px; text-align:left; }
   .shophead { font-size:13px; letter-spacing:1px; color:#ffd76a; font-weight:800; margin-bottom:6px; }
@@ -134,6 +134,20 @@
      route-progress and fuel bars can never be mistaken for each other. */
   .barrow { display:flex; align-items:center; gap:8px; margin-top:6px; }
   .barrow #prog, .barrow #fuelBar { flex:1; margin-top:0; }
+  /* Fase 2R: in portrait the route + fuel bars leave the crowded top stack
+     and dock as slim vertical gauges on the left edge, mid-screen — clear
+     of the steering buttons (bottom-left), speedo (bottom-right) and toast.
+     Fill is driven by --fill (set in game.js): width in landscape, height
+     (bottom-anchored) in portrait. Landscape is untouched. */
+  @media (orientation: portrait) {
+    .barrow { position:fixed; top:50%; transform:translateY(-50%); flex-direction:column;
+              gap:6px; margin-top:0; z-index:5; }
+    .barrow.vbar-prog { left:12px; }
+    .barrow.vbar-fuel { left:36px; }
+    .barrow #prog, .barrow #fuelBar { flex:none; width:10px; height:150px; margin-top:0;
+              display:flex; flex-direction:column; justify-content:flex-end; }
+    .barrow #progFill, .barrow #fuelFill { width:100%; height:var(--fill, 0%); }
+  }
   .barico { font-size:13px; line-height:1; }
   .iconbtn.small { width:36px; height:36px; border-radius:10px; font-size:13px; pointer-events:auto; }
   /* menu/pause buttons used to sit below the bars (margin-top:8px); in the
@@ -152,8 +166,8 @@
   <div class="hudrow"><span><button id="menuBtn" data-i18n="menu">MENU</button>
     <button id="pauseBtn">⏸</button></span><span id="score">0</span><span><span id="hp">♥♥♥</span><span id="shieldLine" class="hidden">🛡</span><button class="iconbtn small" id="muteBtn2">🔊</button></span></div>
   <div class="hudrow"><span id="dist"></span><span id="laneLabel"></span><span id="comboLabel"></span></div>
-  <div class="barrow"><span class="barico">🏁</span><div id="prog"><div id="progFill"></div></div></div>
-  <div class="barrow"><span class="barico">⛽</span><div id="fuelBar"><div id="fuelFill"></div></div></div>
+  <div class="barrow vbar-prog"><span class="barico">🏁</span><div id="prog"><div id="progFill"></div></div></div>
+  <div class="barrow vbar-fuel"><span class="barico">⛽</span><div id="fuelBar"><div id="fuelFill"></div></div></div>
   <div id="sign"></div>
   <div id="speedo">
     <svg viewBox="0 0 120 120" width="120" height="120">
@@ -1994,15 +2008,15 @@ function updateHUD() {
   const endless = st.mode === 'endless';
   if (endless) {
     $('dist').textContent = t('travelled') + ' ' + (st.dist / 1000).toFixed(1) + ' km';
-    $('prog').style.display = 'none';
+    $('prog').parentElement.style.display = 'none';
   } else {
     const remain = Math.max(0, st.routeLen - st.dist) / 1000;
     $('dist').textContent = t('left') + ' ' + remain.toFixed(1) + ' km';
-    $('prog').style.display = 'block';
-    $('progFill').style.width = Math.min(100, (st.dist / st.routeLen) * 100) + '%';
+    $('prog').parentElement.style.display = 'flex';
+    $('progFill').style.setProperty('--fill', Math.min(100, (st.dist / st.routeLen) * 100) + '%');
   }
   $('nitroFill').style.width = Math.round(st.nitro) + '%';
-  $('fuelFill').style.width = Math.round((st.fuel / st.maxFuel) * 100) + '%';
+  $('fuelFill').style.setProperty('--fill', Math.round((st.fuel / st.maxFuel) * 100) + '%');
   $('fuelFill').style.background = (st.fuel / st.maxFuel) < 0.25 ? '#ff3d5e' : '#ffb020';
   $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
   $('laneLabel').textContent = st.laneCount + ' ' + t('lanes');

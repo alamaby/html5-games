@@ -955,15 +955,15 @@ function updateHUD() {
   const endless = st.mode === 'endless';
   if (endless) {
     $('dist').textContent = t('travelled') + ' ' + (st.dist / 1000).toFixed(1) + ' km';
-    $('prog').style.display = 'none';
+    $('prog').parentElement.style.display = 'none';
   } else {
     const remain = Math.max(0, st.routeLen - st.dist) / 1000;
     $('dist').textContent = t('left') + ' ' + remain.toFixed(1) + ' km';
-    $('prog').style.display = 'block';
-    $('progFill').style.width = Math.min(100, (st.dist / st.routeLen) * 100) + '%';
+    $('prog').parentElement.style.display = 'flex';
+    $('progFill').style.setProperty('--fill', Math.min(100, (st.dist / st.routeLen) * 100) + '%');
   }
   $('nitroFill').style.width = Math.round(st.nitro) + '%';
-  $('fuelFill').style.width = Math.round((st.fuel / st.maxFuel) * 100) + '%';
+  $('fuelFill').style.setProperty('--fill', Math.round((st.fuel / st.maxFuel) * 100) + '%');
   $('fuelFill').style.background = (st.fuel / st.maxFuel) < 0.25 ? '#ff3d5e' : '#ffb020';
   $('comboLabel').textContent = st.combo > 1 ? t('combo') + st.combo : '';
   $('laneLabel').textContent = st.laneCount + ' ' + t('lanes');
