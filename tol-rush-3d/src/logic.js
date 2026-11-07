@@ -197,14 +197,17 @@ const TR = {
 
   // Lane centres (OLD-indexed) at taper progress p: each surviving lane
   // interpolates to its new centre; the doomed lane converges onto the new
-  // lane 0, i.e. it merges into its neighbour over the zone.
+  // lane 0, i.e. it merges into its neighbour over the zone. The progress
+  // is eased (smoothstep) so lanes bend gradually — straight at both ends
+  // of the zone — matching the taper marking lines. p=0/0.5/1 are unchanged.
   taperLaneXs(from, to, p) {
     const fromXs = TR.LANE_X[from], toXs = TR.LANE_X[to];
+    const e = p * p * (3 - 2 * p);
     const out = [];
     for (let i = 0; i < from; i++) {
       const j = TR.mapLane(from, to, i);
       const dest = j < 0 ? toXs[0] : toXs[j];
-      out.push(fromXs[i] + (dest - fromXs[i]) * p);
+      out.push(fromXs[i] + (dest - fromXs[i]) * e);
     }
     return out;
   },

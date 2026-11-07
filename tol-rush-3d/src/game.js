@@ -598,13 +598,20 @@ function syncTaperGroup(from, to) {
   if (taperGroup && taperKey === key) return;
   if (taperGroup) scene.remove(taperGroup);
   taperGroup = new THREE.Group();
-  const SEG = 10, LEN = TR.TRANSITION_LEN / SEG;
+  // Fase 2S: 40 short (5 m) segments per line, each rotated to the line's
+  // direction, lateral position eased (smoothstep) — so the line bends
+  // gradually instead of a staircase of straight 20 m boxes. k = -20..-1
+  // extends 100 m BEYOND the line at the new layout (road ahead keeps its
+  // markings while the zone tapers); k >= 0 covers the 200 m zone.
+  const SEG = 40, LEN = TR.TRANSITION_LEN / SEG;
+  const ease = (f) => f * f * (3 - 2 * f);
   for (const [x0, x1] of TR.taperLines(from, to)) {
-    // k = -5..-1 extends 100 m BEYOND the line at the new layout (so the
-    // road ahead of the line keeps its markings while the zone tapers).
-    for (let k = -5; k < SEG; k++) {
-      const f = Math.max(0, (k + 0.5) / SEG); // 0 at/beyond the line, 1 at the zone start
-      taperGroup.add(box(0.18, 0.02, LEN, 0xffffff, x1 + (x0 - x1) * f, 0.02, (k + 0.5) * LEN));
+    for (let k = -20; k < SEG; k++) {
+      const f0 = Math.max(0, k / SEG), f1 = Math.max(0, (k + 1) / SEG);
+      const xa = x1 + (x0 - x1) * ease(f0), xb = x1 + (x0 - x1) * ease(f1);
+      const m = box(0.18, 0.02, LEN + 0.3, 0xffffff, (xa + xb) / 2, 0.02, (k + 0.5) * LEN);
+      m.rotation.y = Math.atan2(xb - xa, LEN);
+      taperGroup.add(m);
     }
   }
   taperGroup.visible = false; scene.add(taperGroup);
@@ -1139,23 +1146,25 @@ function buildRestSeqGroup() {
   // drive-lane dashes along x=-14 (entrance -> SPBU -> exit)
   for (let i = 0; i < 11; i++) g.add(box(0.3, 0.12, 2.5, 0xdddddd, -14, 0.06, -18 - i * 6));
   for (let i = 0; i < 5; i++) g.add(box(0.3, 0.12, 3, 0xdddddd, -14, 0.06, -94 - i * 5));
-  // main building + roof + road-facing sign
-  g.add(box(14, 4, 10, 0xe8e2d2, -29, 2, -45));
-  g.add(box(15, 0.5, 11, 0x2a6b4a, -29, 4.2, -45));
+  // main building + roof + road-facing sign (Fase 2S: moved 2 m closer to
+  // the drive lane and enlarged so the complex reads bigger on a phone)
+  g.add(box(15, 4.5, 11, 0xe8e2d2, -27, 2.25, -45));
+  g.add(box(16, 0.5, 12, 0x2a6b4a, -27, 4.7, -45));
   const bldSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.5),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', '') }));
-  bldSign.rotation.y = Math.PI / 2; bldSign.position.set(-21.8, 2.6, -45); g.add(bldSign);
+  bldSign.rotation.y = Math.PI / 2; bldSign.position.set(-19.3, 2.8, -45); g.add(bldSign);
   // musholla + toilet block
   g.add(box(6, 3, 6, 0xf2ede2, -29, 1.5, -62));
   g.add(box(7, 0.5, 7, 0x2a6b4a, -29, 3.2, -62));
   g.add(box(0.8, 5, 0.8, 0xf2ede2, -25.5, 2.5, -62));
   g.add(box(8, 2.5, 4, 0x9fb6c3, -29, 1.25, -30));
   // SPBU: canopy + pillars + pump beside the drive lane + kiosk + sign
-  g.add(box(14, 0.5, 9, 0xcc2222, -16, 4.5, -85));
+  // (Fase 2S: canopy enlarged so it reads bigger on a phone)
+  g.add(box(16, 0.6, 10, 0xcc2222, -16, 4.5, -85));
   for (const px of [-21, -11]) for (const pz of [-88, -82])
     g.add(box(0.5, 4.5, 0.5, 0xeeeeee, px, 2.25, pz));
   g.add(box(1.2, 2.2, 0.8, 0xf2f2f2, -17.5, 1.1, -85));
-  g.add(box(3, 2.5, 3, 0xe8e2d2, -23, 1.25, -85));
+  g.add(box(3, 2.5, 3, 0xe8e2d2, -22, 1.25, -85));
   const spbuSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 1.6),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('SPBU', '') }));
   spbuSign.position.set(-16, 4.5, -80.4); g.add(spbuSign);
@@ -1197,12 +1206,14 @@ function clearRestSeq() {
 // at the end of the animation or on SKIP — the fill bar is the visual refill.
 let restAnim = null;
 // Beat table: end time, scroll end, lane x (null = merge to player's lane), stage key.
+// Fase 2S: beat 1 (entry ramp) lengthened 12 m / 2.5 s -> 30 m / 4 s so the
+// car enters on a gentler, longer ramp; later beats shift +1.5 s (total 17.5 s).
 const REST_BEATS = [
-  { t1: 2.5, s1: 12, x1: -12, stage: 'restS1' },
-  { t1: 7.5, s1: 78, x1: -14, stage: 'restS2', wander: true },
-  { t1: 10.5, s1: 85, x1: -14, stage: 'restS3' },
-  { t1: 13.5, s1: 85, x1: -14, stage: 'restS4', fuel: true },
-  { t1: 16.0, s1: 110, x1: null, stage: 'restS5' },
+  { t1: 4.0, s1: 30, x1: -12, stage: 'restS1' },
+  { t1: 9.0, s1: 78, x1: -14, stage: 'restS2', wander: true },
+  { t1: 12.0, s1: 85, x1: -14, stage: 'restS3' },
+  { t1: 15.0, s1: 85, x1: -14, stage: 'restS4', fuel: true },
+  { t1: 17.5, s1: 110, x1: null, stage: 'restS5' },
 ];
 function startRestAnim() {
   const stop = TR.openRestStop(st);
@@ -1252,7 +1263,7 @@ function updateRestAnim(dt) {
   playerMesh.rotation.y = Math.max(-0.35, Math.min(0.35, -dxRate * 0.04));
   // queue car pulls away once the player has stopped behind it
   if (restSeqQueueCar) {
-    const qk = Math.max(0, Math.min(1, (t - 8.0) / 1.5));
+    const qk = Math.max(0, Math.min(1, (t - 9.5) / 1.5));
     restSeqQueueCar.position.z = -85 - 30 * ease(qk);
   }
   // fuel fills only during the SPBU beat; before it show current fuel, after it 100%
@@ -1273,9 +1284,11 @@ function updateRestAnim(dt) {
     headlight.target.position.set(carX, 0.5, -40);
     headlight.target.updateMatrixWorld();
   }
-  // keep the car in frame while it drives the sequence
-  camera.position.set(carX * 0.5, 5.4, 9);
-  camera.lookAt(carX * 0.65, 0.8, -12);
+  // Fase 2S: camera centres on the car through the whole sequence (full
+  // carX follow, not the half-follow of normal play) so it never drifts
+  // out of frame on a narrow portrait phone.
+  camera.position.set(carX, 5.4, 9);
+  camera.lookAt(carX, 0.8, -12);
   if (t >= REST_BEATS[REST_BEATS.length - 1].t1) finishRestAnim();
 }
 function startGame(mode) {

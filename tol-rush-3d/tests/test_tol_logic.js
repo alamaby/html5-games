@@ -577,6 +577,7 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
 
   // taperLaneXs interpolates centres; the doomed lane converges onto new lane 0
   eq('taper midpoint 4->3', TR.taperLaneXs(4, 3, 0.5), [-4.25, -2.55, 0.85, 4.25]);
+  eq('taper eased quarter 4->3', TR.taperLaneXs(4, 3, 0.25), [-4.834375, -1.965625, 1.434375, 4.834375]);
   eq('taper end 4->3', TR.taperLaneXs(4, 3, 1), [-3.4, -3.4, 0, 3.4]);
   eq('taper 2->4 keeps old lanes', TR.taperLaneXs(2, 4, 1), [-1.7, 1.7]);
 
