@@ -663,8 +663,8 @@ function extrudeBody(pts, width, color) {
   s.moveTo(pts[0][0], pts[0][1]);
   for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
   s.closePath();
-  const depth = width - 0.1;
-  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2, curveSegments: 8 });
+  const depth = width - 0.16; // bevel 0.08 each side keeps total width exact
+  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 3, curveSegments: 12 });
   geo.rotateY(-Math.PI / 2); // shape x -> world z (front = -z), extrude z -> world x
   geo.translate(depth / 2, 0, 0);
   return new THREE.Mesh(geo, mat(color));
@@ -698,7 +698,7 @@ function makeCar(kind, colorHex, highPoly) {
     g.add(box(1.6, 0.5, 2.2, 0x1a2b45, 0, 1.12, 0.2)); // cabin
     g.add(box(1.85, 0.18, 0.9, col, 0, 0.95, 1.9)); // spoiler-ish tail
   }
-  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, highPoly ? 24 : 14);
+  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, highPoly ? 32 : 14);
   const wheelMat = mat(0x111111);
   let zs;
   if (kind === 'truck') zs = [-3.2, -1.2, 1.2, 3.2];
@@ -706,14 +706,29 @@ function makeCar(kind, colorHex, highPoly) {
   else if (kind === 'hatch') zs = [-1.15, 1.15];
   else if (kind === 'suv' || kind === 'sport') zs = [-1.5, 1.5];
   else zs = [-1.45, 1.45];
-  const hubGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.34, highPoly ? 16 : 10);
+  const hubGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.34, highPoly ? 20 : 10);
   const hubMat = mat(0x8a8f9a);
+  // Fase 2U: front wheels (z = zs[0], the front axle) sit in steering pivots
+  // on the player car, so they visibly turn into a lane change; rear wheels
+  // stay fixed. wheelNodes tracks every wheel part for the body-group split.
+  const wheelNodes = [], steerPivots = [];
   for (const z of zs) for (const x of [-0.92, 0.92]) {
     const w = new THREE.Mesh(wheelGeo, wheelMat);
-    w.rotation.z = Math.PI / 2; w.position.set(x, 0.38, z); g.add(w);
+    w.rotation.z = Math.PI / 2;
     const h = new THREE.Mesh(hubGeo, hubMat);
-    h.rotation.z = Math.PI / 2; h.position.set(x, 0.38, z); g.add(h);
+    h.rotation.z = Math.PI / 2;
+    if (highPoly && z === zs[0]) {
+      const pv = new THREE.Group();
+      pv.position.set(x, 0.38, z);
+      pv.add(w); pv.add(h); g.add(pv);
+      wheelNodes.push(pv); steerPivots.push(pv);
+    } else {
+      w.position.set(x, 0.38, z); h.position.set(x, 0.38, z);
+      g.add(w); g.add(h);
+      wheelNodes.push(w, h);
+    }
   }
+  if (steerPivots.length) g.userData.steer = steerPivots;
   // headlights (front = -z) and taillights (rear = +z); basic material so they
   // glow at night instead of going dark with the scene lights
   const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : (kind === 'truck' ? -4.55 : (kind === 'hatch' ? -1.8 : -2.3)));
@@ -763,6 +778,18 @@ function makeCar(kind, colorHex, highPoly) {
   sigL.visible = sigR.visible = false;
   g.add(sigL); g.add(sigR);
   g.userData.signals = { left: sigL, right: sigR };
+  // Fase 2U: on the player car, everything except the wheels lives in a
+  // body subgroup, so the body can roll/shift against the wheels mid-turn
+  // instead of the whole car moving as one rigid piece.
+  if (highPoly) {
+    const body = new THREE.Group();
+    for (const child of [...g.children]) {
+      if (wheelNodes.includes(child)) continue;
+      g.remove(child); body.add(child);
+    }
+    g.add(body);
+    g.userData.body = body;
+  }
   return g;
 }
 function initThree() {
@@ -1245,6 +1272,7 @@ function clearRestSeq() {
 // back. Effects (heal, refill, +250, traffic clear) are applied by TR.tryRest
 // at the end of the animation or on SKIP — the fill bar is the visual refill.
 let restAnim = null;
+let steerCur = 0; // Fase 2U: smoothed steering angle, driven by the lane gap
 // Beat table: end time, scroll end, lane x (null = merge to player's lane), stage key.
 // Fase 2S: beat 1 (entry ramp) lengthened 12 m / 2.5 s -> 30 m / 4 s so the
 // car enters on a gentler, longer ramp; later beats shift +1.5 s (total 17.5 s).
@@ -1271,12 +1299,21 @@ function startRestAnim() {
   beep(600, 0.1, 'sine', 0.12);
   return true;
 }
+// Fase 2U: straighten the steering pivots and level the body after a
+// sequence or a fresh start, so no stale lean survives into the next run.
+function resetPlayerPose() {
+  if (!playerMesh) return;
+  if (playerMesh.userData.steer) for (const pv of playerMesh.userData.steer) pv.rotation.y = 0;
+  const pb = playerMesh.userData.body;
+  if (pb) { pb.rotation.z = 0; pb.position.x = 0; }
+}
 function finishRestAnim() {
   if (!restAnim) return;
   restAnim = null;
   clearRestSeq();
   $('restOverlay').classList.add('hidden');
   if (playerMesh) { playerMesh.position.set(st.player.x, 0, 0); playerMesh.rotation.set(0, 0, 0); }
+  resetPlayerPose();
   TR.tryRest(st); // toast for the +250/rest event is handled by handleEvents next frame
 }
 function updateRestAnim(dt) {
@@ -1301,6 +1338,12 @@ function updateRestAnim(dt) {
   restAnim.prevX = carX;
   playerMesh.position.set(carX, 0, 0);
   playerMesh.rotation.y = Math.max(-0.35, Math.min(0.35, -dxRate * 0.04));
+  // Fase 2U: wheels steer and body leans with the lateral velocity, same as
+  // a lane change — the car turns into the ramp instead of sliding sideways.
+  const steerR = playerMesh.userData.steer;
+  if (steerR) for (const pv of steerR) pv.rotation.y = Math.max(-0.35, Math.min(0.35, -dxRate * 0.03));
+  const pbodyR = playerMesh.userData.body;
+  if (pbodyR) { pbodyR.rotation.z = dxRate * 0.01; pbodyR.position.x = -dxRate * 0.01; }
   // queue car pulls away once the player has stopped behind it
   if (restSeqQueueCar) {
     const qk = Math.max(0, Math.min(1, (t - 9.5) / 1.5));
@@ -1334,6 +1377,7 @@ function updateRestAnim(dt) {
 function startGame(mode) {
   currentMode = TR.ROUTES[mode] ? mode : 'short';
   restAnim = null; clearRestSeq(); $('restOverlay').classList.add('hidden');
+  resetPlayerPose(); steerCur = 0;
   for (const mesh of trafficMeshes.values()) scene.remove(mesh);
   trafficMeshes.clear();
   for (const mesh of pickupMeshes.values()) scene.remove(mesh);
@@ -1524,6 +1568,15 @@ function loop(now) {
     updateDebris(dt);
     playerMesh.rotation.y = (st.laneXs[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
+    // Fase 2U: front wheels steer into the lane change (smoothed so they
+    // swing in instead of snapping), and the body rolls/shifts against the
+    // wheels instead of moving as one rigid piece.
+    const steerTarget = Math.max(-0.38, Math.min(0.38, (st.laneXs[st.player.targetLane] - st.player.x) * -0.1));
+    steerCur += (steerTarget - steerCur) * Math.min(1, dt * 14);
+    const steer = playerMesh.userData.steer;
+    if (steer) for (const pv of steer) pv.rotation.y = steerCur;
+    const pbody = playerMesh.userData.body;
+    if (pbody) { pbody.rotation.z = -steerCur * 0.18; pbody.position.x = steerCur * 0.12; }
     syncTrafficMeshes();
     syncPickups();
     syncRoadworkMeshes();
