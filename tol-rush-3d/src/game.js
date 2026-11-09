@@ -239,7 +239,7 @@ function refreshPlayerMesh() {
   const key = loadSelectedCar();
   const car = TR.CARS[key];
   scene.remove(playerMesh);
-  playerMesh = makeCar(car.kind, car.color);
+  playerMesh = makeCar(car.kind, car.color, true);
   scene.add(playerMesh);
 }
 function renderCars() {
@@ -633,10 +633,50 @@ function makeSignTexture(line1, line2) {
   g.font = '700 44px Arial'; g.fillText(line2 || '', 256, 190);
   const tex = new THREE.CanvasTexture(cv); return tex;
 }
-function makeCar(kind, colorHex) {
+// Fase 2T: high-poly player bodies — extruded side profiles with a bevel,
+// replacing the hard body/cabin boxes. pts are [x = world z (front is
+// negative), y = height]; width is the extrude depth across the car.
+const PLAYER_PROFILES = {
+  sedan: {
+    body: [[-2.2, 0.35], [-2.2, 0.68], [-2.02, 0.84], [-1.0, 0.9], [1.2, 0.9], [1.98, 0.86], [2.2, 0.78], [2.2, 0.35]],
+    cabin: [[-1.05, 0.88], [-0.62, 1.3], [0.62, 1.3], [1.15, 0.9]],
+    wBody: 1.8, wCabin: 1.6,
+  },
+  hatch: {
+    body: [[-1.8, 0.35], [-1.8, 0.68], [-1.58, 0.84], [-0.8, 0.88], [1.2, 0.88], [1.8, 0.8], [1.8, 0.35]],
+    cabin: [[-0.95, 0.86], [-0.5, 1.42], [0.55, 1.42], [1.0, 0.88]],
+    wBody: 1.8, wCabin: 1.6,
+  },
+  suv: {
+    body: [[-2.3, 0.35], [-2.3, 0.85], [-2.0, 1.0], [-0.9, 1.02], [1.6, 1.02], [2.3, 0.9], [2.3, 0.35]],
+    cabin: [[-1.25, 1.0], [-0.8, 1.62], [0.8, 1.62], [1.3, 1.0]],
+    wBody: 1.9, wCabin: 1.7,
+  },
+  sport: {
+    body: [[-2.3, 0.3], [-2.3, 0.58], [-1.95, 0.7], [-0.6, 0.74], [1.5, 0.74], [2.3, 0.66], [2.3, 0.3]],
+    cabin: [[-1.0, 0.72], [-0.5, 1.12], [0.6, 1.12], [1.1, 0.74]],
+    wBody: 1.9, wCabin: 1.5,
+  },
+};
+function extrudeBody(pts, width, color) {
+  const s = new THREE.Shape();
+  s.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
+  s.closePath();
+  const depth = width - 0.1;
+  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2, curveSegments: 8 });
+  geo.rotateY(-Math.PI / 2); // shape x -> world z (front = -z), extrude z -> world x
+  geo.translate(depth / 2, 0, 0);
+  return new THREE.Mesh(geo, mat(color));
+}
+function makeCar(kind, colorHex, highPoly) {
   const g = new THREE.Group();
   const col = colorHex;
-  if (kind === 'truck') {
+  const P = highPoly ? PLAYER_PROFILES[kind] : null;
+  if (P) {
+    g.add(extrudeBody(P.body, P.wBody, col));
+    g.add(extrudeBody(P.cabin, P.wCabin, 0x1a2b45));
+  } else if (kind === 'truck') {
     g.add(box(2.0, 1.7, 1.9, 0xd8dee9, 0, 1.15, -3.6)); // cab
     g.add(box(2.1, 2.3, 7.2, col, 0, 1.45, 0.6)); // container
     g.add(box(1.9, 0.7, 0.2, 0x223044, 0, 0.9, -4.6)); // windshield
@@ -658,7 +698,7 @@ function makeCar(kind, colorHex) {
     g.add(box(1.6, 0.5, 2.2, 0x1a2b45, 0, 1.12, 0.2)); // cabin
     g.add(box(1.85, 0.18, 0.9, col, 0, 0.95, 1.9)); // spoiler-ish tail
   }
-  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
+  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, highPoly ? 24 : 14);
   const wheelMat = mat(0x111111);
   let zs;
   if (kind === 'truck') zs = [-3.2, -1.2, 1.2, 3.2];
@@ -666,7 +706,7 @@ function makeCar(kind, colorHex) {
   else if (kind === 'hatch') zs = [-1.15, 1.15];
   else if (kind === 'suv' || kind === 'sport') zs = [-1.5, 1.5];
   else zs = [-1.45, 1.45];
-  const hubGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.34, 10);
+  const hubGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.34, highPoly ? 16 : 10);
   const hubMat = mat(0x8a8f9a);
   for (const z of zs) for (const x of [-0.92, 0.92]) {
     const w = new THREE.Mesh(wheelGeo, wheelMat);
@@ -705,8 +745,8 @@ function makeCar(kind, colorHex) {
   if (kind === 'hatch') g.add(box(1.5, 0.08, 1.6, 0x1a2b45, 0, 1.46, 0.1)); // glass roof
   if (kind === 'suv') for (const sx of [-1, 1]) g.add(box(0.12, 0.1, 2.0, dark, sx * 0.6, 1.68, 0)); // roof rails
   if (kind === 'sport') {
-    g.add(box(0.5, 0.06, 1.3, 0x14161c, 0, 0.81, -1.6)); // racing stripe, hood
-    g.add(box(0.5, 0.06, 1.8, 0x14161c, 0, 1.18, 0.3)); // racing stripe, roof
+    g.add(box(0.5, 0.06, 1.3, 0x14161c, 0, highPoly ? 0.77 : 0.81, -1.6)); // racing stripe, hood
+    g.add(box(0.5, 0.06, 1.8, 0x14161c, 0, highPoly ? 1.14 : 1.18, 0.3)); // racing stripe, roof
     for (const sx of [-1, 1]) g.add(box(0.15, 0.18, 3.2, dark, sx * 0.95, 0.32, 0)); // side skirts
   }
   if (kind === 'truck') {
@@ -829,7 +869,7 @@ function initThree() {
   lanesSign.position.set(0, 5, 0); lanesGroup.add(lanesSign);
   lanesGroup.visible = false; scene.add(lanesGroup);
 
-  { const _sc = TR.CARS[loadSelectedCar()]; playerMesh = makeCar(_sc.kind, _sc.color); }
+  { const _sc = TR.CARS[loadSelectedCar()]; playerMesh = makeCar(_sc.kind, _sc.color, true); }
   scene.add(playerMesh);
   // shield bubble (Fase 2K): shown only while st.shield, synced in the loop
   shieldMesh = new THREE.Mesh(new THREE.SphereGeometry(1.9, 20, 14),
