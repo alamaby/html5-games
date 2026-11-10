@@ -1520,6 +1520,11 @@ function updateRestAnim(dt) {
   // camera: chase, slightly higher than normal play so the curves read
   camera.position.set(pos.x - tan.x * 10, 6.2, pos.z - tan.z * 10);
   camera.lookAt(pos.x + tan.x * 12, 0.8, pos.z + tan.z * 12);
+  // Speedo fix, part 2: the HUD refresh lives at the end of the play
+  // branch, which is paused during the sequence — refresh it here too, so
+  // the speedometer follows st.speed (mirrored from a.v above) instead of
+  // freezing at the entry speed.
+  updateHUD();
 }
 function startGame(mode) {
   currentMode = TR.ROUTES[mode] ? mode : 'short';
