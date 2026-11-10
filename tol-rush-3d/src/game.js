@@ -1466,6 +1466,12 @@ function updateRestAnim(dt) {
   a.v += Math.max(-rate * dt, Math.min(rate * dt, target - a.v));
   if (a.v < 0.01 && target === 0) a.v = 0;
   a.d = Math.min(len, a.d + a.v * dt);
+  // Speedo fix: updateHUD() reads st.speed every frame, and the play branch
+  // that normally recomputes it is paused during the sequence — so mirror
+  // the sequence speed here (~58 km/h cruising, 0 while queueing/fuelling).
+  // TR.step() re-derives st.speed from scratch on the first frame after the
+  // sequence, so this cannot leak into the resumed drive.
+  st.speed = a.v;
   // --- queue car: waits at the pump, pulls away, then drives off ahead ---
   if (restSeqQueueCar) {
     if (a.phase === 'advance' || a.phase === 'fuel' || a.phase === 'drive2') {
