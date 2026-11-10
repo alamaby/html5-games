@@ -103,6 +103,8 @@
                    35%{transform:scale(1);} 75%{opacity:1;} 100%{opacity:0; transform:scale(1) translateY(-14px);} }
   #flash { position:fixed; inset:0; background:rgba(255,40,60,.35); opacity:0; pointer-events:none; z-index:7; transition:opacity .25s; }
   #flash.show { opacity:1; }
+  #fadeOverlay { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; z-index:30; transition:opacity .4s ease; }
+  #fadeOverlay.on { opacity:1; }
   .corner { position:fixed; z-index:20; display:flex; gap:10px; top:max(12px, env(safe-area-inset-top)); }
   #topLeft { left:12px; } #topRight { right:12px; }
   .iconbtn { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18);
@@ -275,6 +277,7 @@
 </div>
 
 <div class="foot">TOL RUSH 3D • MVP</div>
+<div id="fadeOverlay"></div>
 
 <script>
 /* Tol Rush 3D — pure game logic (no DOM, no THREE, no audio). Testable in Node.
@@ -2253,53 +2256,59 @@ function goToMenu() {
 // the player's lane with no snap.
 const REST_SEQ_PARK_COLORS = [0xd8402e, 0x2e6fd8, 0xe8e2d2, 0x333333, 0x2a6b4a, 0xe0a52e];
 const REST_SEQ_PARK_SLOTS = [
-  { x: -20, z: -30 }, { x: -20, z: -36 }, { x: -20, z: -52 }, { x: -20, z: -58 },
-  { x: -24, z: -66, kind: 'truck' },
+  { x: -21, z: -102 }, { x: -21, z: -108 }, { x: -21, z: -118 }, { x: -21, z: -124 },
+  { x: -25, z: -136, kind: 'truck' },
 ];
-let restSeqGroup = null, restSeqParked = null, restSeqQueueCar = null;
+let restSeqGroup = null, restSeqParked = null, restSeqQueueCar = null, restRoadGroup = null;
 function buildRestSeqGroup() {
   const g = new THREE.Group();
-  g.add(box(34, 0.3, 130, 0x3a3f46, -20, -0.15, -60)); // area ground pad, top at y=0
-  // entrance gantry (local z=-12; plane faces +z, toward the arriving car)
-  g.add(box(0.5, 5, 0.5, 0xdddddd, -20, 2.5, -12));
-  g.add(box(0.5, 5, 0.5, 0xdddddd, -8, 2.5, -12));
+  // lot ground: asphalt pad under the whole area (top at y=0, clear of the
+  // highway road plane, which ends at x=-7.25)
+  g.add(box(28.5, 0.3, 290, 0x3a3f46, -21.75, -0.15, -135));
+  // entrance gantry over the drive lane (z=-95)
+  g.add(box(0.5, 5, 0.5, 0xdddddd, -19, 2.5, -95));
+  g.add(box(0.5, 5, 0.5, 0xdddddd, -11, 2.5, -95));
   const entSign = new THREE.Mesh(new THREE.PlaneGeometry(10, 3),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', '') }));
-  entSign.position.set(-14, 4.5, -12); g.add(entSign);
-  // drive-lane dashes along x=-14 (entrance -> SPBU -> exit)
-  for (let i = 0; i < 11; i++) g.add(box(0.3, 0.12, 2.5, 0xdddddd, -14, 0.06, -18 - i * 6));
-  for (let i = 0; i < 5; i++) g.add(box(0.3, 0.12, 3, 0xdddddd, -14, 0.06, -94 - i * 5));
-  // main building + roof + road-facing sign (Fase 2S: moved 2 m closer to
-  // the drive lane and enlarged so the complex reads bigger on a phone)
-  g.add(box(15, 4.5, 11, 0xe8e2d2, -27, 2.25, -45));
-  g.add(box(16, 0.5, 12, 0x2a6b4a, -27, 4.7, -45));
+  entSign.position.set(-15, 4.5, -95); g.add(entSign);
+  // main building + roof + road-facing sign (drive lane at x=-15)
+  g.add(box(15, 4.5, 11, 0xe8e2d2, -27, 2.25, -112));
+  g.add(box(16, 0.5, 12, 0x2a6b4a, -27, 4.7, -112));
   const bldSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.5),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', '') }));
-  bldSign.rotation.y = Math.PI / 2; bldSign.position.set(-19.3, 2.8, -45); g.add(bldSign);
+  bldSign.rotation.y = Math.PI / 2; bldSign.position.set(-19.3, 2.8, -112); g.add(bldSign);
   // musholla + toilet block
-  g.add(box(6, 3, 6, 0xf2ede2, -29, 1.5, -62));
-  g.add(box(7, 0.5, 7, 0x2a6b4a, -29, 3.2, -62));
-  g.add(box(0.8, 5, 0.8, 0xf2ede2, -25.5, 2.5, -62));
-  g.add(box(8, 2.5, 4, 0x9fb6c3, -29, 1.25, -30));
+  g.add(box(6, 3, 6, 0xf2ede2, -29, 1.5, -132));
+  g.add(box(7, 0.5, 7, 0x2a6b4a, -29, 3.2, -132));
+  g.add(box(0.8, 5, 0.8, 0xf2ede2, -25.5, 2.5, -132));
+  g.add(box(8, 2.5, 4, 0x9fb6c3, -29, 1.25, -98));
   // SPBU: canopy + pillars + pump beside the drive lane + kiosk + sign
-  // (Fase 2S: canopy enlarged so it reads bigger on a phone)
-  g.add(box(16, 0.6, 10, 0xcc2222, -16, 4.5, -85));
-  for (const px of [-21, -11]) for (const pz of [-88, -82])
+  g.add(box(16, 0.6, 10, 0xcc2222, -16, 4.5, -169));
+  for (const px of [-21, -11]) for (const pz of [-172, -166])
     g.add(box(0.5, 4.5, 0.5, 0xeeeeee, px, 2.25, pz));
-  g.add(box(1.2, 2.2, 0.8, 0xf2f2f2, -17.5, 1.1, -85));
-  g.add(box(3, 2.5, 3, 0xe8e2d2, -22, 1.25, -85));
+  g.add(box(1.2, 2.2, 0.8, 0xf2f2f2, -18.5, 1.1, -169));
+  g.add(box(3, 2.5, 3, 0xe8e2d2, -22, 1.25, -169));
   const spbuSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 1.6),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('SPBU', '') }));
-  spbuSign.position.set(-16, 4.5, -80.4); g.add(spbuSign);
-  // exit sign + lamp posts (basic-material heads glow at night)
+  spbuSign.position.set(-16, 4.5, -164.4); g.add(spbuSign);
+  // exit sign + lamp posts on the building side (basic-material heads glow at night)
   const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.5),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('KELUAR', '') }));
-  exitSign.position.set(-14, 4, -108); g.add(exitSign);
-  for (const lz of [-30, -55, -75]) {
-    g.add(box(0.3, 5, 0.3, 0x888888, -10, 2.5, lz));
+  exitSign.position.set(-13, 4, -232); g.add(exitSign);
+  for (const lz of [-110, -140, -170, -200]) {
+    g.add(box(0.3, 5, 0.3, 0x888888, -19, 2.5, lz));
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.3, 0.9),
       new THREE.MeshBasicMaterial({ color: 0xffe9a0 }));
-    head.position.set(-10, 5.1, lz); g.add(head);
+    head.position.set(-19, 5.1, lz); g.add(head);
+  }
+  // a few trees on the lot, left of the buildings, plus two screens on the
+  // highway side of the SPBU zone (the hedge stops short of the canopy)
+  for (const [tx, tz, ts] of [[-32, -105, 1.1], [-33, -122, 0.9], [-31, -148, 1.2], [-24, -185, 1.0], [-32, -205, 0.9], [-10, -152, 1.0], [-10, -180, 1.1]]) {
+    const tree = new THREE.Group();
+    tree.add(box(0.5, 2.2, 0.5, 0x6b4a2a, 0, 1.1, 0));
+    tree.add(box(2.2, 2.2, 2.2, 0x2f6b2f, 0, 3.0, 0));
+    tree.scale.set(ts, ts, ts);
+    tree.position.set(tx, 0, tz); g.add(tree);
   }
   restSeqParked = new THREE.Group(); g.add(restSeqParked);
   g.visible = false; scene.add(g);
@@ -2316,38 +2325,134 @@ function rebuildRestSeqParked() {
     restSeqParked.add(car);
   }
 }
+// Fase 2V: hide the frozen highway while the car drives the rest area (it
+// would otherwise sit in frame and could block the path), and restore it
+// when the sequence ends — clearRestSeq runs on finish, SKIP, menu and new
+// run, so every exit path restores it. (restGroup/lanesGroup/exitGroup stay
+// hidden after the restore; the normal loop re-shows them as needed.)
+function setHighwayHidden(hidden) {
+  for (const c of [2, 3, 4]) if (markingGroups[c]) markingGroups[c].visible = hidden ? false : c === currentMarkings;
+  if (taperGroup) taperGroup.visible = false;
+  if (lanesGroup) lanesGroup.visible = false;
+  if (restGroup) restGroup.visible = false;
+  if (exitGroup) exitGroup.visible = false;
+  for (const p of posts) p.visible = !hidden;
+  for (const tr of trees) tr.visible = !hidden;
+  for (const m of trafficMeshes.values()) m.visible = !hidden;
+  for (const m of pickupMeshes.values()) m.visible = !hidden;
+  for (const m of roadworkMeshes.values()) m.visible = !hidden;
+}
 function clearRestSeq() {
   if (restSeqGroup) {
     restSeqGroup.visible = false; restSeqGroup.position.z = 0;
     if (restSeqQueueCar) { restSeqGroup.remove(restSeqQueueCar); restSeqQueueCar = null; }
   }
+  if (restRoadGroup) {
+    scene.remove(restRoadGroup);
+    restRoadGroup.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material && o.material !== roadMat) o.material.dispose();
+    });
+    restRoadGroup = null;
+  }
+  // lift the merge fade (covers finish, SKIP, menu and new run, so the
+  // screen can never get stuck black)
+  const f = $('fadeOverlay'); if (f) f.classList.remove('on');
+  setHighwayHidden(false);
 }
 
-// ---------- rest-area animation ----------
-// The game pauses while the car drives the rest-area sequence, then merges
-// back. Effects (heal, refill, +250, traffic clear) are applied by TR.tryRest
-// at the end of the animation or on SKIP — the fill bar is the visual refill.
+// ---------- rest-area animation (Fase 2V: a real road, not a scrolling set) ----------
+// The car drives a real curved path instead of a scrolling set: the path
+// leaves the player's lane on a long entry ramp, runs past the complex,
+// stops at the SPBU, then merges back onto the same lane. Position and
+// heading come from the path itself, so the car visibly follows the road.
+// Effects (heal, refill, +250, traffic clear) are applied by TR.tryRest at
+// the end of the animation or on SKIP — the fill bar is the visual refill.
 let restAnim = null;
 let steerCur = 0; // Fase 2U: smoothed steering angle, driven by the lane gap
-// Beat table: end time, scroll end, lane x (null = merge to player's lane), stage key.
-// Fase 2S: beat 1 (entry ramp) lengthened 12 m / 2.5 s -> 30 m / 4 s so the
-// car enters on a gentler, longer ramp; later beats shift +1.5 s (total 17.5 s).
-const REST_BEATS = [
-  { t1: 4.0, s1: 30, x1: -12, stage: 'restS1' },
-  { t1: 9.0, s1: 78, x1: -14, stage: 'restS2', wander: true },
-  { t1: 12.0, s1: 85, x1: -14, stage: 'restS3' },
-  { t1: 15.0, s1: 85, x1: -14, stage: 'restS4', fuel: true },
-  { t1: 17.5, s1: 110, x1: null, stage: 'restS5' },
-];
+// Fase 2V debug: ?rest jumps a run to just before the first rest stop and
+// auto-starts the sequence when the window opens, so the sequence can be
+// checked in a browser without driving 2.5 km first. Normal play is untouched.
+const DEBUG_REST = new URLSearchParams(location.search).has('rest');
+// Path waypoints (x, z) in world space; first/last share the player's lane
+// so the car enters and merges heading straight, with no snap at either end.
+// Stop 1 (behind the queue car) is at z=-155, the pump at z=-169.
+function restPathPoints(fromX) {
+  return [
+    [fromX, 0], [fromX, -18], [-3, -40], [-9, -62], [-13, -82], [-15, -100],
+    [-15, -135], [-15, -155], [-15, -169], [-15, -196], [-12, -218], [-6, -238],
+    [fromX, -246], [fromX, -264],
+  ].map(([x, z]) => new THREE.Vector3(x, 0, z));
+}
+// Arc length where the path reaches a given z (z decreases monotonically).
+function restDistAtZ(curve, zTarget) {
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (curve.getPointAt(mid).z > zTarget) lo = mid; else hi = mid;
+  }
+  return curve.getLength() * (lo + hi) / 2;
+}
+// A strip following the curve: flat (y0 === y1, a road ribbon) or vertical
+// (a hedge wall). offset is metres right of the path centreline.
+function restStrip(curve, u0, u1, offset, halfW, y0, y1, material) {
+  const N = 60;
+  const pos = [], idx = [];
+  for (let i = 0; i <= N; i++) {
+    const u = u0 + (u1 - u0) * (i / N);
+    const p = curve.getPointAt(u);
+    const tg = curve.getTangentAt(u);
+    const rx = -tg.z, rz = tg.x; // right normal in XZ
+    if (y0 === y1) {
+      pos.push(p.x + rx * (offset - halfW), y0, p.z + rz * (offset - halfW));
+      pos.push(p.x + rx * (offset + halfW), y0, p.z + rz * (offset + halfW));
+    } else {
+      pos.push(p.x + rx * offset, y0, p.z + rz * offset);
+      pos.push(p.x + rx * offset, y1, p.z + rz * offset);
+    }
+  }
+  for (let i = 0; i < N; i++) {
+    const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+    idx.push(a, b, c, b, d, c);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, material);
+}
+// The rest-area road: asphalt ribbon on the shared road material (so night
+// darkens it like the highway), white edge lines, and hedge walls screening
+// the highway once the path has left it (they stop short of the SPBU canopy).
+function buildRestRoad(curve, len) {
+  const g = new THREE.Group();
+  g.add(restStrip(curve, 0, 1, 0, 2.6, 0.04, 0.04, roadMat));
+  const edgeMat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  g.add(restStrip(curve, 0, 1, -2.35, 0.1, 0.06, 0.06, edgeMat));
+  g.add(restStrip(curve, 0, 1, 2.35, 0.1, 0.06, 0.06, edgeMat));
+  const hedgeMat = new THREE.MeshLambertMaterial({ color: 0x2f6b2f, side: THREE.DoubleSide });
+  g.add(restStrip(curve, 70 / len, 140 / len, 3.6, 0, 0, 1.1, hedgeMat));
+  g.add(restStrip(curve, 190 / len, 215 / len, 3.6, 0, 0, 1.1, hedgeMat));
+  return g;
+}
 function startRestAnim() {
   const stop = TR.openRestStop(st);
   if (!stop) return false;
-  restAnim = { t: 0, stop, fromX: st.player.x, fromFuel: st.fuel, halfBeep: false, prevX: st.player.x, beat: -1 };
+  const fromX = st.player.x;
+  const curve = new THREE.CatmullRomCurve3(restPathPoints(fromX), false, 'centripetal');
+  const len = curve.getLength();
+  const dStop1 = restDistAtZ(curve, -155);
+  const dPump = restDistAtZ(curve, -169);
+  restAnim = { stop, fromX, fromFuel: st.fuel, halfBeep: false, stage: 'restS1',
+    curve, len, d: 0, v: 0, phase: 'drive1', phaseT: 0,
+    queueD: dStop1 + 14, dStop1, dPump, prevHeading: 0 };
   rebuildRestSeqParked(); // parked cars reshuffle every visit
   restSeqQueueCar = makeCar('sedan', REST_SEQ_PARK_COLORS[Math.floor(Math.random() * REST_SEQ_PARK_COLORS.length)]);
-  restSeqQueueCar.position.set(-14, 0, -85); restSeqGroup.add(restSeqQueueCar);
-  restSeqGroup.visible = true; restSeqGroup.position.z = 0;
-  restGroup.visible = false; // old right-side set piece hides during the sequence
+  restSeqGroup.add(restSeqQueueCar);
+  restRoadGroup = buildRestRoad(curve, len); scene.add(restRoadGroup);
+  restSeqGroup.visible = true;
+  setHighwayHidden(true);
+  if (nitroFlame) nitroFlame.visible = false;
   $('restFuelFill').style.width = Math.round((st.fuel / st.maxFuel) * 100) + '%';
   $('restFuelPct').textContent = Math.round((st.fuel / st.maxFuel) * 100) + '%';
   $('restStage').textContent = t('restS1');
@@ -2373,62 +2478,101 @@ function finishRestAnim() {
   TR.tryRest(st); // toast for the +250/rest event is handled by handleEvents next frame
 }
 function updateRestAnim(dt) {
-  restAnim.t += dt;
-  const t = restAnim.t;
+  const a = restAnim;
+  a.phaseT += dt;
   const ease = (k) => 1 - Math.pow(1 - k, 2);
-  let bi = 0;
-  while (bi < REST_BEATS.length - 1 && t >= REST_BEATS[bi].t1) bi++;
-  const beat = REST_BEATS[bi];
-  const t0 = bi === 0 ? 0 : REST_BEATS[bi - 1].t1;
-  const s0 = bi === 0 ? 0 : REST_BEATS[bi - 1].s1;
-  const x0 = bi === 0 ? restAnim.fromX : (REST_BEATS[bi - 1].x1 ?? restAnim.fromX);
-  const k = Math.min(1, (t - t0) / (beat.t1 - t0));
-  // scroll is linear per beat, so speed changes read as accel/decel
-  const scroll = s0 + (beat.s1 - s0) * k;
-  let carX;
-  if (beat.wander) carX = -12 - 2 * k - 4 * Math.sin(Math.PI * k);
-  else if (beat.x1 === null) carX = -14 + (st.player.x + 14) * ease(k);
-  else carX = x0 + (beat.x1 - x0) * ease(k);
-  // heading follows lateral velocity: moving left = positive rotation (turn left)
-  const dxRate = dt > 0 ? (carX - restAnim.prevX) / dt : 0;
-  restAnim.prevX = carX;
-  playerMesh.position.set(carX, 0, 0);
-  playerMesh.rotation.y = Math.max(-0.35, Math.min(0.35, -dxRate * 0.04));
-  // Fase 2U: wheels steer and body leans with the lateral velocity, same as
-  // a lane change — the car turns into the ramp instead of sliding sideways.
-  const steerR = playerMesh.userData.steer;
-  if (steerR) for (const pv of steerR) pv.rotation.y = Math.max(-0.35, Math.min(0.35, -dxRate * 0.03));
-  const pbodyR = playerMesh.userData.body;
-  if (pbodyR) { pbodyR.rotation.z = dxRate * 0.01; pbodyR.position.x = -dxRate * 0.01; }
-  // queue car pulls away once the player has stopped behind it
-  if (restSeqQueueCar) {
-    const qk = Math.max(0, Math.min(1, (t - 9.5) / 1.5));
-    restSeqQueueCar.position.z = -85 - 30 * ease(qk);
-  }
-  // fuel fills only during the SPBU beat; before it show current fuel, after it 100%
-  if (beat.fuel) {
-    const p = k;
-    const pct = Math.round(((restAnim.fromFuel / st.maxFuel) + (1 - restAnim.fromFuel / st.maxFuel) * p) * 100);
+  const curve = a.curve, len = a.len;
+  // --- phases, driven by distance along the path (not a clock) ---
+  let target = 0, stage = 'restS1';
+  if (a.phase === 'drive1') {
+    // cruise at 16, easing to a stop right behind the queue car (a sqrt
+    // decel profile, so the last metres do not drag out exponentially)
+    const rem = a.dStop1 - a.d;
+    target = rem > 25 ? 16 : Math.sqrt(8 * Math.max(0, rem));
+    stage = a.d < 60 ? 'restS1' : 'restS2';
+    if (a.d >= a.dStop1 - 0.5 && a.v < 1.5) {
+      a.d = a.dStop1; a.v = 0; a.phase = 'queue'; a.phaseT = 0;
+    }
+  } else if (a.phase === 'queue') {
+    stage = 'restS3';
+    const qk = Math.min(1, a.phaseT / 1.2);
+    a.queueD = a.dStop1 + 14 + 30 * ease(qk);
+    if (a.phaseT >= 1.2) { a.phase = 'advance'; a.phaseT = 0; }
+  } else if (a.phase === 'advance') {
+    stage = 'restS3';
+    const rem = a.dPump - a.d;
+    target = Math.min(5, Math.sqrt(8 * Math.max(0, rem)));
+    if (a.d >= a.dPump - 0.5 && a.v < 1.5) {
+      a.d = a.dPump; a.v = 0; a.phase = 'fuel'; a.phaseT = 0;
+    }
+  } else if (a.phase === 'fuel') {
+    stage = 'restS4';
+    const p = Math.min(1, a.phaseT / 3);
+    const pct = Math.round(((a.fromFuel / st.maxFuel) + (1 - a.fromFuel / st.maxFuel) * p) * 100);
     $('restFuelFill').style.width = pct + '%';
     $('restFuelPct').textContent = pct + '%';
-    if (p > 0.5 && !restAnim.halfBeep) { restAnim.halfBeep = true; beep(760, 0.1, 'sine', 0.12); }
-  } else if (bi === REST_BEATS.length - 1) {
-    $('restFuelFill').style.width = '100%'; $('restFuelPct').textContent = '100%';
+    if (p > 0.5 && !a.halfBeep) { a.halfBeep = true; beep(760, 0.1, 'sine', 0.12); }
+    if (a.phaseT >= 3) { a.phase = 'drive2'; a.phaseT = 0; }
+  } else { // drive2: exit ramp back to the highway, easing off near the merge
+    target = a.d < len - 30 ? 12 : 8; stage = 'restS5';
+    // Fase 2V fade: the screen goes black over the last 8 m so the cut back
+    // to the highway reads as a scene change, not a camera snap.
+    if (a.d >= len - 8) { const f = $('fadeOverlay'); if (f) f.classList.add('on'); }
+    if (a.d >= len - 0.5) { finishRestAnim(); return; }
   }
-  if (bi !== restAnim.beat) { restAnim.beat = bi; $('restStage').textContent = t(beat.stage); }
-  restSeqGroup.position.z = scroll;
-  if (shieldMesh) { shieldMesh.visible = !!st.shield; shieldMesh.position.set(carX, 1.0, 0); }
+  // --- speed follows its target with limited accel/decel ---
+  const rate = target > a.v ? 6 : 9;
+  a.v += Math.max(-rate * dt, Math.min(rate * dt, target - a.v));
+  if (a.v < 0.01 && target === 0) a.v = 0;
+  a.d = Math.min(len, a.d + a.v * dt);
+  // --- queue car: waits at the pump, pulls away, then drives off ahead ---
+  if (restSeqQueueCar) {
+    if (a.phase === 'advance' || a.phase === 'fuel' || a.phase === 'drive2') {
+      a.queueD = Math.min(len, a.queueD + 10 * dt);
+    }
+    if (a.queueD >= len) restSeqQueueCar.visible = false;
+    else {
+      const qp = curve.getPointAt(a.queueD / len);
+      const qt = curve.getTangentAt(a.queueD / len);
+      restSeqQueueCar.position.set(qp.x, 0, qp.z);
+      restSeqQueueCar.rotation.y = Math.atan2(-qt.x, -qt.z);
+    }
+  }
+  // --- the car follows the path: position and heading come from the road ---
+  const u = a.d / len;
+  const pos = curve.getPointAt(u);
+  const tan = curve.getTangentAt(u);
+  const heading = Math.atan2(-tan.x, -tan.z);
+  let dHead = heading - a.prevHeading;
+  while (dHead > Math.PI) dHead -= 2 * Math.PI;
+  while (dHead < -Math.PI) dHead += 2 * Math.PI;
+  const yawRate = dt > 0 ? dHead / dt : 0;
+  a.prevHeading = heading;
+  playerMesh.position.set(pos.x, 0, pos.z);
+  playerMesh.rotation.y = heading;
+  // Fase 2U: wheels steer with the yaw rate, body leans against the turn.
+  const steerTarget = Math.max(-0.35, Math.min(0.35, yawRate * 0.8));
+  steerCur += (steerTarget - steerCur) * Math.min(1, dt * 14);
+  const steerR = playerMesh.userData.steer;
+  if (steerR) for (const pv of steerR) pv.rotation.y = steerCur;
+  const pbodyR = playerMesh.userData.body;
+  if (pbodyR) {
+    const lat = a.v * yawRate;
+    pbodyR.rotation.z = Math.max(-0.06, Math.min(0.06, -lat * 0.012));
+    pbodyR.position.x = Math.max(-0.05, Math.min(0.05, lat * 0.015));
+  }
+  // fuel bar shows 100% once the fill is done
+  if (a.phase === 'drive2') { $('restFuelFill').style.width = '100%'; $('restFuelPct').textContent = '100%'; }
+  if (stage !== a.stage) { a.stage = stage; $('restStage').textContent = t(stage); }
+  if (shieldMesh) { shieldMesh.visible = !!st.shield; shieldMesh.position.set(pos.x, 1.0, pos.z); }
   if (headlight && st.condition === 'night') {
-    headlight.position.set(carX, 1.2, 0);
-    headlight.target.position.set(carX, 0.5, -40);
+    headlight.position.set(pos.x, 1.2, pos.z);
+    headlight.target.position.set(pos.x + tan.x * 40, 0.5, pos.z + tan.z * 40);
     headlight.target.updateMatrixWorld();
   }
-  // Fase 2S: camera centres on the car through the whole sequence (full
-  // carX follow, not the half-follow of normal play) so it never drifts
-  // out of frame on a narrow portrait phone.
-  camera.position.set(carX, 5.4, 9);
-  camera.lookAt(carX, 0.8, -12);
-  if (t >= REST_BEATS[REST_BEATS.length - 1].t1) finishRestAnim();
+  // camera: chase, slightly higher than normal play so the curves read
+  camera.position.set(pos.x - tan.x * 10, 6.2, pos.z - tan.z * 10);
+  camera.lookAt(pos.x + tan.x * 12, 0.8, pos.z + tan.z * 12);
 }
 function startGame(mode) {
   currentMode = TR.ROUTES[mode] ? mode : 'short';
@@ -2442,6 +2586,11 @@ function startGame(mode) {
   roadworkMeshes.clear();
   clearDebris();
   st = TR.createGame({ mode: currentMode, upgrades: loadUpgrades(), condition: currentCondition, car: loadSelectedCar() });
+  // Fase 2V debug: ?rest opens the first rest stop immediately (no driving
+  // needed) so the sequence can be checked in a browser; the loop below
+  // auto-starts it. No distance is teleported, so score, odometer, coins
+  // and missions stay clean (a dist teleport would have faked all of them).
+  if (DEBUG_REST && st.restStops.length) st.restStops[0].state = 'open';
   refreshPlayerMesh();
   missionToasted = new Set();
   paused = false; $('pauseOverlay').classList.add('hidden');
@@ -2555,6 +2704,7 @@ function loop(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   if (!renderer) return;
   if (running && !paused && st.status === 'play') {
+    if (DEBUG_REST && !restAnim && TR.openRestStop(st)) startRestAnim();
     if (restAnim) { updateRestAnim(dt); } else {
     TR.step(st, dt);
     handleEvents();
