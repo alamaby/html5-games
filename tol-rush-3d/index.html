@@ -2770,9 +2770,10 @@ function clearRestSeq() {
 
 // ---------- rest-area animation (Fase 2V: a real road, not a scrolling set) ----------
 // The car drives a real curved path instead of a scrolling set: the path
-// leaves the player's lane on a long entry ramp, runs past the complex,
-// stops at the SPBU, then merges back onto the same lane. Position and
-// heading come from the path itself, so the car visibly follows the road.
+// first drifts the car to the leftmost lane while it slows to ramp speed,
+// then curves left into the complex, stops at the SPBU, and merges back
+// into the leftmost lane. Position and heading come from the path itself,
+// so the car visibly follows the road.
 // Effects (heal, refill, +250, traffic clear) are applied by TR.tryRest at
 // the end of the animation or on SKIP — the fill bar is the visual refill.
 let restAnim = null;
@@ -2801,14 +2802,21 @@ function setShowcase(on) {
   const b = $('showcaseBtn');
   if (b) { b.dataset.i18n = on ? 'showcaseBtnOff' : 'showcaseBtn'; b.textContent = t(b.dataset.i18n); b.classList.toggle('on', on); }
 }
-// Path waypoints (x, z) in world space; first/last share the player's lane
-// so the car enters and merges heading straight, with no snap at either end.
-// Stop 1 (behind the queue car) is at z=-155, the pump at z=-169.
-function restPathPoints(fromX) {
+// Path waypoints (x, z) in world space. Fase 2V+: the entry is two
+// steps — first a straight approach that drifts the car gradually to
+// the LEFTMOST lane while it slows to ramp speed (the car never cuts
+// straight across from its lane into the exit), and only after the ramp
+// is in view does the road curve left into the complex. The exit feeds
+// back into the leftmost lane, so the first/last waypoints share leftX
+// (not the player's entry lane). Stop 1 (behind the queue car) is at
+// z=-155, the pump at z=-169.
+function restPathPoints(fromX, leftX) {
+  const midX = (fromX + leftX) / 2;
   return [
-    [fromX, 0], [fromX, -18], [-3, -40], [-9, -62], [-13, -82], [-15, -100],
-    [-15, -135], [-15, -155], [-15, -169], [-15, -196], [-12, -218], [-6, -238],
-    [fromX, -246], [fromX, -264],
+    [fromX, 0], [midX, -35], [leftX, -70], [leftX, -90], [leftX, -105],
+    [-10, -122], [-14, -138], [-15, -155],
+    [-15, -169], [-15, -196], [-12, -218], [-8, -238],
+    [leftX, -246], [leftX, -264],
   ].map(([x, z]) => new THREE.Vector3(x, 0, z));
 }
 // Arc length where the path reaches a given z (z decreases monotonically).
@@ -2866,13 +2874,14 @@ function startRestAnim() {
   const stop = TR.openRestStop(st);
   if (!stop) return false;
   const fromX = st.player.x;
-  const curve = new THREE.CatmullRomCurve3(restPathPoints(fromX), false, 'centripetal');
+  const leftX = st.laneXs[0];
+  const curve = new THREE.CatmullRomCurve3(restPathPoints(fromX, leftX), false, 'centripetal');
   const len = curve.getLength();
   const dStop1 = restDistAtZ(curve, -155);
   const dPump = restDistAtZ(curve, -169);
-  restAnim = { stop, fromX, fromFuel: st.fuel, halfBeep: false, stage: 'restS1',
-    curve, len, d: 0, v: 0, phase: 'drive1', phaseT: 0,
-    queueD: dStop1 + 14, dStop1, dPump, prevHeading: 0 };
+  restAnim = { stop, fromX, leftX, fromFuel: st.fuel, halfBeep: false, stage: 'restS1',
+    curve, len, d: 0, v: st.speed, phase: 'drive1', phaseT: 0,
+    queueD: dStop1 + 14, dStop1, dPump, dApproach: restDistAtZ(curve, -90), prevHeading: 0 };
   rebuildRestSeqParked(); // parked cars reshuffle every visit
   restSeqQueueCar = makeCar('sedan', REST_SEQ_PARK_COLORS[Math.floor(Math.random() * REST_SEQ_PARK_COLORS.length)]);
   restSeqGroup.add(restSeqQueueCar);
@@ -2900,6 +2909,10 @@ function finishRestAnim() {
   restAnim = null;
   clearRestSeq();
   $('restOverlay').classList.add('hidden');
+  // Fase 2V+: the car always merges back into the leftmost lane, so the
+  // resumed drive starts from lane 0 (the exit ramp feeds the left lane).
+  st.player.lane = 0; st.player.targetLane = 0; st.player.moveT = 1;
+  st.player.x = st.laneXs[0]; st.player.startX = st.laneXs[0];
   if (playerMesh) { playerMesh.position.set(st.player.x, 0, 0); playerMesh.rotation.set(0, 0, 0); }
   resetPlayerPose();
   TR.tryRest(st); // toast for the +250/rest event is handled by handleEvents next frame
@@ -2912,11 +2925,13 @@ function updateRestAnim(dt) {
   // --- phases, driven by distance along the path (not a clock) ---
   let target = 0, stage = 'restS1';
   if (a.phase === 'drive1') {
-    // cruise at 16, easing to a stop right behind the queue car (a sqrt
-    // decel profile, so the last metres do not drag out exponentially)
+    // Fase 2V+: entry in two steps — first drift to the leftmost lane
+    // and slow to ramp speed (approach, d < dApproach), then the cruise
+    // and stop behind the queue car. The car never cuts straight across
+    // from its lane into the exit.
     const rem = a.dStop1 - a.d;
-    target = rem > 25 ? 16 : Math.sqrt(8 * Math.max(0, rem));
-    stage = a.d < 60 ? 'restS1' : 'restS2';
+    target = a.d < a.dApproach ? 12 : (rem > 25 ? 16 : Math.sqrt(8 * Math.max(0, rem)));
+    stage = a.d < a.dApproach ? 'restS1' : 'restS2';
     if (a.d >= a.dStop1 - 0.5 && a.v < 1.5) {
       a.d = a.dStop1; a.v = 0; a.phase = 'queue'; a.phaseT = 0;
     }
