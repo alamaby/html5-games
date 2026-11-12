@@ -715,11 +715,84 @@ function extrudeBody(pts, width, color, smooth) {
   geo.translate(depth / 2, 0, 0);
   return new THREE.Mesh(geo, mat(color));
 }
+// Fase 2Y: procedural loft — a real sculpted body, not an extrusion. The
+// body is built from cross-sections along the car's length: the nose and
+// tail taper in, the fenders bulge out over the wheels, the beltline rises
+// and falls. Each section is a superellipse (boxy with rounded corners,
+// flat-ish top and bottom); the upper sides lean inward (tumblehome) via
+// the lean factor. Prototype: sedan only — the other kinds keep the 2X
+// extrusions until the loft look is judged.
+const LOFT_BODY_SECTIONS = [
+  { z: -2.20, w: 0.72, yBot: 0.35, yTop: 0.72 },
+  { z: -2.00, w: 0.80, yBot: 0.35, yTop: 0.78 },
+  { z: -1.60, w: 0.93, yBot: 0.35, yTop: 0.88 },
+  { z: -1.00, w: 0.90, yBot: 0.35, yTop: 0.90 },
+  { z: 0.00, w: 0.90, yBot: 0.35, yTop: 0.90 },
+  { z: 1.00, w: 0.90, yBot: 0.35, yTop: 0.88 },
+  { z: 1.60, w: 0.93, yBot: 0.35, yTop: 0.86 },
+  { z: 2.00, w: 0.82, yBot: 0.35, yTop: 0.82 },
+  { z: 2.20, w: 0.72, yBot: 0.35, yTop: 0.80 },
+];
+const LOFT_CABIN_SECTIONS = [
+  { z: -1.05, w: 0.78, yBot: 0.88, yTop: 0.98 },
+  { z: -0.62, w: 0.80, yBot: 0.88, yTop: 1.28 },
+  { z: 0.62, w: 0.80, yBot: 0.88, yTop: 1.28 },
+  { z: 1.15, w: 0.78, yBot: 0.88, yTop: 0.98 },
+];
+function loftMesh(sections, color, lean) {
+  const M = 20; // outline points per section
+  const n = 4; // superellipse exponent: boxy with rounded corners
+  const rings = [];
+  for (const s of sections) {
+    const yc = (s.yBot + s.yTop) / 2, h = (s.yTop - s.yBot) / 2;
+    const ring = [];
+    for (let i = 0; i < M; i++) {
+      const th = (i / M) * Math.PI * 2;
+      const c = Math.cos(th), sn = Math.sin(th);
+      let x = s.w * Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
+      const y = yc + h * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / n);
+      if (lean && y > yc) x *= 1 - lean * (y - yc) / h; // tumblehome
+      ring.push(new THREE.Vector3(x, y, s.z));
+    }
+    rings.push(ring);
+  }
+  const pos = [];
+  const quad = (a, b, c, d) => {
+    pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z,
+      a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
+  };
+  for (let i = 0; i < rings.length - 1; i++) {
+    for (let j = 0; j < M; j++) {
+      const j2 = (j + 1) % M;
+      quad(rings[i][j], rings[i][j2], rings[i + 1][j2], rings[i + 1][j]);
+    }
+  }
+  // end caps: triangle fan from the ring centroid (outlines are convex)
+  for (const si of [0, rings.length - 1]) {
+    const ring = rings[si];
+    const cx = ring.reduce((a, p) => a + p.x, 0) / M;
+    const cy = ring.reduce((a, p) => a + p.y, 0) / M;
+    const cz = ring[0].z;
+    for (let j = 0; j < M; j++) {
+      const j2 = (j + 1) % M;
+      if (si === 0) pos.push(cx, cy, cz, ring[j2].x, ring[j2].y, ring[j2].z, ring[j].x, ring[j].y, ring[j].z);
+      else pos.push(cx, cy, cz, ring[j].x, ring[j].y, ring[j].z, ring[j2].x, ring[j2].y, ring[j2].z);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, mat(color));
+}
 function makeCar(kind, colorHex, highPoly) {
   const g = new THREE.Group();
   const col = colorHex;
   const P = highPoly ? PLAYER_PROFILES[kind] : null;
-  if (P) {
+  const lofted = highPoly && kind === 'sedan'; // Fase 2Y prototype: sedan only
+  if (lofted) {
+    g.add(loftMesh(LOFT_BODY_SECTIONS, col, 0.07));
+    g.add(loftMesh(LOFT_CABIN_SECTIONS, 0x1a2b45, 0.10));
+  } else if (P) {
     g.add(extrudeBody(P.bodyLo, P.wLo, col, false));
     g.add(extrudeBody(P.bodyHi, P.wHi, col, true));
     g.add(extrudeBody(P.cabin, P.wCabin, 0x1a2b45, false));
@@ -808,8 +881,9 @@ function makeCar(kind, colorHex, highPoly) {
   if (steerPivots.length) g.userData.steer = steerPivots;
   if (spinNodes.length) g.userData.spin = spinNodes;
   // Fase 2X: wheel-arch trim — half-torus rings hugging the body sides
-  // around each wheel (body-fixed, so the wheel turns inside them).
-  if (highPoly) {
+  // around each wheel (body-fixed, so the wheel turns inside them). Skipped
+  // on the lofted sedan: its fender bulge IS the arch shape.
+  if (highPoly && !lofted) {
     const archGeo = new THREE.TorusGeometry(0.47, 0.07, 6, 16, Math.PI);
     const archMat = mat(0x1a1d24);
     for (const z of zs) for (const sx of [-1, 1]) {
@@ -823,12 +897,18 @@ function makeCar(kind, colorHex, highPoly) {
   // glow at night instead of going dark with the scene lights
   const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : (kind === 'truck' ? -4.55 : (kind === 'hatch' ? -1.8 : -2.3)));
   const rear = -front;
+  // Fase 2Y: on the lofted sedan the nose/tail taper in, so the lights sit
+  // slightly back and lower, on the loft surface instead of floating past it.
+  const lightFront = lofted ? -2.05 : front;
+  const lightRear = lofted ? 2.05 : rear;
+  const lightY = lofted ? 0.66 : 0.7;
+  const lightX = lofted ? 0.5 : 0.6;
   const tails = [];
-  for (const x of [-0.6, 0.6]) {
+  for (const x of [-lightX, lightX]) {
     const hl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }));
-    hl.position.set(x, 0.7, front); g.add(hl);
+    hl.position.set(x, lightY, lightFront); g.add(hl);
     const tl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xff2a3c }));
-    tl.position.set(x, 0.7, rear); g.add(tl); tails.push(tl.material);
+    tl.position.set(x, lightY, lightRear); g.add(tl); tails.push(tl.material);
   }
   g.userData.tails = tails; // brake lights, brightened by the loop while braking
   // ---- extra body detail (Fase 2M, view-only) ----
@@ -845,8 +925,8 @@ function makeCar(kind, colorHex, highPoly) {
   const mirX = kind === 'truck' ? 1.12 : (kind === 'bus' ? 1.1 : 1.0);
   for (const sx of [-1, 1]) g.add(box(0.22, 0.18, 0.3, dark, sx * mirX, mirY, mirZ)); // mirrors
   const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.3, 10), mat(0x555555));
-  ex.rotation.x = Math.PI / 2; ex.position.set(0.6, 0.25, rear + 0.15); g.add(ex); // exhaust
-  if (kind === 'sedan') g.add(box(1.7, 0.14, 1.0, col, 0, 0.96, -1.65)); // hood step
+  ex.rotation.x = Math.PI / 2; ex.position.set(lofted ? 0.3 : 0.6, 0.25, rear + 0.15); g.add(ex); // exhaust
+  if (kind === 'sedan' && !lofted) g.add(box(1.7, 0.14, 1.0, col, 0, 0.96, -1.65)); // hood step (extrusion only; the lofted hood already curves)
   if (kind === 'hatch') g.add(box(1.5, 0.08, 1.6, 0x1a2b45, 0, 1.46, 0.1)); // glass roof
   if (kind === 'suv') for (const sx of [-1, 1]) g.add(box(0.12, 0.1, 2.0, dark, sx * 0.6, 1.68, 0)); // roof rails
   if (kind === 'sport') {
@@ -863,8 +943,8 @@ function makeCar(kind, colorHex, highPoly) {
     for (const sx of [-1, 1]) g.add(box(0.06, 1.9, 0.9, 0x14161c, sx * 1.02, 1.05, -3.4)); // doors
   }
   // indicators on the rear corners, blinked by the sync loop
-  const sigL = box(0.3, 0.18, 0.06, 0xffb020, -0.6, 0.95, rear + 0.04);
-  const sigR = box(0.3, 0.18, 0.06, 0xffb020, 0.6, 0.95, rear + 0.04);
+  const sigL = box(0.3, 0.18, 0.06, 0xffb020, lofted ? -0.5 : -0.6, lofted ? 0.78 : 0.95, lofted ? 2.0 : rear + 0.04);
+  const sigR = box(0.3, 0.18, 0.06, 0xffb020, lofted ? 0.5 : 0.6, lofted ? 0.78 : 0.95, lofted ? 2.0 : rear + 0.04);
   sigL.visible = sigR.visible = false;
   g.add(sigL); g.add(sigR);
   g.userData.signals = { left: sigL, right: sigR };
