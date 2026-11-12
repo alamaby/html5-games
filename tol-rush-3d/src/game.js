@@ -722,21 +722,29 @@ function extrudeBody(pts, width, color, smooth) {
 // flat-ish top and bottom); the upper sides lean inward (tumblehome) via
 // the lean factor. Prototype: sedan only — the other kinds keep the 2X
 // extrusions until the loft look is judged.
+// Refinement (2Y+): stronger fender flare (w 0.98 at the wheel centres)
+// with the sill rising over the wheels (yBot 0.58) so the arches read in
+// profile, and an arched roofline (cabin crown 1.35, shoulders 1.27).
 const LOFT_BODY_SECTIONS = [
   { z: -2.20, w: 0.72, yBot: 0.35, yTop: 0.72 },
   { z: -2.00, w: 0.80, yBot: 0.35, yTop: 0.78 },
-  { z: -1.60, w: 0.93, yBot: 0.35, yTop: 0.88 },
+  { z: -1.70, w: 0.96, yBot: 0.50, yTop: 0.87 },
+  { z: -1.45, w: 0.98, yBot: 0.58, yTop: 0.88 },
+  { z: -1.20, w: 0.96, yBot: 0.50, yTop: 0.89 },
   { z: -1.00, w: 0.90, yBot: 0.35, yTop: 0.90 },
   { z: 0.00, w: 0.90, yBot: 0.35, yTop: 0.90 },
   { z: 1.00, w: 0.90, yBot: 0.35, yTop: 0.88 },
-  { z: 1.60, w: 0.93, yBot: 0.35, yTop: 0.86 },
+  { z: 1.20, w: 0.96, yBot: 0.50, yTop: 0.87 },
+  { z: 1.45, w: 0.98, yBot: 0.58, yTop: 0.86 },
+  { z: 1.70, w: 0.96, yBot: 0.50, yTop: 0.85 },
   { z: 2.00, w: 0.82, yBot: 0.35, yTop: 0.82 },
   { z: 2.20, w: 0.72, yBot: 0.35, yTop: 0.80 },
 ];
 const LOFT_CABIN_SECTIONS = [
   { z: -1.05, w: 0.78, yBot: 0.88, yTop: 0.98 },
-  { z: -0.62, w: 0.80, yBot: 0.88, yTop: 1.28 },
-  { z: 0.62, w: 0.80, yBot: 0.88, yTop: 1.28 },
+  { z: -0.62, w: 0.80, yBot: 0.88, yTop: 1.27 },
+  { z: 0.00, w: 0.80, yBot: 0.88, yTop: 1.35 },
+  { z: 0.62, w: 0.80, yBot: 0.88, yTop: 1.27 },
   { z: 1.15, w: 0.78, yBot: 0.88, yTop: 0.98 },
 ];
 function loftMesh(sections, color, lean) {
