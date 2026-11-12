@@ -2752,6 +2752,10 @@ const DEBUG_REST = new URLSearchParams(location.search).has('rest');
 // orbits the parked player car so the lofted body can be judged from
 // every angle; the chase camera takes over as soon as a run starts.
 const DEBUG_SHOWCASE = new URLSearchParams(location.search).has('showcase');
+// Debug only: ?spindbg shows the live wheel-spin angle in the hint pill,
+// so a browser check can tell whether the turntable spin actually runs
+// (the markers render but were seen frozen in the 20:32 check).
+const DEBUG_SPIN = new URLSearchParams(location.search).has('spindbg');
 let showcaseT = 0;
 let showcaseOn = DEBUG_SHOWCASE; // menu button toggles this; ?showcase starts it on
 function setShowcase(on) {
@@ -3232,6 +3236,7 @@ function loop(now) {
       // parked, so this is a display spin, not driving speed).
       const spinN = playerMesh.userData.spin;
       if (spinN) for (const s of spinN) s.rotation.x -= 4 * dt;
+      if (DEBUG_SPIN) { const el = $('showcaseHint'); if (el) el.textContent = 'spin=' + (spinN ? spinN[0].rotation.x.toFixed(1) : 'NONE'); }
     } else {
       camera.position.set(0, 5.4, 9);
       camera.lookAt(0, 0.8, -12);
