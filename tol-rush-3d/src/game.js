@@ -899,6 +899,19 @@ function buildGltfSedan(colorHex) {
       mesh.position.set(-c[0], -c[1], -c[2]); // centre the wheel on the pivot
       spin.add(mesh);
     });
+    // Turntable marker: the GLB rims have ~10 near-identical thin spokes,
+    // so the spin aliases to static at low frame rates — two browser
+    // checks saw "static" wheels even though the spin angle accumulates
+    // correctly (verified in Node). One bright red marker per wheel face
+    // breaks the symmetry, so the turn is unmistakable.
+    const markerGeo = new THREE.BoxGeometry(0.04, 0.09, 0.06);
+    const markerMat = mat(0xd43d2a);
+    const faces = isRear ? [mx[0], mn[0]] : [(c[0] > 0 ? mx[0] : mn[0])];
+    faces.forEach((fx) => {
+      const mk = new THREE.Mesh(markerGeo, markerMat);
+      mk.position.set(fx - c[0] + Math.sign(fx - c[0]) * 0.02, 0.16, 0);
+      spin.add(mk);
+    });
     if (isRear) {
       spin.position.set(c[0], c[1], c[2]);
       g.add(spin);
