@@ -27,16 +27,22 @@ tpl = (ROOT / 'template.html').read_text(encoding='utf-8')
 logic = (ROOT / 'logic.js').read_text(encoding='utf-8')
 game = (ROOT / 'game.js').read_text(encoding='utf-8')
 
-# GLTF player sedan (Quaternius car-1, CC0): base64-inlined so the
-# single-file build stays self-contained (the .glb itself is never
-# pushed — binary files cannot go through the push tool). The
-# placeholder appears twice in game.js: the const (replaced here with
-# the base64) and the makeCar guard (left as the comparison literal).
-glb = (ROOT / 'quaternius-car-1.glb').read_bytes()
-glb_b64 = base64.b64encode(glb).decode('ascii')
-assert game.count('__GLB_SEDAN_B64__') == 2, 'GLB placeholder count changed'
-game = game.replace('__GLB_SEDAN_B64__', glb_b64, 1)
-assert game.count('__GLB_SEDAN_B64__') == 1, 'GLB const not replaced'
+# GLTF player cars (Quaternius Cars Bundle, CC0): one model per kind,
+# base64-inlined so the single-file build stays self-contained (the .glb
+# itself is never pushed — binary files cannot go through the push tool).
+# Each placeholder appears exactly once in game.js (in GLB_CARS_B64);
+# the makeCar guard builds the placeholder name dynamically, so it
+# never contains a literal placeholder.
+GLB_FILES = {
+    '__GLB_SEDAN_B64__': 'quaternius-car-1.glb',
+    '__GLB_HATCH_B64__': 'quaternius-car-2.glb',
+    '__GLB_SUV_B64__': 'quaternius-suv.glb',
+    '__GLB_SPORT_B64__': 'quaternius-sports-1.glb',
+}
+for ph, fname in GLB_FILES.items():
+    assert game.count(ph) == 1, 'GLB placeholder count changed: ' + ph
+    game = game.replace(ph, base64.b64encode((ROOT / fname).read_bytes()).decode('ascii'), 1)
+    assert ph not in game, 'GLB placeholder not replaced: ' + ph
 
 if portal:
     three = (ROOT / 'three.min.js').read_text(encoding='utf-8')

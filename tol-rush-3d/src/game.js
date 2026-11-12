@@ -797,10 +797,22 @@ function loftMesh(sections, color, lean) {
 // NORMAL + index, pbrMetallicRoughness baseColorFactor, no textures, skins
 // or animations. The model faces +Z while the game faces -Z, so every
 // geometry is rotated Y by PI here; after that the car behaves like any
-// other makeCar result (steering pivots, spin groups, body subgroup).
-// The GLB is base64-inlined by build.py; the placeholder below means
-// "no model inlined" and makeCar falls back to the procedural loft.
-const GLB_SEDAN_B64 = '__GLB_SEDAN_B64__';
+// GLTF player cars (Quaternius Cars Bundle, CC0 — one model per kind:
+// sedan = car-1, hatch = car-2 compact, SUV = suv, sport = sports-1;
+// sports-2 stays unused: its two-tone Orange/DarkOrange paint would
+// clash under recolor, sports-1 recolors cleanly). The GLBs are
+// base64-inlined by build.py; a placeholder below means "no model
+// inlined" and makeCar falls back to the procedural build.
+// Per-model uniform scale (measured body width -> target width, so each
+// car keeps its real proportions and reads true to kind): sedan
+// 1.81->1.81, hatch 1.64->1.72, SUV 2.11->2.00, sport 1.87->1.85.
+const GLB_CARS_B64 = {
+  sedan: '__GLB_SEDAN_B64__',
+  hatch: '__GLB_HATCH_B64__',
+  suv: '__GLB_SUV_B64__',
+  sport: '__GLB_SPORT_B64__',
+};
+const GLB_CARS_SCALE = { sedan: 1.0, hatch: 1.72 / 1.64, suv: 2.0 / 2.11, sport: 1.85 / 1.87 };
 function b64ToArrayBuffer(b64) {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
@@ -858,20 +870,21 @@ function parseGLB(buf) {
       if (prim.indices !== undefined) geo.setIndex(new THREE.BufferAttribute(readAccessor(prim.indices), 1));
       geo.rotateY(Math.PI); // model faces +Z, game faces -Z
       const mm = prim.material !== undefined ? materials[prim.material] : null;
-      meshes.push({ meshIndex: mi, geo, mat: mm ? mm.mat : mat(0x888888), matName: mm ? mm.name : '' });
+      meshes.push({ meshIndex: mi, geo, mat: mm ? mm.mat : mat(0x888888), matName: mm ? mm.name : '', tris: (geo.index ? geo.index.count : geo.attributes.position.count) / 3 });
     });
   });
   const meshNode = {};
   (json.nodes || []).forEach((n) => { if (n.mesh !== undefined) meshNode[n.mesh] = n.name || ''; });
   return { meshes, meshNode };
 }
-function buildGltfSedan(colorHex) {
+function buildGltfCar(kind, colorHex) {
   const g = new THREE.Group();
-  const parsed = parseGLB(b64ToArrayBuffer(GLB_SEDAN_B64));
+  const parsed = parseGLB(b64ToArrayBuffer(GLB_CARS_B64[kind]));
   const byNode = {};
   parsed.meshes.forEach((m) => { (byNode[m.meshIndex] = byNode[m.meshIndex] || []).push(m); });
   const body = new THREE.Group();
-  const steerPivots = [], spinNodes = [];
+  const steerPivots = [], spinNodes = [], rearSpins = [];
+  let wheelR = 0, wheelMinY = 0, seenWheel = false;
   Object.keys(byNode).forEach((mi) => {
     const name = parsed.meshNode[mi] || '';
     const parts = byNode[mi];
@@ -887,34 +900,42 @@ function buildGltfSedan(colorHex) {
     });
     const c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
     if (!/Wheel/i.test(name)) {
-      // body: recolor the paint material ('Blue' in this model) to the
-      // car's color; windows/lights/trim keep their GLB colors.
-      parts.forEach((p) => { body.add(new THREE.Mesh(p.geo, p.matName === 'Blue' ? mat(colorHex) : p.mat)); });
+      // body: recolor the paint material — the material with the most
+      // triangles in this node (Blue / LightBlue / White / Orange per
+      // model) — to the car's color; windows/lights/trim keep GLB colors.
+      let paintName = '', paintTris = -1;
+      parts.forEach((p) => { if (p.tris > paintTris) { paintTris = p.tris; paintName = p.matName; } });
+      parts.forEach((p) => { body.add(new THREE.Mesh(p.geo, p.matName === paintName ? mat(colorHex) : p.mat)); });
       return;
     }
     const isRear = /Back/i.test(name);
+    const r = (mx[1] - mn[1]) / 2; // wheel radius, model coords
+    if (!seenWheel || r > wheelR) wheelR = r;
+    if (!seenWheel || mn[1] < wheelMinY) wheelMinY = mn[1];
+    seenWheel = true;
     const spin = new THREE.Group();
     parts.forEach((p) => {
       const mesh = new THREE.Mesh(p.geo, p.mat);
       mesh.position.set(-c[0], -c[1], -c[2]); // centre the wheel on the pivot
       spin.add(mesh);
     });
-    // Turntable marker: the GLB rims have ~10 near-identical thin spokes,
-    // so the spin aliases to static at low frame rates — two browser
-    // checks saw "static" wheels even though the spin angle accumulates
-    // correctly (verified in Node). One bright red marker per wheel face
-    // breaks the symmetry, so the turn is unmistakable.
-    const markerGeo = new THREE.BoxGeometry(0.04, 0.09, 0.06);
+    // Turntable marker: one bright red box per wheel face. The GLB rims
+    // have ~10 near-identical thin spokes, so the spin is hard to read
+    // from the rims alone; the marker makes the turn unmistakable (the
+    // spin itself was proven working via ?spindbg, 2026-11-12).
+    const ms = r / 0.262; // marker size relative to the sedan's wheels
+    const markerGeo = new THREE.BoxGeometry(0.04 * ms, 0.09 * ms, 0.06 * ms);
     const markerMat = mat(0xd43d2a);
     const faces = isRear ? [mx[0], mn[0]] : [(c[0] > 0 ? mx[0] : mn[0])];
     faces.forEach((fx) => {
       const mk = new THREE.Mesh(markerGeo, markerMat);
-      mk.position.set(fx - c[0] + Math.sign(fx - c[0]) * 0.02, 0.16, 0);
+      mk.position.set(fx - c[0] + Math.sign(fx - c[0]) * 0.02 * ms, 0.6 * r, 0);
       spin.add(mk);
     });
     if (isRear) {
       spin.position.set(c[0], c[1], c[2]);
       g.add(spin);
+      rearSpins.push(spin);
     } else {
       const pv = new THREE.Group();
       pv.position.set(c[0], c[1], c[2]);
@@ -924,20 +945,30 @@ function buildGltfSedan(colorHex) {
     }
     spinNodes.push(spin);
   });
+  // Ground the car: lift everything so the lowest wheel point sits at
+  // y=0 (the models' wheels dip 1-3 cm below ground), then scale the
+  // whole car to its per-kind target width.
+  const yOff = -wheelMinY;
+  body.children.forEach((m) => { m.position.y += yOff; });
+  steerPivots.forEach((pv) => { pv.position.y += yOff; });
+  rearSpins.forEach((s) => { s.position.y += yOff; });
+  const scale = GLB_CARS_SCALE[kind] || 1;
+  g.scale.setScalar(scale);
   g.add(body);
   g.userData.body = body;
+  g.userData.wheelR = wheelR * scale; // world wheel radius (spin rate)
   if (steerPivots.length) g.userData.steer = steerPivots;
   if (spinNodes.length) g.userData.spin = spinNodes;
-  // No userData.signals/tails: this model has no signal meshes; every
-  // game access to them is guarded, so the car simply has no blinkers.
+  // No userData.signals/tails: these models have no signal meshes; every
+  // game access to them is guarded, so the cars simply have no blinkers.
   return g;
 }
 function makeCar(kind, colorHex, highPoly) {
-  // GLTF player sedan (Quaternius car-1, CC0): replaces the procedural
-  // loft when the build inlined the model. A parse failure falls back
-  // to the loft instead of breaking the game.
-  if (highPoly && kind === 'sedan' && GLB_SEDAN_B64 !== '__GLB_SEDAN_B64__') {
-    try { return buildGltfSedan(colorHex); } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF sedan failed, using loft:', e); }
+  // GLTF player cars (Quaternius, CC0): one model per kind, inlined by
+  // build.py. A parse failure falls back to the procedural build instead
+  // of breaking the game.
+  if (highPoly && GLB_CARS_B64[kind] && GLB_CARS_B64[kind] !== '__GLB_' + kind.toUpperCase() + '_B64__') {
+    try { return buildGltfCar(kind, colorHex); } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF ' + kind + ' failed, using procedural:', e); }
   }
   const g = new THREE.Group();
   const col = colorHex;
@@ -1040,6 +1071,7 @@ function makeCar(kind, colorHex, highPoly) {
   }
   if (steerPivots.length) g.userData.steer = steerPivots;
   if (spinNodes.length) g.userData.spin = spinNodes;
+  g.userData.wheelR = 0.38; // procedural wheel radius (CylinderGeometry)
   // Fase 2X: wheel-arch trim — half-torus rings hugging the body sides
   // around each wheel (body-fixed, so the wheel turns inside them). Skipped
   // on the lofted sedan: its fender bulge IS the arch shape.
@@ -1862,7 +1894,7 @@ function updateRestAnim(dt) {
   }
   // Fase 2X: wheels roll with the sequence speed, same as on the highway.
   const spinR = playerMesh.userData.spin;
-  if (spinR) for (const s of spinR) s.rotation.x -= (a.v / 0.38) * dt;
+  if (spinR) for (const s of spinR) s.rotation.x -= (a.v / (playerMesh.userData.wheelR || 0.38)) * dt;
   // fuel bar shows 100% once the fill is done
   if (a.phase === 'drive2') { $('restFuelFill').style.width = '100%'; $('restFuelPct').textContent = '100%'; }
   if (stage !== a.stage) { a.stage = stage; $('restStage').textContent = t(stage); }
@@ -2093,7 +2125,7 @@ function loop(now) {
     // Fase 2X: wheels roll with the car's speed (the top of the wheel moves
     // forward, so the spin angle decreases).
     const spinN = playerMesh.userData.spin;
-    if (spinN) for (const s of spinN) s.rotation.x -= (st.speed / 0.38) * dt;
+    if (spinN) for (const s of spinN) s.rotation.x -= (st.speed / (playerMesh.userData.wheelR || 0.38)) * dt;
     syncTrafficMeshes();
     syncPickups();
     syncRoadworkMeshes();
