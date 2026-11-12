@@ -889,7 +889,15 @@ const TR = {
       const lanes = TR.laneCountAt(st, at);
       const fits = st.mode === 'endless' || at + TR.ROADWORK_LEN < st.routeLen;
       if (lanes >= 3 && fits) {
-        st.roadworks.push({ at, len: TR.ROADWORK_LEN, lane: Math.floor(Math.random() * lanes) });
+        // Close an EDGE lane only (0 or lanes-1). A middle closure strands
+        // the player: with 3 lanes the two open lanes are not adjacent, so
+        // a player behind a slow car in either lane has no dodge (moving
+        // into the closed lane is refused); with 4 lanes an inner closure
+        // isolates the neighbouring edge lane the same way. Edge closure
+        // keeps the open lanes one connected chain, so there is always a
+        // neighbouring open lane to dodge into.
+        const closedLane = Math.random() < 0.5 ? 0 : lanes - 1;
+        st.roadworks.push({ at, len: TR.ROADWORK_LEN, lane: closedLane });
       }
       st.nextRoadworkAt = at + TR.ROADWORK_LEN + TR.ROADWORK_GAP_MIN + Math.random() * (TR.ROADWORK_GAP_MAX - TR.ROADWORK_GAP_MIN);
     }

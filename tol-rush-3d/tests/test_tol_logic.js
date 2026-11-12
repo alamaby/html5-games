@@ -497,6 +497,47 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   ok('no zone on 2-lane stretch', !g.roadworks.some((rz) => rz.at === 4100));
   ok('generator advanced past skipped zone', g.nextRoadworkAt > 3100);
 
+  // Fase 2I fix: the generator only ever closes an EDGE lane (0 or last).
+  // A middle closure strands the player: with 3 lanes the two open lanes
+  // are not adjacent, so a player behind a slow car in either lane has no
+  // dodge; with 4 lanes an inner closure isolates the neighbouring edge
+  // lane the same way. Edge closure keeps the open lanes connected.
+  {
+    let edgeOnly3 = true, edgeOnly4 = true, seen0 = false, seenLast = false;
+    for (let i = 0; i < 200; i++) {
+      const g3 = TR.createGame({ mode: 'short' }); quiet(g3);
+      g3.nextRoadworkAt = 1200; g3.dist = 900; // 3 lanes at 1200
+      TR.step(g3, 1 / 60);
+      const z3 = g3.roadworks.find((rz) => rz.at === 1200);
+      if (!z3 || (z3.lane !== 0 && z3.lane !== 2)) edgeOnly3 = false;
+      if (z3 && z3.lane === 0) seen0 = true;
+      if (z3 && z3.lane === 2) seenLast = true;
+      const g4 = TR.createGame({ mode: 'short' }); quiet(g4);
+      g4.nextRoadworkAt = 2000; g4.dist = 1700; // 4 lanes at 2000
+      TR.step(g4, 1 / 60);
+      const z4 = g4.roadworks.find((rz) => rz.at === 2000);
+      if (!z4 || (z4.lane !== 0 && z4.lane !== 3)) edgeOnly4 = false;
+    }
+    ok('3-lane zones close an edge lane only (200 runs)', edgeOnly3);
+    ok('4-lane zones close an edge lane only (200 runs)', edgeOnly4);
+    ok('both edges occur (not stuck on one side)', seen0 && seenLast);
+    // connectivity: with an edge closure every open lane has an adjacent open lane
+    for (const lanes of [3, 4]) {
+      for (const closed of [0, lanes - 1]) {
+        const open = [];
+        for (let l = 0; l < lanes; l++) if (l !== closed) open.push(l);
+        ok('open lanes connected, ' + lanes + ' lanes, closed ' + closed,
+          open.every((l) => open.includes(l - 1) || open.includes(l + 1)));
+      }
+    }
+    // the trap, demonstrated: 3 lanes, middle closed, truck ahead in lane 0
+    const t = TR.createGame({ mode: 'short' }); quiet(t);
+    t.roadworks.push({ at: 1500, len: 220, lane: 1 });
+    t.dist = 1600; t.laneCount = 3; t.laneXs = TR.LANE_X[3];
+    t.player.lane = t.player.targetLane = 0; t.player.x = t.laneXs[0];
+    ok('trap: middle closed, no dodge from lane 0', !TR.moveLane(t, 1) && !TR.moveLane(t, -1));
+  }
+
   // convoy: one gap lane, trucks/buses only, convoy event fired
   // (spawned 100 m ahead so no member can collide with the player mid-test)
   const cv = TR.createGame({ mode: 'short' }); quiet(cv);
