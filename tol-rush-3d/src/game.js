@@ -768,7 +768,10 @@ function makeCar(kind, colorHex, highPoly) {
   for (const z of zs) for (const x of [-0.92, 0.92]) {
     if (highPoly) {
       const spin = new THREE.Group();
-      spin.position.set(x, 0.38, z);
+      // NOTE: spin gets NO position here — the steering pivot (front) or the
+      // car group (rear) positions it. Setting a position here AND on the
+      // pivot double-offsets the front wheels (they floated ahead/outside
+      // the body in the first 2X live check).
       const tire = new THREE.Mesh(tireGeo, wheelMat);
       tire.rotation.y = Math.PI / 2;
       spin.add(tire);
@@ -787,6 +790,7 @@ function makeCar(kind, colorHex, highPoly) {
         pv.add(spin); g.add(pv);
         wheelNodes.push(pv); steerPivots.push(pv);
       } else {
+        spin.position.set(x, 0.38, z);
         g.add(spin);
         wheelNodes.push(spin);
       }
