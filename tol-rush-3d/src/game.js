@@ -1979,6 +1979,10 @@ function loop(now) {
       const ang = showcaseT * 0.3; // ~21 s per full orbit
       camera.position.set(Math.sin(ang) * 8.5, 2.4, Math.cos(ang) * 8.5);
       camera.lookAt(0, 0.9, 0);
+      // Turntable: the wheels spin slowly so the rims read (the car is
+      // parked, so this is a display spin, not driving speed).
+      const spinN = playerMesh.userData.spin;
+      if (spinN) for (const s of spinN) s.rotation.x -= 4 * dt;
     } else {
       camera.position.set(0, 5.4, 9);
       camera.lookAt(0, 0.8, -12);

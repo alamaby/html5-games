@@ -18,8 +18,14 @@
              background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
   /* Showcase mode (?showcase): clear the start screen so the orbiting
      camera can show the parked car — light backdrop, shop blocks hidden */
-  body.showcase #startOverlay { background:rgba(5,8,18,.25); }
-  body.showcase #startOverlay .shop, body.showcase #startOverlay .howto { display:none; }
+  body.showcase #startOverlay { background:rgba(5,8,18,.25); justify-content:flex-end; }
+  /* showcase: only the toggle button stays — route/condition buttons, best
+     score, title, subtitle, instructions and shops all hide so the car
+     is never covered */
+  body.showcase #startOverlay .shop, body.showcase #startOverlay .howto,
+  body.showcase #startOverlay .moderow:not(.showcase-row), body.showcase #startOverlay .condrow,
+  body.showcase #startOverlay .best, body.showcase #startOverlay .subtitle,
+  body.showcase #startOverlay .kicker, body.showcase #startOverlay .title { display:none; }
   #showcaseHint { display:none; position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:25; background:rgba(15,22,45,.8); color:#ffe29a; font-size:13px; font-weight:700; padding:6px 12px; border-radius:99px; pointer-events:none; white-space:nowrap; }
   body.showcase #showcaseHint { display:block; }
   .overlay.hidden { display:none; }
@@ -236,7 +242,7 @@
     <button class="bigbtn condbtn" data-cond="rain" data-i18n="condRain">HUJAN</button>
     <button class="bigbtn condbtn" data-cond="random" data-i18n="condRandom">ACAK</button>
   </div>
-  <div class="moderow"><button class="bigbtn modebtn" id="showcaseBtn" data-i18n="showcaseBtn">🔍 LIHAT MOBIL</button></div>
+  <div class="moderow showcase-row"><button class="bigbtn modebtn" id="showcaseBtn" data-i18n="showcaseBtn">🔍 LIHAT MOBIL</button></div>
   <div class="shop">
     <div class="shophead"><span data-i18n="carTitle">MOBIL</span></div>
     <div id="carList"></div>
@@ -3067,6 +3073,10 @@ function loop(now) {
       const ang = showcaseT * 0.3; // ~21 s per full orbit
       camera.position.set(Math.sin(ang) * 8.5, 2.4, Math.cos(ang) * 8.5);
       camera.lookAt(0, 0.9, 0);
+      // Turntable: the wheels spin slowly so the rims read (the car is
+      // parked, so this is a display spin, not driving speed).
+      const spinN = playerMesh.userData.spin;
+      if (spinN) for (const s of spinN) s.rotation.x -= 4 * dt;
     } else {
       camera.position.set(0, 5.4, 9);
       camera.lookAt(0, 0.8, -12);
