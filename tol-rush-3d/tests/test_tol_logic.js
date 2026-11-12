@@ -667,5 +667,77 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   ok('endless driven to 20 km', ge.dist >= 20000);
 }
 
+// Fase 2W challenges — one fresh state per case, fields set directly;
+// checkChallenges returns only newly completed keys, in def order.
+{
+  const ch = (st, finished, done) => TR.checkChallenges(st, finished, done || []);
+  // setBrake tracks brake use for Tanpa Rem
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    eq('brakeUsed starts false', st.brakeUsed, false);
+    TR.setBrake(st, true);
+    eq('setBrake(true) marks brakeUsed', st.brakeUsed, true);
+    TR.setBrake(st, false);
+    eq('setBrake(false) does not clear brakeUsed', st.brakeUsed, true);
+  }
+  // irit: short finish, zero jerrycans (brake used, so tanpaRem stays out)
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.brakeUsed = true;
+    eq('irit passes on clean short finish', ch(st, true), ['irit']);
+    st.pickupCount = 1;
+    eq('irit fails after one jerrycan', ch(st, true), []);
+  }
+  // tanpaRem: short finish, brake never touched (one jerrycan, so irit stays out)
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.pickupCount = 1;
+    eq('tanpaRem passes with no braking', ch(st, true), ['tanpaRem']);
+    st.brakeUsed = true;
+    eq('tanpaRem fails after braking', ch(st, true), []);
+  }
+  // komboMaster: combo x5 held to the finish (isolated by jerrycan + brake)
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.pickupCount = 1; st.brakeUsed = true; st.combo = 5;
+    eq('komboMaster passes at combo x5', ch(st, true), ['komboMaster']);
+    st.combo = 4;
+    eq('komboMaster fails at combo x4', ch(st, true), []);
+  }
+  // badai: short + rain + zero crashes (isolated by jerrycan + brake)
+  {
+    const st = TR.createGame({ mode: 'short', condition: 'rain' }); quiet(st);
+    st.pickupCount = 1; st.brakeUsed = true;
+    eq('badai passes on clean rain finish', ch(st, true), ['badai']);
+    st.crashes = 1;
+    eq('badai fails after one crash', ch(st, true), []);
+    const sd = TR.createGame({ mode: 'short', condition: 'day' }); quiet(sd);
+    sd.pickupCount = 1; sd.brakeUsed = true;
+    eq('badai fails in dry weather', ch(sd, true), []);
+  }
+  // tamuRest: long route, both rest stops used (isolated by jerrycan + brake)
+  {
+    const st = TR.createGame({ mode: 'long' }); quiet(st);
+    st.pickupCount = 1; st.brakeUsed = true; st.restCount = 2;
+    eq('tamuRest passes with both rests', ch(st, true), ['tamuRest']);
+    st.restCount = 1;
+    eq('tamuRest fails with one rest', ch(st, true), []);
+    const sh = TR.createGame({ mode: 'short' }); quiet(sh);
+    sh.pickupCount = 1; sh.brakeUsed = true; sh.restCount = 2;
+    eq('tamuRest fails on short route', ch(sh, true), []);
+  }
+  // unfinished run grants nothing, even with perfect metrics
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    eq('no challenge on unfinished run', ch(st, false), []);
+  }
+  // already unlocked challenges are excluded
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.brakeUsed = true;
+    eq('unlocked irit excluded', ch(st, true, ['irit']), []);
+  }
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

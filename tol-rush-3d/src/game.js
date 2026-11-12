@@ -68,7 +68,7 @@ const I18N = {
     how3: '♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).',
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
-    missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai',
+    missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai', challengeTitle: 'CHALLENGE', challengeLabel: 'CHALLENGE',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!', laneClosingToast: 'Jalur akan ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
     shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
@@ -102,7 +102,7 @@ const I18N = {
     how3: '♥ 3 HP, empty tank = crawl. Rest area: full HP + full fuel (+250).',
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
-    missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete',
+    missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete', challengeTitle: 'CHALLENGES', challengeLabel: 'CHALLENGES',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!', laneClosingToast: 'Lane closing ahead!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
     shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
@@ -149,6 +149,7 @@ function applyI18n() {
   renderCars();
   renderMissions();
   renderAchievements();
+  renderChallenges();
   updateConditionUI();
 }
 
@@ -342,6 +343,28 @@ function renderAchievements() {
   list.innerHTML = TR.ACH_DEFS.map((d) => {
     const a = ACH_TEXT[d.key]; const isU = unlocked.includes(d.key);
     const name = lang === 'id' ? a.id : a.en; const desc = lang === 'id' ? a.descId : a.descEn;
+    return '<div class="shoprow"><span>' + (isU ? '🏆 ' : '🔒 ') + '<b>' + name + '</b> — ' + desc + '</span><span class="lvl">' + (isU ? '✓' : '+' + d.coins) + '</span></div>';
+  }).join('');
+}
+// ---------- permanent challenges (Fase 2W) ----------
+const CHALLENGE_TEXT = {
+  irit: { id: 'Si Irit', en: 'Fuel Saver', descId: 'Finis Rute 5 km tanpa ambil jeriken', descEn: 'Finish the 5 km route without a jerrycan' },
+  tanpaRem: { id: 'Kaki Dingin', en: 'Cool Foot', descId: 'Finis Rute 5 km tanpa rem', descEn: 'Finish the 5 km route without braking' },
+  komboMaster: { id: 'Raja Salip', en: 'Overtake King', descId: 'Kombo x5 sampai finis', descEn: 'Hold combo x5 to the finish' },
+  badai: { id: 'Penakluk Badai', en: 'Storm Tamer', descId: 'Finis Rute 5 km di hujan tanpa tabrakan', descEn: 'Finish the 5 km route in the rain without crashing' },
+  tamuRest: { id: 'Pelanggan Setia', en: 'Regular Guest', descId: 'Mampir ke 2 rest area di Rute 10 km', descEn: 'Stop at both rest areas on the 10 km route' },
+};
+function loadChallenges() {
+  try { const a = JSON.parse(localStorage.getItem('tr_challenges_v1') || '[]'); return a.filter((k) => TR.CHALLENGE_DEFS.some((d) => d.key === k)); } catch (e) { return []; }
+}
+function saveChallenges(a) { try { localStorage.setItem('tr_challenges_v1', JSON.stringify(a)); } catch (e) {} }
+function challengeName(key) { const c = CHALLENGE_TEXT[key]; return c ? (lang === 'id' ? c.id : c.en) : key; }
+function renderChallenges() {
+  const list = $('chList'); if (!list) return;
+  const unlocked = loadChallenges();
+  list.innerHTML = TR.CHALLENGE_DEFS.map((d) => {
+    const c = CHALLENGE_TEXT[d.key]; const isU = unlocked.includes(d.key);
+    const name = lang === 'id' ? c.id : c.en; const desc = lang === 'id' ? c.descId : c.descEn;
     return '<div class="shoprow"><span>' + (isU ? '🏆 ' : '🔒 ') + '<b>' + name + '</b> — ' + desc + '</span><span class="lvl">' + (isU ? '✓' : '+' + d.coins) + '</span></div>';
   }).join('');
 }
@@ -1121,7 +1144,11 @@ function endGame(finished) {
   const achNew = TR.checkAchievements(st, finished, achCtx, loadAchievements());
   const achCoins = achNew.reduce((s, k) => s + TR.ACH_DEFS.find((d) => d.key === k).coins, 0);
   if (achNew.length) saveAchievements(loadAchievements().concat(achNew));
-  const coinsEarned = Math.floor(st.score / 50) + (finished ? 50 : 0) + missionCoins + achCoins;
+  // challenges completed this run (Fase 2W, granted once each)
+  const chNew = TR.checkChallenges(st, finished, loadChallenges());
+  const chCoins = chNew.reduce((s, k) => s + TR.CHALLENGE_DEFS.find((d) => d.key === k).coins, 0);
+  if (chNew.length) saveChallenges(loadChallenges().concat(chNew));
+  const coinsEarned = Math.floor(st.score / 50) + (finished ? 50 : 0) + missionCoins + achCoins + chCoins;
   const coinsTotal = loadCoins() + coinsEarned;
   saveCoins(coinsTotal);
   $('endStats').innerHTML =
@@ -1133,6 +1160,7 @@ function endGame(finished) {
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
     (missionNew.length ? '<br><b>' + t('missionLabel') + ':</b> ' + missionNew.map(missionName).join(', ') + ' (+' + missionCoins + ')' : '') +
     (achNew.length ? '<br><b>' + t('achLabel') + ':</b> ' + achNew.map((k) => '🏆 ' + achName(k)).join(', ') + ' (+' + achCoins + ')' : '') +
+    (chNew.length ? '<br><b>' + t('challengeLabel') + ':</b> ' + chNew.map((k) => '🏆 ' + challengeName(k)).join(', ') + ' (+' + chCoins + ')' : '') +
     '<br><b>' + t('carTitle') + ':</b> ' + carName(st.car) +
     '<br><b>ODO:</b> ' + fmtKm(odoSaved);
   $('endOverlay').classList.remove('hidden');
@@ -1141,6 +1169,7 @@ function endGame(finished) {
   renderCars();
   renderMissions();
   renderAchievements();
+  renderChallenges();
   if (finished) { beep(523, 0.18, 'sine', 0.22); setTimeout(() => beep(659, 0.18, 'sine', 0.22), 180); setTimeout(() => beep(784, 0.3, 'sine', 0.22), 360); }
 }
 // ---------- pause / resume (Fase 2J) ----------

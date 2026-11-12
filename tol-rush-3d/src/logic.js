@@ -113,8 +113,8 @@ const TR = {
       fuelCritical: false,
       score: 0,
       bonus: 0,
-      // run metrics for missions + achievements (Fase 2H)
-      crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, fuelEmpty: false,
+      // run metrics for missions + achievements (Fase 2H) + challenges (2W)
+      crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, fuelEmpty: false, brakeUsed: false,
       combo: 0,
       comboT: 0,
       nitro: 50,
@@ -274,7 +274,7 @@ const TR = {
     return true;
   },
 
-  setBrake(st, on) { st.brake = !!on; },
+  setBrake(st, on) { st.brake = !!on; if (on) st.brakeUsed = true; }, // brakeUsed feeds the Tanpa Rem challenge (2W)
   setNitro(st, on) { st.nitroOn = !!on; },
 
   // Rest-area decision. Returns true only when a stop's window is open.
@@ -768,6 +768,20 @@ const TR = {
   ],
   checkAchievements(st, finished, ctx, unlocked) {
     return TR.ACH_DEFS.filter((a) => a.check(st, finished, ctx) && !unlocked.includes(a.key)).map((a) => a.key);
+  },
+  // ---------- permanent challenges (Fase 2W) ----------
+  // One-time coin rewards + badges, checked at run end like achievements.
+  // pickupCount counts jerrycans only (shields are shieldPickups); restCount
+  // counts rest stops used (tryRest, incl. SKIP); brakeUsed is set by setBrake.
+  CHALLENGE_DEFS: [
+    { key: 'irit', coins: 100, check: (st, finished) => finished && st.mode === 'short' && st.pickupCount === 0 },
+    { key: 'tanpaRem', coins: 100, check: (st, finished) => finished && st.mode === 'short' && !st.brakeUsed },
+    { key: 'komboMaster', coins: 150, check: (st, finished) => finished && st.combo >= 5 },
+    { key: 'badai', coins: 200, check: (st, finished) => finished && st.mode === 'short' && st.condition === 'rain' && st.crashes === 0 },
+    { key: 'tamuRest', coins: 150, check: (st, finished) => finished && st.mode === 'long' && st.restCount >= 2 },
+  ],
+  checkChallenges(st, finished, unlocked) {
+    return TR.CHALLENGE_DEFS.filter((c) => c.check(st, finished) && !unlocked.includes(c.key)).map((c) => c.key);
   },
 };
 
