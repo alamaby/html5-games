@@ -1321,6 +1321,7 @@ function loadOwnedCars() {
 }
 function saveOwnedCars(arr) { try { localStorage.setItem('tr_cars_owned', JSON.stringify(arr)); } catch (e) {} }
 function loadSelectedCar() {
+  if (DEBUG_CAR && TR.CARS[DEBUG_CAR]) return DEBUG_CAR;
   try {
     const k = localStorage.getItem('tr_car');
     if (k && TR.CARS[k] && loadOwnedCars().includes(k)) return k;
@@ -2787,6 +2788,10 @@ const DEBUG_SHOWCASE = new URLSearchParams(location.search).has('showcase');
 // Debug only: ?spindbg shows the live wheel-spin angle in the hint pill,
 // so a browser check can tell whether the turntable spin actually runs
 // (the markers render but were seen frozen in the 20:32 check).
+// Debug only: ?car=<key> previews that car for this session (showcase +
+// runs), without owning it or touching saved data — so a browser check
+// can see every GLTF model. Ignored unless the key is a real car.
+const DEBUG_CAR = new URLSearchParams(location.search).get('car');
 const DEBUG_SPIN = new URLSearchParams(location.search).has('spindbg');
 let showcaseT = 0;
 let showcaseOn = DEBUG_SHOWCASE; // menu button toggles this; ?showcase starts it on
