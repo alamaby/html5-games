@@ -656,38 +656,61 @@ function makeSignTexture(line1, line2) {
   g.font = '700 44px Arial'; g.fillText(line2 || '', 256, 190);
   const tex = new THREE.CanvasTexture(cv); return tex;
 }
-// Fase 2T: high-poly player bodies — extruded side profiles with a bevel,
-// replacing the hard body/cabin boxes. pts are [x = world z (front is
+// Fase 2T/2X: high-poly player bodies — extruded side profiles with a bevel.
+// Fase 2X: the body is split into a lower slab (full width, rocker to
+// beltline) and an upper slab (0.12 narrower), so the side has a real
+// shoulder step instead of one flat plate. pts are [x = world z (front is
 // negative), y = height]; width is the extrude depth across the car.
 const PLAYER_PROFILES = {
   sedan: {
-    body: [[-2.2, 0.35], [-2.2, 0.68], [-2.02, 0.84], [-1.0, 0.9], [1.2, 0.9], [1.98, 0.86], [2.2, 0.78], [2.2, 0.35]],
+    bodyLo: [[-2.2, 0.35], [-2.2, 0.65], [2.2, 0.65], [2.2, 0.35]],
+    bodyHi: [[-2.2, 0.6], [-2.2, 0.68], [-2.02, 0.84], [-1.0, 0.9], [1.2, 0.9], [1.98, 0.86], [2.2, 0.78], [2.2, 0.6]],
+    wLo: 1.8, wHi: 1.68,
     cabin: [[-1.05, 0.88], [-0.62, 1.3], [0.62, 1.3], [1.15, 0.9]],
-    wBody: 1.8, wCabin: 1.6,
+    wCabin: 1.6,
   },
   hatch: {
-    body: [[-1.8, 0.35], [-1.8, 0.68], [-1.58, 0.84], [-0.8, 0.88], [1.2, 0.88], [1.8, 0.8], [1.8, 0.35]],
+    bodyLo: [[-1.8, 0.35], [-1.8, 0.65], [1.8, 0.65], [1.8, 0.35]],
+    bodyHi: [[-1.8, 0.6], [-1.8, 0.68], [-1.58, 0.84], [-0.8, 0.88], [1.2, 0.88], [1.8, 0.8], [1.8, 0.6]],
+    wLo: 1.8, wHi: 1.68,
     cabin: [[-0.95, 0.86], [-0.5, 1.42], [0.55, 1.42], [1.0, 0.88]],
-    wBody: 1.8, wCabin: 1.6,
+    wCabin: 1.6,
   },
   suv: {
-    body: [[-2.3, 0.35], [-2.3, 0.85], [-2.0, 1.0], [-0.9, 1.02], [1.6, 1.02], [2.3, 0.9], [2.3, 0.35]],
+    bodyLo: [[-2.3, 0.35], [-2.3, 0.65], [2.3, 0.65], [2.3, 0.35]],
+    bodyHi: [[-2.3, 0.6], [-2.3, 0.85], [-2.0, 1.0], [-0.9, 1.02], [1.6, 1.02], [2.3, 0.9], [2.3, 0.6]],
+    wLo: 1.9, wHi: 1.78,
     cabin: [[-1.25, 1.0], [-0.8, 1.62], [0.8, 1.62], [1.3, 1.0]],
-    wBody: 1.9, wCabin: 1.7,
+    wCabin: 1.7,
   },
   sport: {
-    body: [[-2.3, 0.3], [-2.3, 0.58], [-1.95, 0.7], [-0.6, 0.74], [1.5, 0.74], [2.3, 0.66], [2.3, 0.3]],
+    bodyLo: [[-2.3, 0.3], [-2.3, 0.55], [2.3, 0.55], [2.3, 0.3]],
+    bodyHi: [[-2.3, 0.5], [-2.3, 0.58], [-1.95, 0.7], [-0.6, 0.74], [1.5, 0.74], [2.3, 0.66], [2.3, 0.5]],
+    wLo: 1.9, wHi: 1.78,
     cabin: [[-1.0, 0.72], [-0.5, 1.12], [0.6, 1.12], [1.1, 0.74]],
-    wBody: 1.9, wCabin: 1.5,
+    wCabin: 1.5,
   },
 };
-function extrudeBody(pts, width, color) {
+function extrudeBody(pts, width, color, smooth) {
   const s = new THREE.Shape();
   s.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
+  if (smooth) {
+    // Fase 2X: smooth spline through the upper outline (roof, hood, trunk
+    // flow as one curve); the bottom edge stays a straight line back to the
+    // start, so the rocker never bows below the design line. NOTE: a spline
+    // through sharp 90° corners overshoots badly (the rectangular lower slab
+    // stretched +0.4 in length), so only the gently-angled upper body is
+    // splined — the lower slab and the flat-roofed cabin stay straight.
+    s.splineThru(pts.slice(1).map((p) => new THREE.Vector2(p[0], p[1])));
+  } else {
+    for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
+  }
+  s.lineTo(pts[0][0], pts[0][1]);
   s.closePath();
   const depth = width - 0.16; // bevel 0.08 each side keeps total width exact
-  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 3, curveSegments: 12 });
+  // NOTE: for a spline, ExtrudeGeometry divides EACH span into curveSegments
+  // parts, so 4 already gives ~32 points along the outline — plenty smooth.
+  const geo = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 4, curveSegments: 4 });
   geo.rotateY(-Math.PI / 2); // shape x -> world z (front = -z), extrude z -> world x
   geo.translate(depth / 2, 0, 0);
   return new THREE.Mesh(geo, mat(color));
@@ -697,8 +720,9 @@ function makeCar(kind, colorHex, highPoly) {
   const col = colorHex;
   const P = highPoly ? PLAYER_PROFILES[kind] : null;
   if (P) {
-    g.add(extrudeBody(P.body, P.wBody, col));
-    g.add(extrudeBody(P.cabin, P.wCabin, 0x1a2b45));
+    g.add(extrudeBody(P.bodyLo, P.wLo, col, false));
+    g.add(extrudeBody(P.bodyHi, P.wHi, col, true));
+    g.add(extrudeBody(P.cabin, P.wCabin, 0x1a2b45, false));
   } else if (kind === 'truck') {
     g.add(box(2.0, 1.7, 1.9, 0xd8dee9, 0, 1.15, -3.6)); // cab
     g.add(box(2.1, 2.3, 7.2, col, 0, 1.45, 0.6)); // container
@@ -734,24 +758,63 @@ function makeCar(kind, colorHex, highPoly) {
   // Fase 2U: front wheels (z = zs[0], the front axle) sit in steering pivots
   // on the player car, so they visibly turn into a lane change; rear wheels
   // stay fixed. wheelNodes tracks every wheel part for the body-group split.
-  const wheelNodes = [], steerPivots = [];
+  // Fase 2X: player wheels are real — a torus tyre (rounded sidewall), a
+  // rim disc and 5 spokes, all inside a spin group so the wheel rolls with
+  // the car's speed; traffic keeps the plain cylinder wheels.
+  const wheelNodes = [], steerPivots = [], spinNodes = [];
+  const tireGeo = highPoly ? new THREE.TorusGeometry(0.26, 0.12, 8, 24) : null;
+  const rimGeo = highPoly ? new THREE.CylinderGeometry(0.2, 0.2, 0.26, 24) : null;
+  const rimMat = highPoly ? mat(0x8a8f9a) : null;
   for (const z of zs) for (const x of [-0.92, 0.92]) {
+    if (highPoly) {
+      const spin = new THREE.Group();
+      spin.position.set(x, 0.38, z);
+      const tire = new THREE.Mesh(tireGeo, wheelMat);
+      tire.rotation.y = Math.PI / 2;
+      spin.add(tire);
+      const rim = new THREE.Mesh(rimGeo, rimMat);
+      rim.rotation.z = Math.PI / 2;
+      spin.add(rim);
+      for (let k = 0; k < 5; k++) {
+        const spv = new THREE.Group();
+        spv.rotation.x = k * Math.PI * 2 / 5;
+        spv.add(box(0.3, 0.32, 0.09, 0x6a6f7a, 0, 0.1, 0));
+        spin.add(spv);
+      }
+      if (z === zs[0]) {
+        const pv = new THREE.Group();
+        pv.position.set(x, 0.38, z);
+        pv.add(spin); g.add(pv);
+        wheelNodes.push(pv); steerPivots.push(pv);
+      } else {
+        g.add(spin);
+        wheelNodes.push(spin);
+      }
+      spinNodes.push(spin);
+      continue;
+    }
     const w = new THREE.Mesh(wheelGeo, wheelMat);
     w.rotation.z = Math.PI / 2;
     const h = new THREE.Mesh(hubGeo, hubMat);
     h.rotation.z = Math.PI / 2;
-    if (highPoly && z === zs[0]) {
-      const pv = new THREE.Group();
-      pv.position.set(x, 0.38, z);
-      pv.add(w); pv.add(h); g.add(pv);
-      wheelNodes.push(pv); steerPivots.push(pv);
-    } else {
-      w.position.set(x, 0.38, z); h.position.set(x, 0.38, z);
-      g.add(w); g.add(h);
-      wheelNodes.push(w, h);
-    }
+    w.position.set(x, 0.38, z); h.position.set(x, 0.38, z);
+    g.add(w); g.add(h);
+    wheelNodes.push(w, h);
   }
   if (steerPivots.length) g.userData.steer = steerPivots;
+  if (spinNodes.length) g.userData.spin = spinNodes;
+  // Fase 2X: wheel-arch trim — half-torus rings hugging the body sides
+  // around each wheel (body-fixed, so the wheel turns inside them).
+  if (highPoly) {
+    const archGeo = new THREE.TorusGeometry(0.47, 0.07, 6, 16, Math.PI);
+    const archMat = mat(0x1a1d24);
+    for (const z of zs) for (const sx of [-1, 1]) {
+      const a = new THREE.Mesh(archGeo, archMat);
+      a.rotation.y = Math.PI / 2;
+      a.position.set(sx * (P.wLo / 2 - 0.01), 0.38, z);
+      g.add(a);
+    }
+  }
   // headlights (front = -z) and taillights (rear = +z); basic material so they
   // glow at night instead of going dark with the scene lights
   const front = kind === 'sedan' ? -2.2 : (kind === 'bus' ? -4.25 : (kind === 'truck' ? -4.55 : (kind === 'hatch' ? -1.8 : -2.3)));
@@ -1537,6 +1600,9 @@ function updateRestAnim(dt) {
     pbodyR.rotation.z = Math.max(-0.06, Math.min(0.06, -lat * 0.012));
     pbodyR.position.x = Math.max(-0.05, Math.min(0.05, lat * 0.015));
   }
+  // Fase 2X: wheels roll with the sequence speed, same as on the highway.
+  const spinR = playerMesh.userData.spin;
+  if (spinR) for (const s of spinR) s.rotation.x -= (a.v / 0.38) * dt;
   // fuel bar shows 100% once the fill is done
   if (a.phase === 'drive2') { $('restFuelFill').style.width = '100%'; $('restFuelPct').textContent = '100%'; }
   if (stage !== a.stage) { a.stage = stage; $('restStage').textContent = t(stage); }
@@ -1764,6 +1830,10 @@ function loop(now) {
     if (steer) for (const pv of steer) pv.rotation.y = steerCur;
     const pbody = playerMesh.userData.body;
     if (pbody) { pbody.rotation.z = -steerCur * 0.18; pbody.position.x = steerCur * 0.12; }
+    // Fase 2X: wheels roll with the car's speed (the top of the wheel moves
+    // forward, so the spin angle decreases).
+    const spinN = playerMesh.userData.spin;
+    if (spinN) for (const s of spinN) s.rotation.x -= (st.speed / 0.38) * dt;
     syncTrafficMeshes();
     syncPickups();
     syncRoadworkMeshes();
