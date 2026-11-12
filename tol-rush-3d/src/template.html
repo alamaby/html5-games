@@ -16,6 +16,12 @@
   .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
              justify-content:center; z-index:10; text-align:center; padding:24px;
              background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
+  /* Showcase mode (?showcase): clear the start screen so the orbiting
+     camera can show the parked car — light backdrop, shop blocks hidden */
+  body.showcase #startOverlay { background:rgba(5,8,18,.25); }
+  body.showcase #startOverlay .shop, body.showcase #startOverlay .howto { display:none; }
+  #showcaseHint { display:none; position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:25; background:rgba(15,22,45,.8); color:#ffe29a; font-size:13px; font-weight:700; padding:6px 12px; border-radius:99px; pointer-events:none; white-space:nowrap; }
+  body.showcase #showcaseHint { display:block; }
   .overlay.hidden { display:none; }
   .kicker { font-size:12px; letter-spacing:5px; color:#ffd76a; margin-bottom:10px; font-weight:700; }
   h1.title { font-size:clamp(38px, 11vw, 68px); font-weight:900; line-height:.95; letter-spacing:1px;
@@ -251,6 +257,8 @@
     <div id="chList"></div>
   </div>
 </div>
+
+<div id="showcaseHint" data-i18n="showcaseHint">SHOWCASE · kamera mengorbit — pilih rute untuk main</div>
 
 <div class="overlay hidden" id="endOverlay">
   <div class="kicker" id="endKicker">FINIS</div>

@@ -68,7 +68,7 @@ const I18N = {
     how3: '♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).',
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
-    missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai', challengeTitle: 'CHALLENGE', challengeLabel: 'CHALLENGE',
+    missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai', challengeTitle: 'CHALLENGE', challengeLabel: 'CHALLENGE', showcaseHint: 'SHOWCASE · kamera mengorbit — pilih rute untuk main',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!', laneClosingToast: 'Jalur akan ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
     shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
@@ -102,7 +102,7 @@ const I18N = {
     how3: '♥ 3 HP, empty tank = crawl. Rest area: full HP + full fuel (+250).',
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
-    missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete', challengeTitle: 'CHALLENGES', challengeLabel: 'CHALLENGES',
+    missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete', challengeTitle: 'CHALLENGES', challengeLabel: 'CHALLENGES', showcaseHint: 'SHOWCASE · orbiting camera — pick a route to play',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!', laneClosingToast: 'Lane closing ahead!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
     shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
@@ -1491,6 +1491,11 @@ let steerCur = 0; // Fase 2U: smoothed steering angle, driven by the lane gap
 // auto-starts the sequence when the window opens, so the sequence can be
 // checked in a browser without driving 2.5 km first. Normal play is untouched.
 const DEBUG_REST = new URLSearchParams(location.search).has('rest');
+// Fase 2Z: showcase mode (?showcase) — the start-screen camera slowly
+// orbits the parked player car so the lofted body can be judged from
+// every angle; the chase camera takes over as soon as a run starts.
+const DEBUG_SHOWCASE = new URLSearchParams(location.search).has('showcase');
+let showcaseT = 0;
 // Path waypoints (x, z) in world space; first/last share the player's lane
 // so the car enters and merges heading straight, with no snap at either end.
 // Stop 1 (behind the queue car) is at z=-155, the pump at z=-169.
@@ -1951,8 +1956,18 @@ function loop(now) {
       playerMesh.userData.signals.right.visible = false;
     }
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
-    camera.position.set(0, 5.4, 9);
-    camera.lookAt(0, 0.8, -12);
+    if (DEBUG_SHOWCASE && playerMesh) {
+      // Showcase orbit: the car is re-centred here (after a run it would
+      // otherwise sit in its last lane), then the camera circles it.
+      playerMesh.position.set(0, 0, 0);
+      showcaseT += dt;
+      const ang = showcaseT * 0.3; // ~21 s per full orbit
+      camera.position.set(Math.sin(ang) * 8.5, 2.4, Math.cos(ang) * 8.5);
+      camera.lookAt(0, 0.9, 0);
+    } else {
+      camera.position.set(0, 5.4, 9);
+      camera.lookAt(0, 0.8, -12);
+    }
   }
   renderer.render(scene, camera);
 }
@@ -1963,6 +1978,7 @@ if (typeof THREE === 'undefined') {
   document.querySelector('[data-i18n="tagline"]').textContent = t('threeMissing');
 } else {
   initThree();
+  if (DEBUG_SHOWCASE) document.body.classList.add('showcase');
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
   requestAnimationFrame(loop);
 }
