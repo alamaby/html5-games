@@ -67,6 +67,8 @@
   .condbtn { font-size:13px; padding:10px 12px; background:rgba(255,255,255,.12); color:#fff;
              border:1px solid rgba(255,255,255,.2); }
   .condbtn.sel { background:#ffd76a; color:#111; border-color:#ffd76a; }
+  /* showcase toggle: gold highlight while the orbit is on */
+  #showcaseBtn.on { background:#ffd76a; color:#111; border-color:#ffd76a; }
   /* the start menu grew long (routes + condition + 2 shops + missions):
      let it scroll from the top instead of centring and clipping */
   #startOverlay { justify-content:flex-start; overflow-y:auto; padding:20px 24px 48px; }
@@ -234,6 +236,7 @@
     <button class="bigbtn condbtn" data-cond="rain" data-i18n="condRain">HUJAN</button>
     <button class="bigbtn condbtn" data-cond="random" data-i18n="condRandom">ACAK</button>
   </div>
+  <div class="moderow"><button class="bigbtn modebtn" id="showcaseBtn" data-i18n="showcaseBtn">🔍 LIHAT MOBIL</button></div>
   <div class="shop">
     <div class="shophead"><span data-i18n="carTitle">MOBIL</span></div>
     <div id="carList"></div>
@@ -1153,7 +1156,7 @@ const I18N = {
     how3: '♥ 3 HP, bensin habis = melambat. Rest area: HP + bensin penuh (+250).',
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
-    missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai', challengeTitle: 'CHALLENGE', challengeLabel: 'CHALLENGE', showcaseHint: 'SHOWCASE · kamera mengorbit — pilih rute untuk main',
+    missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai', challengeTitle: 'CHALLENGE', challengeLabel: 'CHALLENGE', showcaseHint: 'SHOWCASE · kamera mengorbit — pilih rute untuk main', showcaseBtn: '🔍 LIHAT MOBIL', showcaseBtnOff: '✕ TUTUP SHOWCASE',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!', laneClosingToast: 'Jalur akan ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
     shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
@@ -1187,7 +1190,7 @@ const I18N = {
     how3: '♥ 3 HP, empty tank = crawl. Rest area: full HP + full fuel (+250).',
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
-    missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete', challengeTitle: 'CHALLENGES', challengeLabel: 'CHALLENGES', showcaseHint: 'SHOWCASE · orbiting camera — pick a route to play',
+    missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete', challengeTitle: 'CHALLENGES', challengeLabel: 'CHALLENGES', showcaseHint: 'SHOWCASE · orbiting camera — pick a route to play', showcaseBtn: '🔍 VIEW CAR', showcaseBtnOff: '✕ CLOSE SHOWCASE',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!', laneClosingToast: 'Lane closing ahead!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
     shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
@@ -2589,6 +2592,13 @@ const DEBUG_REST = new URLSearchParams(location.search).has('rest');
 // every angle; the chase camera takes over as soon as a run starts.
 const DEBUG_SHOWCASE = new URLSearchParams(location.search).has('showcase');
 let showcaseT = 0;
+let showcaseOn = DEBUG_SHOWCASE; // menu button toggles this; ?showcase starts it on
+function setShowcase(on) {
+  showcaseOn = on;
+  document.body.classList.toggle('showcase', on);
+  const b = $('showcaseBtn');
+  if (b) { b.dataset.i18n = on ? 'showcaseBtnOff' : 'showcaseBtn'; b.textContent = t(b.dataset.i18n); b.classList.toggle('on', on); }
+}
 // Path waypoints (x, z) in world space; first/last share the player's lane
 // so the car enters and merges heading straight, with no snap at either end.
 // Stop 1 (behind the queue car) is at z=-155, the pump at z=-169.
@@ -3049,7 +3059,7 @@ function loop(now) {
       playerMesh.userData.signals.right.visible = false;
     }
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
-    if (DEBUG_SHOWCASE && playerMesh) {
+    if (showcaseOn && playerMesh) {
       // Showcase orbit: the car is re-centred here (after a run it would
       // otherwise sit in its last lane), then the camera circles it.
       playerMesh.position.set(0, 0, 0);
@@ -3071,7 +3081,9 @@ if (typeof THREE === 'undefined') {
   document.querySelector('[data-i18n="tagline"]').textContent = t('threeMissing');
 } else {
   initThree();
-  if (DEBUG_SHOWCASE) document.body.classList.add('showcase');
+  const sb = $('showcaseBtn');
+  if (sb) sb.addEventListener('click', () => setShowcase(!showcaseOn));
+  if (DEBUG_SHOWCASE) setShowcase(true);
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
   requestAnimationFrame(loop);
 }
