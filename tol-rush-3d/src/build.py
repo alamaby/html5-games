@@ -14,6 +14,7 @@ Default: Three.js r149 loads from CDN, default language Indonesian
   Game code is identical in both builds; the SDK calls in game.js are
   guarded, so the portal file still plays with no SDK present.
 """
+import base64
 import sys
 from pathlib import Path
 
@@ -25,6 +26,17 @@ portal = '--portal' in sys.argv
 tpl = (ROOT / 'template.html').read_text(encoding='utf-8')
 logic = (ROOT / 'logic.js').read_text(encoding='utf-8')
 game = (ROOT / 'game.js').read_text(encoding='utf-8')
+
+# GLTF player sedan (Quaternius car-1, CC0): base64-inlined so the
+# single-file build stays self-contained (the .glb itself is never
+# pushed — binary files cannot go through the push tool). The
+# placeholder appears twice in game.js: the const (replaced here with
+# the base64) and the makeCar guard (left as the comparison literal).
+glb = (ROOT / 'quaternius-car-1.glb').read_bytes()
+glb_b64 = base64.b64encode(glb).decode('ascii')
+assert game.count('__GLB_SEDAN_B64__') == 2, 'GLB placeholder count changed'
+game = game.replace('__GLB_SEDAN_B64__', glb_b64, 1)
+assert game.count('__GLB_SEDAN_B64__') == 1, 'GLB const not replaced'
 
 if portal:
     three = (ROOT / 'three.min.js').read_text(encoding='utf-8')

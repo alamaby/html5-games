@@ -792,7 +792,140 @@ function loftMesh(sections, color, lean) {
   geo.computeVertexNormals();
   return new THREE.Mesh(geo, mat(color));
 }
+// ---------- minimal GLB parser (static meshes only) ----------
+// Written for the Quaternius car GLBs, which are exactly that: POSITION +
+// NORMAL + index, pbrMetallicRoughness baseColorFactor, no textures, skins
+// or animations. The model faces +Z while the game faces -Z, so every
+// geometry is rotated Y by PI here; after that the car behaves like any
+// other makeCar result (steering pivots, spin groups, body subgroup).
+// The GLB is base64-inlined by build.py; the placeholder below means
+// "no model inlined" and makeCar falls back to the procedural loft.
+const GLB_SEDAN_B64 = '__GLB_SEDAN_B64__';
+function b64ToArrayBuffer(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+function parseGLB(buf) {
+  const dv = new DataView(buf);
+  if (dv.getUint32(0, true) !== 0x46546C67) throw new Error('not a GLB file');
+  const jsonLen = dv.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen)));
+  let off = 20 + jsonLen;
+  const binLen = dv.getUint32(off, true);
+  const binStart = off + 8;
+  if (binStart + binLen > buf.byteLength) throw new Error('GLB BIN chunk truncated');
+  const compBytes = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
+  const nComp = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+  function readAccessor(ai) {
+    const a = json.accessors[ai];
+    const bv = json.bufferViews[a.bufferView];
+    const start = binStart + (bv.byteOffset || 0) + (a.byteOffset || 0);
+    const nc = nComp[a.type];
+    const stride = bv.byteStride || nc * compBytes[a.componentType];
+    const count = a.count;
+    if (a.componentType === 5126) {
+      const out = new Float32Array(count * nc);
+      for (let i = 0; i < count; i++) for (let c = 0; c < nc; c++)
+        out[i * nc + c] = dv.getFloat32(start + i * stride + c * 4, true);
+      return out;
+    }
+    if (a.componentType === 5123) {
+      const out = new Uint16Array(count);
+      for (let i = 0; i < count; i++) out[i] = dv.getUint16(start + i * stride, true);
+      return out;
+    }
+    if (a.componentType === 5125) {
+      const out = new Uint32Array(count);
+      for (let i = 0; i < count; i++) out[i] = dv.getUint32(start + i * stride, true);
+      return out;
+    }
+    throw new Error('unsupported accessor componentType ' + a.componentType);
+  }
+  const materials = (json.materials || []).map((m) => {
+    const pbr = m.pbrMetallicRoughness || {};
+    const bc = pbr.baseColorFactor || [1, 1, 1, 1];
+    return { name: m.name || '', mat: mat(new THREE.Color(bc[0], bc[1], bc[2])) };
+  });
+  const meshes = [];
+  (json.meshes || []).forEach((mesh, mi) => {
+    mesh.primitives.forEach((prim) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(readAccessor(prim.attributes.POSITION), 3));
+      if (prim.attributes.NORMAL) geo.setAttribute('normal', new THREE.BufferAttribute(readAccessor(prim.attributes.NORMAL), 3));
+      else geo.computeVertexNormals();
+      if (prim.indices !== undefined) geo.setIndex(new THREE.BufferAttribute(readAccessor(prim.indices), 1));
+      geo.rotateY(Math.PI); // model faces +Z, game faces -Z
+      const mm = prim.material !== undefined ? materials[prim.material] : null;
+      meshes.push({ meshIndex: mi, geo, mat: mm ? mm.mat : mat(0x888888), matName: mm ? mm.name : '' });
+    });
+  });
+  const meshNode = {};
+  (json.nodes || []).forEach((n) => { if (n.mesh !== undefined) meshNode[n.mesh] = n.name || ''; });
+  return { meshes, meshNode };
+}
+function buildGltfSedan(colorHex) {
+  const g = new THREE.Group();
+  const parsed = parseGLB(b64ToArrayBuffer(GLB_SEDAN_B64));
+  const byNode = {};
+  parsed.meshes.forEach((m) => { (byNode[m.meshIndex] = byNode[m.meshIndex] || []).push(m); });
+  const body = new THREE.Group();
+  const steerPivots = [], spinNodes = [];
+  Object.keys(byNode).forEach((mi) => {
+    const name = parsed.meshNode[mi] || '';
+    const parts = byNode[mi];
+    // wheel centre = union bbox centre of this node's primitives
+    // (measured from the file, not hardcoded, so it stays right if the
+    // model is swapped); for the merged rear axle this is the midpoint.
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    parts.forEach((p) => {
+      p.geo.computeBoundingBox();
+      const b = p.geo.boundingBox;
+      const lo = [b.min.x, b.min.y, b.min.z], hi = [b.max.x, b.max.y, b.max.z];
+      for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], lo[k]); mx[k] = Math.max(mx[k], hi[k]); }
+    });
+    const c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
+    if (!/Wheel/i.test(name)) {
+      // body: recolor the paint material ('Blue' in this model) to the
+      // car's color; windows/lights/trim keep their GLB colors.
+      parts.forEach((p) => { body.add(new THREE.Mesh(p.geo, p.matName === 'Blue' ? mat(colorHex) : p.mat)); });
+      return;
+    }
+    const isRear = /Back/i.test(name);
+    const spin = new THREE.Group();
+    parts.forEach((p) => {
+      const mesh = new THREE.Mesh(p.geo, p.mat);
+      mesh.position.set(-c[0], -c[1], -c[2]); // centre the wheel on the pivot
+      spin.add(mesh);
+    });
+    if (isRear) {
+      spin.position.set(c[0], c[1], c[2]);
+      g.add(spin);
+    } else {
+      const pv = new THREE.Group();
+      pv.position.set(c[0], c[1], c[2]);
+      pv.add(spin);
+      g.add(pv);
+      steerPivots.push(pv);
+    }
+    spinNodes.push(spin);
+  });
+  g.add(body);
+  g.userData.body = body;
+  if (steerPivots.length) g.userData.steer = steerPivots;
+  if (spinNodes.length) g.userData.spin = spinNodes;
+  // No userData.signals/tails: this model has no signal meshes; every
+  // game access to them is guarded, so the car simply has no blinkers.
+  return g;
+}
 function makeCar(kind, colorHex, highPoly) {
+  // GLTF player sedan (Quaternius car-1, CC0): replaces the procedural
+  // loft when the build inlined the model. A parse failure falls back
+  // to the loft instead of breaking the game.
+  if (highPoly && kind === 'sedan' && GLB_SEDAN_B64 !== '__GLB_SEDAN_B64__') {
+    try { return buildGltfSedan(colorHex); } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF sedan failed, using loft:', e); }
+  }
   const g = new THREE.Group();
   const col = colorHex;
   const P = highPoly ? PLAYER_PROFILES[kind] : null;
@@ -859,10 +992,16 @@ function makeCar(kind, colorHex, highPoly) {
       const rim = new THREE.Mesh(rimGeo, rimMat);
       rim.rotation.z = Math.PI / 2;
       spin.add(rim);
+      // Spokes must READ as rotation at game-view distance: the old short
+      // grey bars (0.32 long, 0.09 wide, barely darker than the rim) were
+      // sub-pixel in screenshots, so the wheels looked static even though
+      // the spin angle accumulated correctly (verified in Node: -6 rad
+      // after 1.5 s of showcase spin). New: long bright bars reaching into
+      // the black tyre, one red index spoke so the turn is unmistakable.
       for (let k = 0; k < 5; k++) {
         const spv = new THREE.Group();
         spv.rotation.x = k * Math.PI * 2 / 5;
-        spv.add(box(0.3, 0.32, 0.09, 0x6a6f7a, 0, 0.1, 0));
+        spv.add(box(0.3, 0.37, 0.12, k === 0 ? 0xd43d2a : 0xdfe5ec, 0, 0.185, 0));
         spin.add(spv);
       }
       if (z === zs[0]) {

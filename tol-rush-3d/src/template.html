@@ -26,6 +26,9 @@
   body.showcase #startOverlay .moderow:not(.showcase-row), body.showcase #startOverlay .condrow,
   body.showcase #startOverlay .best, body.showcase #startOverlay .subtitle,
   body.showcase #startOverlay .kicker, body.showcase #startOverlay .title { display:none; }
+  /* showcase: the footer line and the corner buttons go too — only the
+     toggle button and the hint pill stay over the 3D scene */
+  body.showcase .corner, body.showcase .foot { display:none; }
   #showcaseHint { display:none; position:fixed; left:50%; bottom:14px; transform:translateX(-50%); z-index:25; background:rgba(15,22,45,.8); color:#ffe29a; font-size:13px; font-weight:700; padding:6px 12px; border-radius:99px; pointer-events:none; white-space:nowrap; }
   body.showcase #showcaseHint { display:block; }
   .overlay.hidden { display:none; }
