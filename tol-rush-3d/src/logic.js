@@ -46,6 +46,16 @@ const TR = {
   // stretch; convoys are slow truck/bus groups leaving exactly one gap lane.
   ROADWORK_LEN: 220, ROADWORK_GAP_MIN: 1500, ROADWORK_GAP_MAX: 2600,
   ROADWORK_FIRST: 1200, ROADWORK_WARN: 300,
+  // Penghadang (Fase 2AC): an aggressive sedan that deliberately swerves
+  // into the player's lane once. It only fires while the player is 40-70 m
+  // behind (closer is unfair, farther is meaningless), only from 1500 m on,
+  // only on 3+ lanes, at most one live, and only ~15% of sedans.
+  PENGHADANG_FIRST: 1500, PENGHADANG_MIN_GAP: 40, PENGHADANG_MAX_GAP: 70,
+  PENGHADANG_CHANCE: 0.15,
+  // Moving traffic (Fase 2AD): cars advance at their own speed. A car
+  // follows the car ahead in its lane within FOLLOW_DIST, matching its
+  // speed so nobody drives through anybody.
+  FOLLOW_DIST: 30,
   CONVOY_FIRST: 1800, CONVOY_GAP_MIN: 2500, CONVOY_GAP_MAX: 4500,
   // Shield pickup (Fase 2K): rare, absorbs exactly one crash, never stacks.
   SHIELD_FIRST: 900, SHIELD_GAP_MIN: 2500, SHIELD_GAP_MAX: 4500, SHIELD_DUP_BONUS: 25,
@@ -82,7 +92,7 @@ const TR = {
     let sightRange = 190;
     if (condition === 'night') sightRange = 110; // headlight range: cars appear later
     if (condition === 'rain') { moveTime += 0.04; brakeFactor = Math.min(0.9, brakeFactor * 1.15); } // wet grip: slower snap, weaker brakes
-    return {
+    const st = {
       status: 'play', // play | finished | over
       mode,
       condition,
@@ -131,6 +141,14 @@ const TR = {
       invuln: 0,
       events: [],
     };
+    // Pre-seed (Fase 2AD): the road starts with three cars already on it,
+    // so the opening has action. Without them the first ambient spawn
+    // (180+ m ahead, closing at only ~5 m/s) is not reached for ~30 s.
+    // Lane 1 is kept clear at the very start: the nearest car is in lane 0.
+    TR.spawnVehicle(st, { kind: 'truck', lane: 0, gapAhead: 40, speed: 13 });
+    TR.spawnVehicle(st, { kind: 'sedan', lane: 2, gapAhead: 80, speed: 14 });
+    TR.spawnVehicle(st, { kind: 'sedan', lane: 1, gapAhead: 120, speed: 15 });
+    return st;
   },
 
   // The rest stop whose window is currently open, or null.
@@ -239,9 +257,15 @@ const TR = {
   },
 
   spawnInterval(dist) {
-    // Fase 2N balance: sparser traffic (was 1.5 s -> 0.65 s floor) so
-    // all-lanes-blocked walls form less often and leave real gaps.
-    return Math.max(1.0, 1.9 - dist / 6000);
+    // Fase 2AD: tuned after the first autopilot measurement (interval 1.4
+    // gave 37-59% braking and 14-20 live cars: the road was congested,
+    // because moving cars linger ~3x longer ahead than static ones).
+    // 2.6 s keeps live traffic near the old ~9-10 while the pre-seed and
+    // denser feel carry the opening. Floor 1.8 (not 1.2): the old formula
+    // densified with distance, which compounds congestion once cars move
+    // (they linger ~3x longer ahead) - the long route's 2-lane stretches
+    // were braking 40-60% of the time.
+    return Math.max(1.8, 2.6 - dist / 6000);
   },
 
   laneX(lane) { return TR.LANES[lane]; },
@@ -355,15 +379,26 @@ const TR = {
       if (v.moving && v.targetLane === lane && Math.abs(v.s - s) < 40) return null;
     }
     if (TR.wallAt(st, s, lane, null)) return null;
-    const kind = o.kind || (Math.random() < 0.3 ? 'truck' : (Math.random() < 0.35 ? 'bus' : 'sedan'));
+    let kind = o.kind || (Math.random() < 0.3 ? 'truck' : (Math.random() < 0.35 ? 'bus' : (Math.random() < TR.PENGHADANG_CHANCE ? 'aggressive' : 'sedan')));
+    // Penghadang gating (rolled kinds only; an explicit kind bypasses it,
+    // so tests can construct one anywhere): not before 1500 m, not on
+    // 2-lane stretches, at most one live.
+    if (!o.kind && kind === 'aggressive') {
+      if (st.dist < TR.PENGHADANG_FIRST || TR.laneCountAt(st, s) < 3 || st.traffic.some((v) => v.kind === 'aggressive')) kind = 'sedan';
+    }
     const len = kind === 'truck' ? 10 : (kind === 'bus' ? 8.5 : 4.4);
+    // Speeds are real now (Fase 2AD): the slowest traffic (13) stays above
+    // the fastest braked player speed (Sport at max base: 32 x 1.12 x 0.36
+    // = 12.9), so braking always holds behind a car. Sedans run a touch
+    // slower (13-17) than the first draft (14-18): they are the most common
+    // car, and a slightly bigger speed gap keeps overtakes flowing.
     const speed = o.speed !== undefined ? o.speed
-      : (kind === 'truck' ? 12 + Math.random() * 3
-      : (kind === 'bus' ? 13 + Math.random() * 3 : 14 + Math.random() * 5));
+      : ((kind === 'truck' || kind === 'bus') ? 13 + Math.random() * 3 : 13 + Math.random() * 4);
     const v = {
       kind, lane, targetLane: lane, s, speed, len,
       x: st.laneXs[lane], startX: st.laneXs[lane], moveT: 1, moving: false,
       signalT: 0, changeCd: 2 + Math.random() * 4, passed: false,
+      swerveUsed: false,
       color: o.color !== undefined ? o.color : Math.floor(Math.random() * 360),
     };
     st.traffic.push(v);
@@ -529,10 +564,12 @@ const TR = {
       }
     }
 
-    // Spawner.
+    // Spawner. Capped at 25 live cars (Fase 2AD): with moving traffic a
+    // long brake lets cars pull far ahead, so the spawner must not keep
+    // piling them up behind the forward cleanup below.
     st.spawnT -= dt;
     if (st.spawnT <= 0) {
-      TR.spawnVehicle(st);
+      if (st.traffic.length < 25) TR.spawnVehicle(st);
       st.spawnT = TR.spawnInterval(st.dist) * (0.8 + Math.random() * 0.4);
     }
 
@@ -605,14 +642,55 @@ const TR = {
       const fits = st.mode === 'endless' || at < st.routeLen - 100;
       if (lanes >= 2 && fits) {
         const gapLane = Math.floor(Math.random() * lanes);
+        // One speed for the whole convoy (Fase 2AD): members used to draw
+        // 11-13 each, which is fine while speed is vestigial but would
+        // dissolve the formation once cars really move.
+        const convoySpeed = 13 + Math.random() * 1;
         for (let l = 0; l < lanes; l++) {
           if (l === gapLane) continue;
-          const v = TR.spawnVehicle(st, { lane: l, gapAhead: at - st.dist + (Math.random() * 20 - 10), kind: Math.random() < 0.6 ? 'truck' : 'bus', speed: 11 + Math.random() * 2 });
+          const v = TR.spawnVehicle(st, { lane: l, gapAhead: at - st.dist + (Math.random() * 20 - 10), kind: Math.random() < 0.6 ? 'truck' : 'bus', speed: convoySpeed });
           if (v) v.convoy = true;
         }
         st.events.push({ t: 'convoy', at });
       }
       st.nextConvoyAt = at + TR.CONVOY_GAP_MIN + Math.random() * (TR.CONVOY_GAP_MAX - TR.CONVOY_GAP_MIN);
+    }
+
+    // Moving traffic (Fase 2AD): every car ahead of the player advances at
+    // its own speed. Processed front-to-back so a follower can match its
+    // leader's already computed effective speed; a car within FOLLOW_DIST
+    // of the car ahead in its lane (target lane while changing) never goes
+    // faster than that car, and eases off further when already closer than
+    // the minimum gap. Cars behind the player do NOT advance: a faster car
+    // catching the player from behind would be an invisible, unwarnable
+    // rear-end (the camera never looks back), so they freeze and get
+    // cleaned up instead.
+    {
+      // Snapshot pre-advance positions: the leader's gap must be measured
+      // against where it was when the step started, not after it already
+      // advanced (a dt=1 step would inflate the gap by the leader's speed).
+      const s0 = new Map(st.traffic.map((v) => [v, v.s]));
+      const ordered = [...st.traffic].sort((a, b) => b.s - a.s);
+      const effSpeed = new Map();
+      for (const v of ordered) {
+        if (v.s < st.dist) { effSpeed.set(v, 0); continue; }
+        let sp = (typeof v.speed === 'number' ? v.speed : 0); // no speed = static
+        const lane = v.moving ? v.targetLane : v.lane;
+        let leader = null, leaderGap = Infinity;
+        for (const o of st.traffic) {
+          if (o === v) continue;
+          if (o.lane !== lane && o.targetLane !== lane) continue;
+          const g = s0.get(o) - s0.get(v);
+          if (g > 0 && g < leaderGap) { leaderGap = g; leader = o; }
+        }
+        if (leader && leaderGap < TR.FOLLOW_DIST) {
+          const leaderSp = effSpeed.has(leader) ? effSpeed.get(leader) : leader.speed;
+          const minGap = (leader.len + v.len) / 2 + 2;
+          sp = Math.min(sp, leaderGap <= minGap ? Math.max(0, leaderSp - 2) : leaderSp);
+        }
+        effSpeed.set(v, sp);
+        v.s += sp * dt;
+      }
     }
 
     // Traffic update, lane changes, collisions, overtakes.
@@ -651,6 +729,36 @@ const TR = {
           v.targetLane = target;
           v.signalT = TR.SIGNAL_TIME;
           st.events.push({ t: 'signal', lane: v.lane, target });
+        }
+      } else if (v.kind === 'aggressive' && st.status === 'play') {
+        // Penghadang (Fase 2AC): one deliberate swerve into the player's
+        // lane. Fires only while the player is 40-70 m behind in an
+        // adjacent lane; the chance is spent when the signal starts. The
+        // wall rule, 45 m target clearance and the closed/doomed-lane
+        // guards still apply, so the cut is always dodgeable. It never
+        // changes lanes randomly like a sedan (see below).
+        if (!v.swerveUsed && v.s >= st.dist) {
+          const gap = v.s - st.dist;
+          const target = st.player.targetLane;
+          if (gap >= TR.PENGHADANG_MIN_GAP && gap <= TR.PENGHADANG_MAX_GAP && Math.abs(target - v.lane) === 1) {
+            let clear = true;
+            for (const o of st.traffic) {
+              if (o === v) continue;
+              if (o.lane === target && Math.abs(o.s - v.s) < 45) { clear = false; break; }
+              if (o.moving && o.targetLane === target && Math.abs(o.s - v.s) < 45) { clear = false; break; }
+            }
+            const zAt = TR.zoneAt(st, v.s);
+            if (zAt && target === zAt.lane) clear = false;
+            if (TR.isDoomedLaneAt(st, target, v.s)) clear = false;
+            if (TR.wallAt(st, v.s, target, v)) clear = false;
+            if (clear) {
+              v.swerveUsed = true;
+              v.targetLane = target;
+              v.signalT = TR.SIGNAL_TIME;
+              st.events.push({ t: 'signal', lane: v.lane, target });
+              st.events.push({ t: 'horn' });
+            }
+          }
         }
       } else if ((v.kind === 'sedan') && st.status === 'play') {
         // Only sedans change lanes, and only after signalling.
@@ -709,7 +817,10 @@ const TR = {
         }
       }
     }
-    st.traffic = st.traffic.filter((v) => (v.s - st.dist) > -30);
+    // Forward cleanup (Fase 2AD): a car more than 350 m ahead is far beyond
+    // the sight range and can only be one that pulled away while the player
+    // braked; dropping it is invisible and bounds the traffic array.
+    st.traffic = st.traffic.filter((v) => (v.s - st.dist) > -30 && (v.s - st.dist) < 350);
 
     // Pickup collection: same lane, close gap. Fuel restores fuel;
     // a shield arms (once — a second shield while armed is +25 instead).

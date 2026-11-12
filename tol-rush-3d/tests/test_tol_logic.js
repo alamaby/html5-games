@@ -64,6 +64,7 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
 // Lane change: signal first, then move; never into player's close lane
 {
   const st = TR.createGame(); quiet(st);
+  st.traffic.length = 0; // drop the pre-seeded cars: this test sets up its own gaps
   const v = TR.spawnVehicle(st, { lane: 0, gapAhead: 30, kind: 'sedan', speed: 15 });
   ok('player-close lane change blocked', !TR.canChangeLane(st, v, 1));
   const far = TR.spawnVehicle(st, { lane: 0, gapAhead: 300, kind: 'sedan', speed: 15 });
@@ -82,6 +83,7 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
 {
   const st = TR.createGame(); quiet(st);
   function hit() {
+    st.traffic.length = 0; // a moving car from the previous hit lingers behind
     const v = TR.spawnVehicle(st, { lane: 1, gapAhead: 3, kind: 'sedan', speed: 15 });
     v.s = st.dist + 1; // overlap the player
     TR.step(st, 1 / 60);
@@ -98,6 +100,7 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
 // Near-miss: adjacent overtake pays combo bonus and nitro
 {
   const st = TR.createGame(); quiet(st);
+  st.traffic.length = 0; // drop the pre-seeded cars: this test sets up its own gap
   const v = TR.spawnVehicle(st, { lane: 0, gapAhead: 6, kind: 'sedan', speed: 10 });
   v.s = st.dist + 6;
   for (let i = 0; i < 120; i++) TR.step(st, 1 / 60);
@@ -237,8 +240,8 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
     ok('brake lvl' + lvl + ' holds behind slowest truck at max speed',
       maxBase * g.brakeFactor < 12);
   }
-  eq('spawn interval at start', TR.spawnInterval(0), 1.9);
-  eq('spawn interval floor', TR.spawnInterval(99999), 1.0);
+  eq('spawn interval at start', TR.spawnInterval(0), 2.6);
+  eq('spawn interval floor', TR.spawnInterval(99999), 1.8);
   ok('spawn sparser than old floor', TR.spawnInterval(99999) > 0.65);
 }
 }
@@ -310,8 +313,9 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   eq('traffic kept on 4-lane stretch', t.traffic.length, 3);
   t.dist = 2999.8; TR.step(t, 1 / 60);
   eq('beyond-line traffic remapped, before-line doomed dropped', t.traffic.length, 2);
-  eq('old lane 3 is now lane 2', t.traffic.find((v) => v.s === 3200 && v.x === 3.4).lane, 2);
-  eq('old lane 1 is now lane 0', t.traffic.find((v) => v.s === 3200 && v.x === -3.4).lane, 0);
+  // (match on x: cars advance a little each step now, so s is 3200.23, not 3200)
+  eq('old lane 3 is now lane 2', t.traffic.find((v) => v.x === 3.4).lane, 2);
+  eq('old lane 1 is now lane 0', t.traffic.find((v) => v.x === -3.4).lane, 0);
 
   // moveLane clamps to the current lane count
   const m = TR.createGame({ mode: 'short' }); quiet(m);
@@ -541,7 +545,8 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   // convoy: one gap lane, trucks/buses only, convoy event fired
   // (spawned 100 m ahead so no member can collide with the player mid-test)
   const cv = TR.createGame({ mode: 'short' }); quiet(cv);
-  cv.nextConvoyAt = cv.dist + 100; cv.nextRoadworkAt = 99999;
+  cv.traffic.length = 0; // drop the pre-seeded cars: they would fill the
+  cv.nextConvoyAt = cv.dist + 100; cv.nextRoadworkAt = 99999; // wall rule and block a member
   TR.step(cv, 1 / 60);
   const members = cv.traffic.filter((t) => t.convoy);
   eq('convoy members = lanes - 1', members.length, 2);
@@ -549,6 +554,194 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   eq('convoy leaves one gap lane', new Set(members.map((t) => t.lane)).size, 2);
   ok('convoy event fired', cv.events.some((e) => e.t === 'convoy'));
   ok('convoy generator advanced', cv.nextConvoyAt > 100);
+}
+
+// Penghadang (Fase 2AC): aggressive sedan, one deliberate swerve into the
+// player's lane, only while the player is 40-70 m behind in an adjacent lane.
+{
+  function penghadangGame(dist, pLane, aLane, gapAhead) {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.dist = dist; st.laneCount = 4; st.laneXs = TR.LANE_X[4]; // 4 lanes at 2000-2800 m
+    st.player.lane = st.player.targetLane = pLane; st.player.x = st.laneXs[pLane];
+    const v = TR.spawnVehicle(st, { kind: 'aggressive', lane: aLane, gapAhead, speed: 16 });
+    return { st, v };
+  }
+  // fires in the window: signal starts, chance spent, horn sounds
+  {
+    const { st, v } = penghadangGame(2000, 1, 0, 50);
+    TR.step(st, 1 / 60);
+    ok('penghadang fires at 50 m', v.signalT > 0 && v.targetLane === 1 && v.swerveUsed);
+    ok('penghadang horn sounds', st.events.some((e) => e.t === 'horn'));
+  }
+  // too close: no swerve below 40 m
+  {
+    const { st, v } = penghadangGame(2000, 1, 0, 30);
+    TR.step(st, 1 / 60);
+    ok('penghadang silent below 40 m', v.signalT === 0 && !v.swerveUsed);
+  }
+  // too far: no swerve above 70 m
+  {
+    const { st, v } = penghadangGame(2000, 1, 0, 100);
+    TR.step(st, 1 / 60);
+    ok('penghadang silent above 70 m', v.signalT === 0 && !v.swerveUsed);
+  }
+  // player in the same lane: nothing to swerve into
+  {
+    const { st, v } = penghadangGame(2000, 0, 0, 50);
+    TR.step(st, 1 / 60);
+    ok('penghadang silent in same lane', v.signalT === 0 && !v.swerveUsed);
+  }
+  // one chance only: after the swerve completes, no second signal
+  {
+    const { st, v } = penghadangGame(2000, 1, 0, 50);
+    TR.step(st, 1 / 60);
+    ok('first swerve fires', v.signalT > 0);
+    v.signalT = 0; v.moving = true; v.moveT = 1; // complete the move
+    TR.step(st, 1 / 60);
+    eq('swerve completes into player lane', v.lane, 1);
+    v.lane = v.targetLane = 0; v.x = v.startX = st.laneXs[0]; v.s = st.dist + 50;
+    st.player.lane = st.player.targetLane = 1; st.player.x = st.laneXs[1];
+    st.events.length = 0;
+    TR.step(st, 1 / 60);
+    ok('no second swerve', v.signalT === 0 && !st.events.some((e) => e.t === 'horn'));
+  }
+  // blocked when the target lane is occupied within 45 m
+  {
+    const { st, v } = penghadangGame(2000, 1, 0, 50);
+    TR.spawnVehicle(st, { kind: 'sedan', lane: 1, gapAhead: 70, speed: 16 });
+    TR.step(st, 1 / 60);
+    ok('penghadang blocked by car in target lane', v.signalT === 0 && !v.swerveUsed);
+  }
+  // blocked by the wall rule: middle lane, both escape lanes occupied
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.dist = 2000; st.laneCount = 4; st.laneXs = TR.LANE_X[4];
+    st.player.lane = st.player.targetLane = 2; st.player.x = st.laneXs[2];
+    const v = TR.spawnVehicle(st, { kind: 'aggressive', lane: 1, gapAhead: 50, speed: 16 });
+    st.traffic.push({ kind: 'sedan', lane: 0, targetLane: 0, s: 2050, speed: 16, len: 4.4, x: st.laneXs[0], startX: st.laneXs[0], moveT: 1, moving: false, signalT: 0, changeCd: 99, passed: false, swerveUsed: false, color: 0 });
+    st.traffic.push({ kind: 'sedan', lane: 1, targetLane: 1, s: 2070, speed: 16, len: 4.4, x: st.laneXs[1], startX: st.laneXs[1], moveT: 1, moving: false, signalT: 0, changeCd: 99, passed: false, swerveUsed: false, color: 0 });
+    st.traffic.push({ kind: 'sedan', lane: 3, targetLane: 3, s: 2050, speed: 16, len: 4.4, x: st.laneXs[3], startX: st.laneXs[3], moveT: 1, moving: false, signalT: 0, changeCd: 99, passed: false, swerveUsed: false, color: 0 });
+    TR.step(st, 1 / 60);
+    ok('penghadang blocked by wall', v.signalT === 0 && !v.swerveUsed);
+  }
+  // blocked into a roadwork-closed lane
+  {
+    const { st, v } = penghadangGame(2000, 1, 0, 50);
+    st.roadworks.push({ at: 2000, len: 220, lane: 1 });
+    TR.step(st, 1 / 60);
+    ok('penghadang blocked by closed lane', v.signalT === 0 && !v.swerveUsed);
+  }
+  // blocked into a doomed lane (decrease approach, lane 0 vanishing at 3000 m)
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.dist = 2800; st.laneCount = 4; st.laneXs = TR.LANE_X[4];
+    st.player.lane = st.player.targetLane = 0; st.player.x = st.laneXs[0];
+    const v = TR.spawnVehicle(st, { kind: 'aggressive', lane: 1, gapAhead: 50, speed: 16 });
+    TR.step(st, 1 / 60);
+    ok('penghadang blocked by doomed lane', v.signalT === 0 && !v.swerveUsed);
+  }
+  // never changes lanes randomly like a sedan: 10 s with the player two lanes over
+  {
+    const { st, v } = penghadangGame(2000, 2, 0, 200);
+    for (let i = 0; i < 600; i++) TR.step(st, 1 / 60);
+    ok('penghadang never wanders', v.signalT === 0 && v.targetLane === 0 && !st.events.some((e) => e.t === 'signal'));
+  }
+  // spawn gating: 500 rolled spawns each — none aggressive before 1500 m,
+  // none while one is live, none on a 2-lane stretch
+  {
+    const g1 = TR.createGame({ mode: 'short' }); quiet(g1); g1.dist = 1000;
+    for (let i = 0; i < 500; i++) TR.spawnVehicle(g1);
+    eq('no penghadang before 1500 m (500 rolls)', g1.traffic.filter((t) => t.kind === 'aggressive').length, 0);
+    const g2 = TR.createGame({ mode: 'short' }); quiet(g2); g2.dist = 2000;
+    TR.spawnVehicle(g2, { kind: 'aggressive', lane: 0, gapAhead: 200, speed: 16 });
+    for (let i = 0; i < 500; i++) TR.spawnVehicle(g2);
+    eq('at most one penghadang live (500 rolls)', g2.traffic.filter((t) => t.kind === 'aggressive').length, 1);
+    const g3 = TR.createGame({ mode: 'short' }); quiet(g3); g3.dist = 4100;
+    for (let i = 0; i < 500; i++) TR.spawnVehicle(g3);
+    eq('no penghadang on 2 lanes (500 rolls)', g3.traffic.filter((t) => t.kind === 'aggressive').length, 0);
+    // explicit kind bypasses gating (so tests can build one anywhere)
+    const g4 = TR.createGame({ mode: 'short' }); quiet(g4); g4.dist = 0;
+    g4.traffic.length = 0; // drop the pre-seeded cars: they would fill the wall rule here
+    ok('explicit aggressive kind allowed', TR.spawnVehicle(g4, { kind: 'aggressive', lane: 0, gapAhead: 100 }) !== null);
+  }
+}
+
+// Moving traffic (Fase 2AD): cars advance at their own speed, follow the
+// car ahead, convoys hold formation, braking really holds now.
+{
+  // a car advances at its speed: 16 m/s for 1 s
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    const v = TR.spawnVehicle(st, { kind: 'sedan', lane: 0, gapAhead: 300, speed: 16 });
+    TR.step(st, 1);
+    eq('car advances at its speed', Math.round(v.s), 316);
+  }
+  // follow rule: a fast car behind a slow car in the same lane matches speed
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    const slow = TR.spawnVehicle(st, { kind: 'truck', lane: 0, gapAhead: 300, speed: 12 });
+    const fast = TR.spawnVehicle(st, { kind: 'sedan', lane: 0, gapAhead: 260, speed: 19 });
+    fast.changeCd = 99; // no random lane change during the test
+    TR.step(st, 1); // gap 40 -> 33 (follower still outside FOLLOW_DIST)
+    TR.step(st, 1); // gap 33 -> 26
+    TR.step(st, 1); // gap 26 < 30: follower matches the leader's 12
+    eq('follower matches leader speed', Math.round(slow.s - fast.s), 26);
+    for (let i = 0; i < 10; i++) TR.step(st, 1); // 10 s more: never overlaps
+    ok('follower never overlaps leader', slow.s - fast.s >= (slow.len + fast.len) / 2 + 2 && fast.s < slow.s + 100);
+  }
+  // braking holds behind a truck: gap grows while braking
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.dist = 2000; // base speed 25, braked 25 x 0.36 = 9 < truck 13
+    st.player.lane = st.player.targetLane = 1; st.player.x = 0;
+    const truck = TR.spawnVehicle(st, { kind: 'truck', lane: 1, gapAhead: 30, speed: 13 });
+    TR.setBrake(st, true);
+    for (let i = 0; i < 5; i++) TR.step(st, 1);
+    ok('braking holds, gap grows', (truck.s - st.dist) > 30);
+  }
+  // sport brake edge: fastest braked player speed (32 x 1.12 x 0.36 = 12.9)
+  // is still below the slowest traffic (13), so the gap grows, thinly
+  {
+    const st = TR.createGame({ mode: 'short', car: 'sport' }); quiet(st);
+    st.dist = 4800; // base speed 32
+    st.player.lane = st.player.targetLane = 1; st.player.x = 0;
+    const truck = TR.spawnVehicle(st, { kind: 'truck', lane: 1, gapAhead: 30, speed: 13 });
+    TR.setBrake(st, true);
+    for (let i = 0; i < 10; i++) TR.step(st, 1);
+    ok('sport braking holds, gap grows', (truck.s - st.dist) > 30);
+  }
+  // pre-seed: the road starts with cars on it, lane 1 clear at the start
+  {
+    const st = TR.createGame({ mode: 'short' });
+    eq('three pre-seeded cars', st.traffic.length, 3);
+    ok('pre-seed lane 1 clear at the start', !st.traffic.some((v) => v.lane === 1 && v.s < 60));
+    ok('pre-seed cars ahead, within sight', st.traffic.every((v) => v.s > 0 && v.s <= 150));
+  }
+  // no accumulation: a long run with the spawner on stays bounded
+  {
+    const st = TR.createGame({ mode: 'short' });
+    let maxLive = 0;
+    for (let i = 0; i < 120 * 60; i++) { // 120 s of game time
+      TR.step(st, 1 / 60);
+      if (st.traffic.length > maxLive) maxLive = st.traffic.length;
+      if (st.status !== 'play') break; // finished/over: stop counting
+    }
+    ok('live traffic stays bounded', maxLive <= 26);
+  }
+  // convoy holds formation: one speed for all members, spread unchanged
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.traffic.length = 0; // drop the pre-seeded cars: they would fill the wall rule
+    st.nextConvoyAt = st.dist + 100;
+    TR.step(st, 1 / 60);
+    const members = st.traffic.filter((t) => t.convoy);
+    ok('convoy spawned', members.length >= 2);
+    eq('convoy members share one speed', new Set(members.map((v) => v.speed)).size, 1);
+    const spread0 = Math.max(...members.map((v) => v.s)) - Math.min(...members.map((v) => v.s));
+    TR.step(st, 1); TR.step(st, 1); // 2 s: old per-member speeds would spread ~4 m
+    const spread1 = Math.max(...members.map((v) => v.s)) - Math.min(...members.map((v) => v.s));
+    ok('convoy formation holds', Math.abs(spread1 - spread0) < 0.01);
+  }
 }
 
 // Shield pickup (Fase 2K): arms on pickup, no stacking, absorbs one crash
@@ -676,7 +869,7 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   const sm = TR.createGame({ mode: 'short' }); quiet(sm);
   sm.dist = 2000; TR.step(sm, 1 / 60);
   sm.player.lane = 2; sm.player.targetLane = 2; sm.player.x = 1.7; sm.player.moveT = 1;
-  const smCar = { kind: 'sedan', lane: 3, targetLane: 3, s: 3500, x: 5.1, startX: 5.1, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 };
+  const smCar = { kind: 'sedan', lane: 3, targetLane: 3, s: 3150, x: 5.1, startX: 5.1, speed: 14, len: 4.4, moving: false, signalT: 0, changeCd: 99, passed: false, moveT: 1 }; // 3150, not 3500: the forward cleanup drops cars > 350 m ahead (gap here is exactly 350 and only shrinks, the player is faster)
   sm.traffic.push(smCar);
   sm.dist = 2800;
   let maxJump = 0, prevPx = sm.player.x, prevCx = smCar.x, beforeLine = null;

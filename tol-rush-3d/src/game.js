@@ -1330,7 +1330,9 @@ function syncTrafficMeshes() {
   for (const v of st.traffic) {
     let mesh = trafficMeshes.get(v);
     if (!mesh) {
-      mesh = makeCar(v.kind, new THREE.Color().setHSL(v.color / 360, 0.55, 0.45).getHex());
+      // Penghadang (Fase 2AC): near-black body so it reads at a glance;
+      // the sedan shape, red taillights and blinkers are the standard ones.
+      mesh = makeCar(v.kind, v.kind === 'aggressive' ? 0x181818 : new THREE.Color().setHSL(v.color / 360, 0.55, 0.45).getHex());
       scene.add(mesh); trafficMeshes.set(v, mesh);
     }
     const gap = v.s - st.dist;
@@ -1445,6 +1447,9 @@ function handleEvents() {
       toast(t('restMissed'));
     } else if (e.t === 'convoy') {
       toast(t('convoyToast')); beep(700, 0.15, 'square', 0.15);
+    } else if (e.t === 'horn') {
+      // Penghadang (Fase 2AC): two low honks when it starts its swerve.
+      beep(220, 0.18, 'square', 0.25); setTimeout(() => beep(200, 0.22, 'square', 0.25), 170);
     } else if (e.t === 'nudged') {
       toast(t('nudgedToast')); beep(500, 0.15, 'square', 0.15);
     } else if (e.t === 'shield') {
