@@ -499,7 +499,7 @@ function comboPop(msg) {
 
 // ---------- THREE scene ----------
 let renderer, scene, camera, playerMesh;
-let hemiLight = null, sunLight = null, roadMat = null, headlight = null, rainPoints = null;
+let hemiLight = null, sunLight = null, roadMat = null, headlightL = null, headlightR = null, rainPoints = null;
 const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
 let shieldMesh = null; // translucent bubble around the player while shielded
@@ -960,20 +960,25 @@ function buildGltfCar(kind, colorHex) {
   g.add(body);
   g.userData.body = body;
   g.userData.wheelR = wheelR * scale; // world wheel radius (spin rate)
-  // Night beams (Fase 2AE): headlight position measured from the model
-  // (front-most body point, scaled to world units), and the same fake
-  // light cone as the procedural cars. The cone lives in model coords,
-  // so its ~5% scale error is invisible.
+  // Night beams (Fase 2AE/2AF): headlight position measured from the model
+  // (front-most body point, scaled to world units), and TWO fake light
+  // cones, one per lamp (Fase 2AF — the player car has two headlights,
+  // so the beams must come from two points, not the centre). The cones
+  // live in model coords, so their ~5% scale error is invisible.
   g.userData.headlightFront = -bodyMinZ * scale;
   g.userData.headlightY = 0.65;
-  const beam = new THREE.Mesh(
-    new THREE.ConeGeometry(2.2, 12, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-  beam.rotation.x = Math.PI / 2; // apex toward the car (+z), base forward (-z)
-  beam.position.set(0, 0.65, bodyMinZ - 6);
-  beam.visible = false;
-  g.add(beam);
-  g.userData.beamCone = beam;
+  g.userData.headlightX = 0.6;
+  const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.20, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const beamCones = [];
+  for (const bx of [-0.6, 0.6]) {
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(1.3, 12, 12, 1, true), beamMat);
+    beam.rotation.x = Math.PI / 2; // apex toward the car (+z), base forward (-z)
+    beam.position.set(bx, 0.65, bodyMinZ - 6);
+    beam.visible = false;
+    g.add(beam);
+    beamCones.push(beam);
+  }
+  g.userData.beamCones = beamCones;
   if (steerPivots.length) g.userData.steer = steerPivots;
   if (spinNodes.length) g.userData.spin = spinNodes;
   // No userData.signals/tails: these models have no signal meshes; every
@@ -1120,22 +1125,30 @@ function makeCar(kind, colorHex, highPoly) {
     tl.position.set(x, lightY, lightRear); g.add(tl); tails.push(tl.material);
   }
   g.userData.tails = tails; // brake lights, brightened by the loop while braking
-  // Night beams (Fase 2AE): the headlight position for the player's real
-  // spotlight, and a fake light cone (additive, unlit) so the beam reads
+  // Night beams (Fase 2AE/2AF): the headlight position for the player's real
+  // spotlights, and fake light cones (additive, unlit) so the beams read
   // in the air. A real SpotLight per car would cost too much on a phone,
-  // so traffic cars get the cone only; the player gets the cone + the
-  // real spotlight, both anchored at the headlights (apex at the lamps,
-  // base 12 m forward, axis at headlight height).
+  // so traffic cars get the cone only; the player gets cones + the real
+  // spotlights, all anchored at the headlights (apex at the lamps,
+  // base 12 m forward, axis at headlight height). The PLAYER gets TWO
+  // cones, one per lamp (left/right); traffic keeps ONE wide cone — from
+  // behind at distance the two lamps merge into one shape anyway.
   g.userData.headlightFront = -lightFront;
   g.userData.headlightY = lightY;
-  const beam = new THREE.Mesh(
-    new THREE.ConeGeometry(2.2, 12, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-  beam.rotation.x = Math.PI / 2; // apex toward the car (+z), base forward (-z)
-  beam.position.set(0, lightY, lightFront - 6);
-  beam.visible = false;
-  g.add(beam);
-  g.userData.beamCone = beam;
+  g.userData.headlightX = lightX;
+  const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.20, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const beamCones = [];
+  const beamXs = highPoly ? [-lightX, lightX] : [0];
+  const beamR = highPoly ? 1.3 : 2.2;
+  for (const bx of beamXs) {
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(beamR, 12, 12, 1, true), beamMat);
+    beam.rotation.x = Math.PI / 2; // apex toward the car (+z), base forward (-z)
+    beam.position.set(bx, lightY, lightFront - 6);
+    beam.visible = false;
+    g.add(beam);
+    beamCones.push(beam);
+  }
+  g.userData.beamCones = beamCones;
   // ---- extra body detail (Fase 2M, view-only) ----
   // All boxes overlap the body slightly (never exactly coplanar) so no
   // face ever z-fights with the panel it sits on.
@@ -1298,12 +1311,17 @@ function initThree() {
     new THREE.MeshBasicMaterial({ color: 0x37e0ff, transparent: true, opacity: 0.22, depthWrite: false }));
   shieldMesh.visible = false; scene.add(shieldMesh);
 
-  // player headlight beam (night only; intensity set by applyCondition).
-  // Origin is the headlight position (Fase 2AE): headlight height, at the
-  // front bumper along the car's heading — not the windshield.
-  headlight = new THREE.SpotLight(0xfff2c8, 0, 70, 0.55, 0.4, 1);
-  headlight.position.set(0, 0.65, -2.0);
-  scene.add(headlight); scene.add(headlight.target);
+  // Player headlight beams (night only; intensity set by applyCondition).
+  // TWO SpotLights, one per lamp (Fase 2AF): the car has two headlights
+  // left/right, so the light must also come from two points — not the
+  // centre. Origins at headlight height, at the front bumper, one lamp
+  // each side of the centre line.
+  headlightL = new THREE.SpotLight(0xfff2c8, 0, 70, 0.55, 0.4, 1);
+  headlightR = new THREE.SpotLight(0xfff2c8, 0, 70, 0.55, 0.4, 1);
+  headlightL.position.set(-0.6, 0.65, -2.0);
+  headlightR.position.set(0.6, 0.65, -2.0);
+  scene.add(headlightL); scene.add(headlightL.target);
+  scene.add(headlightR); scene.add(headlightR.target);
   // rain particles (rain only; positions recycled in the loop)
   const rainGeo = new THREE.BufferGeometry();
   const rainPos = new Float32Array(700 * 3);
@@ -1323,6 +1341,29 @@ function initThree() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 }
+// Place both headlight SpotLights: (cx,cz) is the car's ground position,
+// (fx,fz) its forward unit vector, hf the lamp distance ahead, hy the
+// lamp height, hx the lamp offset left/right of the centre line.
+// Targets sit 40 m ahead, slightly down.
+function placeHeadlights(cx, cz, fx, fz, hf, hy, hx) {
+  const rx = -fz, rz = fx; // right vector, perpendicular to forward
+  const bx = cx + fx * hf, bz = cz + fz * hf; // midpoint between the lamps
+  if (headlightL) {
+    headlightL.position.set(bx - rx * hx, hy, bz - rz * hx);
+    headlightL.target.position.set(bx - rx * hx + fx * 40, 0.3, bz - rz * hx + fz * 40);
+    headlightL.target.updateMatrixWorld();
+  }
+  if (headlightR) {
+    headlightR.position.set(bx + rx * hx, hy, bz + rz * hx);
+    headlightR.target.position.set(bx + rx * hx + fx * 40, 0.3, bz + rz * hx + fz * 40);
+    headlightR.target.updateMatrixWorld();
+  }
+}
+// Toggle a car's beam cones (one for traffic, two for the player).
+function setBeamCones(mesh, on) {
+  const cs = mesh && mesh.userData.beamCones;
+  if (cs) for (const b of cs) b.visible = on;
+}
 // Sky, fog, lights and road for a condition; also called on the start screen
 // so the menu previews the saved condition (random previews as day).
 function applyCondition(cond) {
@@ -1331,7 +1372,9 @@ function applyCondition(cond) {
     scene.background.set(0x0b1226); scene.fog.color.set(0x0b1226); scene.fog.near = 20; scene.fog.far = 120;
     hemiLight.intensity = 0.25; sunLight.intensity = 0.15;
     if (roadMat) roadMat.color.set(0x23262c);
-    if (headlight) headlight.intensity = 1.6;
+    // Fase 2AF: two lamps, 1.2 each (the overlap stays near the old 1.6).
+    if (headlightL) headlightL.intensity = 1.2;
+    if (headlightR) headlightR.intensity = 1.2;
     if (rainPoints) rainPoints.visible = false;
     setSkyColors(0x050914, 0x1b2b4d);
     if (starPoints) starPoints.visible = true;
@@ -1340,7 +1383,8 @@ function applyCondition(cond) {
     scene.background.set(0x5a6a7d); scene.fog.color.set(0x5a6a7d); scene.fog.near = 25; scene.fog.far = 130;
     hemiLight.intensity = 0.6; sunLight.intensity = 0.35;
     if (roadMat) roadMat.color.set(0x1d2126);
-    if (headlight) headlight.intensity = 0;
+    if (headlightL) headlightL.intensity = 0;
+    if (headlightR) headlightR.intensity = 0;
     if (rainPoints) rainPoints.visible = true;
     setSkyColors(0x55606e, 0x8d97a3);
     if (starPoints) starPoints.visible = false;
@@ -1349,15 +1393,16 @@ function applyCondition(cond) {
     scene.background.set(0x87b5e0); scene.fog.color.set(0x87b5e0); scene.fog.near = 30; scene.fog.far = 170;
     hemiLight.intensity = 0.95; sunLight.intensity = 0.7;
     if (roadMat) roadMat.color.set(0x2b3038);
-    if (headlight) headlight.intensity = 0;
+    if (headlightL) headlightL.intensity = 0;
+    if (headlightR) headlightR.intensity = 0;
     if (rainPoints) rainPoints.visible = false;
     setSkyColors(0x3f8fe0, 0xcfe8ff);
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
   }
-  // Fase 2AE: the player's beam cone follows the condition (covers the
+  // Fase 2AE/2AF: the player's beam cones follow the condition (covers the
   // menu/showcase, where the per-frame loop does not run).
-  if (playerMesh && playerMesh.userData.beamCone) playerMesh.userData.beamCone.visible = (cond === 'night');
+  setBeamCones(playerMesh, cond === 'night');
 }
 function syncTrafficMeshes() {
   const alive = new Set(st.traffic);
@@ -1376,7 +1421,7 @@ function syncTrafficMeshes() {
     mesh.position.set(v.x, 0, -gap);
     mesh.visible = gap > -25 && gap < (st.sightRange || 190);
     // Fase 2AE: traffic cars show their (fake) beam cones at night only.
-    if (mesh.userData.beamCone) mesh.userData.beamCone.visible = (st.condition === 'night');
+    setBeamCones(mesh, st.condition === 'night');
     const sig = mesh.userData.signals;
     const blinking = (v.signalT > 0 || v.moving) && (Math.floor(st.time * 4) % 2 === 0);
     const toRight = v.targetLane > v.lane;
@@ -1963,20 +2008,18 @@ function updateRestAnim(dt) {
   if (a.phase === 'drive2') { $('restFuelFill').style.width = '100%'; $('restFuelPct').textContent = '100%'; }
   if (stage !== a.stage) { a.stage = stage; $('restStage').textContent = t(stage); }
   if (shieldMesh) { shieldMesh.visible = !!st.shield; shieldMesh.position.set(pos.x, 1.0, pos.z); }
-  if (headlight && st.condition === 'night') {
-    // Fase 2AE: beam starts at the headlights (front bumper, headlight
-    // height) along the path tangent, aimed 40 m ahead and slightly down.
+  if (st.condition === 'night') {
+    // Fase 2AE/2AF: two beams, one per lamp, along the path tangent.
     const hf = playerMesh.userData.headlightFront || 2.0;
     const hy = playerMesh.userData.headlightY || 0.65;
-    headlight.position.set(pos.x + tan.x * hf, hy, pos.z + tan.z * hf);
-    headlight.target.position.set(pos.x + tan.x * (hf + 40), 0.3, pos.z + tan.z * (hf + 40));
-    headlight.target.updateMatrixWorld();
+    const hx = playerMesh.userData.headlightX || 0.6;
+    placeHeadlights(pos.x, pos.z, tan.x, tan.z, hf, hy, hx);
   }
-  // Night beams: the player's cone, the queue car's, and the parked cars'.
+  // Night beams: the player's cones, the queue car's, and the parked cars'.
   const nightNow = st.condition === 'night';
-  if (playerMesh.userData.beamCone) playerMesh.userData.beamCone.visible = nightNow;
-  if (restSeqQueueCar && restSeqQueueCar.userData.beamCone) restSeqQueueCar.userData.beamCone.visible = nightNow;
-  if (restSeqParked) for (const c of restSeqParked.children) if (c.userData.beamCone) c.userData.beamCone.visible = nightNow;
+  setBeamCones(playerMesh, nightNow);
+  setBeamCones(restSeqQueueCar, nightNow);
+  if (restSeqParked) for (const c of restSeqParked.children) setBeamCones(c, nightNow);
   // camera: chase, slightly higher than normal play so the curves read
   camera.position.set(pos.x - tan.x * 10, 6.2, pos.z - tan.z * 10);
   camera.lookAt(pos.x + tan.x * 12, 0.8, pos.z + tan.z * 12);
@@ -2202,16 +2245,14 @@ function loop(now) {
     syncTrafficMeshes();
     syncPickups();
     syncRoadworkMeshes();
-    if (headlight && st.condition === 'night') {
-      // Fase 2AE: beam starts at the headlights (front bumper, headlight
-      // height), aimed 40 m ahead and slightly down — not the windshield.
+    if (st.condition === 'night') {
+      // Fase 2AE/2AF: two beams, one per lamp, straight ahead (-z).
       const hf = playerMesh.userData.headlightFront || 2.0;
       const hy = playerMesh.userData.headlightY || 0.65;
-      headlight.position.set(st.player.x, hy, -hf);
-      headlight.target.position.set(st.player.x, 0.3, -hf - 40);
-      headlight.target.updateMatrixWorld();
+      const hx = playerMesh.userData.headlightX || 0.6;
+      placeHeadlights(st.player.x, 0, 0, -1, hf, hy, hx);
     }
-    if (playerMesh.userData.beamCone) playerMesh.userData.beamCone.visible = (st.condition === 'night');
+    setBeamCones(playerMesh, st.condition === 'night');
     if (rainPoints && rainPoints.visible) {
       const pos = rainPoints.geometry.attributes.position;
       for (let i = 0; i < pos.count; i++) {
