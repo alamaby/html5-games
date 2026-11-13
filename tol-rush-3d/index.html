@@ -184,11 +184,19 @@
   body.slider-on .menu-nav-row { display:flex; align-items:center; justify-content:center; gap:20px; padding-top:10px; }
   .menu-nav { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(15,22,45,.72); color:#fff; font-size:22px; font-weight:800; cursor:pointer; }
   .menu-nav:disabled { opacity:.3; }
+  .menu-nav-mid { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  /* the current slide's name, so the player always knows which menu
+     they are on (Instruksi / Menu Utama / Toko) */
+  .menu-slide-label { font-size:11px; letter-spacing:2px; color:#ffd76a; font-weight:800; }
   .menu-dots { display:flex; gap:8px; }
   .menu-dots span { width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.3); cursor:pointer; }
   .menu-dots span.on { background:#ffd76a; }
+  /* explicit way back to the main menu — shown on Instruksi and Toko,
+     hidden on Utama itself (and in landscape / showcase) */
+  .menu-home { display:none; margin-top:10px; background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.2); border-radius:12px; padding:10px 18px; font-weight:800; font-size:13px; letter-spacing:1px; cursor:pointer; }
+  body.slider-on .menu-home.show { display:block; }
   /* showcase: the slider nav hides with the rest of the menu */
-  body.showcase .menu-nav-row { display:none; }
+  body.showcase .menu-nav-row, body.showcase .menu-home { display:none; }
   .barico { font-size:13px; line-height:1; }
   .iconbtn.small { width:36px; height:36px; border-radius:10px; font-size:13px; pointer-events:auto; }
   /* menu/pause buttons used to sit below the bars (margin-top:8px); in the
@@ -301,9 +309,13 @@
   </div>
   <div class="menu-nav-row">
     <button class="menu-nav" id="menuPrev" aria-label="Sebelumnya">‹</button>
-    <div class="menu-dots" id="menuDots"><span data-dot="0"></span><span data-dot="1" class="on"></span><span data-dot="2"></span></div>
+    <div class="menu-nav-mid">
+      <div class="menu-slide-label" id="menuSlideLabel" data-i18n="menuSlideUtama">MENU UTAMA</div>
+      <div class="menu-dots" id="menuDots"><span data-dot="0"></span><span data-dot="1" class="on"></span><span data-dot="2"></span></div>
+    </div>
     <button class="menu-nav" id="menuNext" aria-label="Berikutnya">›</button>
   </div>
+  <button class="menu-home" id="menuHome" data-i18n="menuHome">🏠 MENU UTAMA</button>
 </div>
 
 <div id="showcaseHint" data-i18n="showcaseHint">SHOWCASE · kamera mengorbit — pilih rute untuk main</div>
@@ -371,6 +383,7 @@ const TR = {
   },
   REST_OPEN_BEFORE: 300,   // window opens 300 m before the rest area
   REST_CLOSE_AFTER: 150,   // window closes 150 m after it
+  SKIP_REST_BONUS: 150,    // Fase 2AI: passing a rest area without stopping earns this (the skip is a real choice now, not a missed freebie)
   SIGNAL_TIME: 0.9,        // seconds of indicator before a car starts moving
   LANE_MOVE_TIME: 0.9,     // seconds for a traffic car to finish changing lane
   PLAYER_MOVE_TIME: 0.22,  // seconds for the player to snap to a new lane
@@ -466,7 +479,7 @@ const TR = {
       score: 0,
       bonus: 0,
       // run metrics for missions + achievements (Fase 2H) + challenges (2W)
-      crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, fuelEmpty: false, brakeUsed: false,
+      crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, skipRestCount: 0, fuelEmpty: false, brakeUsed: false,
       combo: 0,
       comboT: 0,
       nitro: 50,
@@ -598,7 +611,7 @@ const TR = {
     return 20 + Math.min(12, dist / 400);
   },
 
-  spawnInterval(dist) {
+  spawnInterval(dist, lanes, mode) {
     // Fase 2AD: tuned after the first autopilot measurement (interval 1.4
     // gave 37-59% braking and 14-20 live cars: the road was congested,
     // because moving cars linger ~3x longer ahead than static ones).
@@ -607,7 +620,25 @@ const TR = {
     // densified with distance, which compounds congestion once cars move
     // (they linger ~3x longer ahead) - the long route's 2-lane stretches
     // were braking 40-60% of the time.
-    return Math.max(1.8, 2.6 - dist / 6000);
+    // Fase 2AJ: the interval scales with the lane count, so the spawn rate
+    // PER LANE stays constant — a 2-lane stretch no longer packs the same
+    // number of cars into half the road. 3 lanes is the reference.
+    // Fase 2AK: in Endless only, past 5 km the road keeps getting busier
+    // (0.05 s per km, down to a 1.2 s floor) — the old formula flattened
+    // at 1.8 s, so Endless stopped escalating at ~5 km.
+    let base = Math.max(1.8, 2.6 - dist / 6000);
+    if (mode === 'endless' && dist > 5000) base = Math.max(1.2, base - (dist - 5000) / 20000);
+    const n = lanes || 3;
+    return base * (3 / n);
+  },
+
+  // Fase 2AK: Endless-only traffic speed bonus past 5 km (0.2 m/s per km,
+  // capped at +3). Faster traffic stays above the fastest braked player
+  // speed (12.9), so braking still holds — the challenge comes from the
+  // denser road, not from cars the player cannot hold behind.
+  endlessEscalation(st) {
+    if (st.mode !== 'endless') return 0;
+    return Math.min(3, Math.max(0, (st.dist - 5000) / 5000));
   },
 
   laneX(lane) { return TR.LANES[lane]; },
@@ -734,8 +765,10 @@ const TR = {
     // = 12.9), so braking always holds behind a car. Sedans run a touch
     // slower (13-17) than the first draft (14-18): they are the most common
     // car, and a slightly bigger speed gap keeps overtakes flowing.
+    // Fase 2AK: Endless past 5 km adds the escalation bonus on top.
+    const esc = TR.endlessEscalation(st);
     const speed = o.speed !== undefined ? o.speed
-      : ((kind === 'truck' || kind === 'bus') ? 13 + Math.random() * 3 : 13 + Math.random() * 4);
+      : ((kind === 'truck' || kind === 'bus') ? 13 + Math.random() * 3 + esc : 13 + Math.random() * 4 + esc);
     const v = {
       kind, lane, targetLane: lane, s, speed, len,
       x: st.laneXs[lane], startX: st.laneXs[lane], moveT: 1, moving: false,
@@ -886,7 +919,13 @@ const TR = {
         st.events.push({ t: 'restOpen', dist: st.dist, at: stop.at });
       } else if (stop.state === 'open' && st.dist > stop.at + TR.REST_CLOSE_AFTER) {
         stop.state = 'missed';
-        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at });
+        // Fase 2AI: the window WAS open and the player drove past it — a
+        // deliberate skip, worth the bonus. (The upcoming -> missed branch
+        // above is a teleport edge case: the window never opened, so no
+        // choice was made and no bonus is due.)
+        st.bonus += TR.SKIP_REST_BONUS;
+        st.skipRestCount += 1;
+        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at, bonus: TR.SKIP_REST_BONUS });
       }
     }
     if (st.mode === 'endless') {
@@ -912,7 +951,9 @@ const TR = {
     st.spawnT -= dt;
     if (st.spawnT <= 0) {
       if (st.traffic.length < 25) TR.spawnVehicle(st);
-      st.spawnT = TR.spawnInterval(st.dist) * (0.8 + Math.random() * 0.4);
+      // Fase 2AJ: the interval is measured against the lane count where
+      // the car will appear (~220 m ahead), not the player's current stretch.
+      st.spawnT = TR.spawnInterval(st.dist, TR.laneCountAt(st, st.dist + 220), st.mode) * (0.8 + Math.random() * 0.4);
     }
 
     // Fuel pickup spawner: never on top of a car in the same lane, and
@@ -987,7 +1028,7 @@ const TR = {
         // One speed for the whole convoy (Fase 2AD): members used to draw
         // 11-13 each, which is fine while speed is vestigial but would
         // dissolve the formation once cars really move.
-        const convoySpeed = 13 + Math.random() * 1;
+        const convoySpeed = 13 + Math.random() * 1 + TR.endlessEscalation(st);
         for (let l = 0; l < lanes; l++) {
           if (l === gapLane) continue;
           const v = TR.spawnVehicle(st, { lane: l, gapAhead: at - st.dist + (Math.random() * 20 - 10), kind: Math.random() < 0.6 ? 'truck' : 'bus', speed: convoySpeed });
@@ -1321,6 +1362,7 @@ const I18N = {
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
     missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai', challengeTitle: 'CHALLENGE', challengeLabel: 'CHALLENGE', showcaseHint: 'SHOWCASE · kamera mengorbit — pilih rute untuk main', showcaseBtn: '🔍 LIHAT MOBIL', showcaseBtnOff: '✕ TUTUP SHOWCASE',
+    menuSlideInstruksi: 'INSTRUSI', menuSlideUtama: 'MENU UTAMA', menuSlideToko: 'TOKO', menuHome: '🏠 MENU UTAMA',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!', laneClosingToast: 'Jalur akan ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
     shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
@@ -1343,6 +1385,7 @@ const I18N = {
     restOpen: 'Rest area di depan! Tekan REST AREA untuk mampir.',
     restDone: 'Rest area! HP penuh, +250 poin.',
     restMissed: 'Rest area terlewat.',
+    skipRestToast: 'Tanpa henti! +150 poin.',
     combo: 'COMBO x',
     restSoon: 'REST AREA', exitSoon: 'EXIT',
     threeMissing: 'Three.js gagal dimuat. Periksa koneksi lalu muat ulang halaman.',
@@ -1355,6 +1398,7 @@ const I18N = {
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
     missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete', challengeTitle: 'CHALLENGES', challengeLabel: 'CHALLENGES', showcaseHint: 'SHOWCASE · orbiting camera — pick a route to play', showcaseBtn: '🔍 VIEW CAR', showcaseBtnOff: '✕ CLOSE SHOWCASE',
+    menuSlideInstruksi: 'INSTRUCTIONS', menuSlideUtama: 'MAIN MENU', menuSlideToko: 'SHOP', menuHome: '🏠 MAIN MENU',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!', laneClosingToast: 'Lane closing ahead!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
     shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
@@ -1377,6 +1421,7 @@ const I18N = {
     restOpen: 'Rest area ahead! Tap REST AREA to stop.',
     restDone: 'Rest area! Full HP, +250 points.',
     restMissed: 'Rest area missed.',
+    skipRestToast: 'Non-stop! +150 points.',
     combo: 'COMBO x',
     restSoon: 'REST AREA', exitSoon: 'EXIT',
     threeMissing: 'Three.js failed to load. Check your connection and reload.',
@@ -2780,7 +2825,10 @@ function handleEvents() {
     } else if (e.t === 'lanesChanged') {
       toast(t('lanesNow') + ' ' + e.lanes + ' ' + t('lanes'));
     } else if (e.t === 'restMissed') {
-      toast(t('restMissed'));
+      // Fase 2AI: a bonus field means the window was open and the player
+      // deliberately drove past it — a non-stop bonus, not a plain miss.
+      if (e.bonus) { toast(t('skipRestToast')); beep(660, 0.15, 'sine', 0.2); }
+      else toast(t('restMissed'));
     } else if (e.t === 'convoy') {
       toast(t('convoyToast')); beep(700, 0.15, 'square', 0.15);
     } else if (e.t === 'horn') {
@@ -2838,6 +2886,7 @@ function endGame(finished) {
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
     (st.shieldSaves ? '<br><b>🛡:</b> ' + st.shieldSaves + 'x' : '') +
+    (st.skipRestCount ? '<br><b>⏭:</b> ' + st.skipRestCount + 'x (+' + (st.skipRestCount * 150) + ')' : '') +
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
     (missionNew.length ? '<br><b>' + t('missionLabel') + ':</b> ' + missionNew.map(missionName).join(', ') + ' (+' + missionCoins + ')' : '') +
     (achNew.length ? '<br><b>' + t('achLabel') + ':</b> ' + achNew.map((k) => '🏆 ' + achName(k)).join(', ') + ' (+' + achCoins + ')' : '') +
@@ -3052,6 +3101,13 @@ function setMenuSlide(i) {
   const prev = $('menuPrev'), next = $('menuNext');
   if (prev) prev.disabled = menuSlide === 0;
   if (next) next.disabled = menuSlide === 2;
+  // Clear wayfinding: the label names the current slide, and the home
+  // button (visible off Utama) is the explicit way back to the main menu.
+  // The label carries data-i18n so a language switch re-applies its text.
+  const lbl = $('menuSlideLabel');
+  if (lbl) { lbl.dataset.i18n = ['menuSlideInstruksi', 'menuSlideUtama', 'menuSlideToko'][menuSlide]; lbl.textContent = t(lbl.dataset.i18n); }
+  const home = $('menuHome');
+  if (home) home.classList.toggle('show', menuSlide !== 1);
 }
 function updateSliderMode() {
   // Portrait-only slider; ?slider forces it on any orientation.
@@ -3604,6 +3660,8 @@ if (typeof THREE === 'undefined') {
   const menuPrev = $('menuPrev'), menuNext = $('menuNext');
   if (menuPrev) menuPrev.addEventListener('click', () => setMenuSlide(menuSlide - 1));
   if (menuNext) menuNext.addEventListener('click', () => setMenuSlide(menuSlide + 1));
+  const menuHome = $('menuHome');
+  if (menuHome) menuHome.addEventListener('click', () => setMenuSlide(1));
   document.querySelectorAll('#menuDots [data-dot]').forEach((d) => d.addEventListener('click', () => setMenuSlide(parseInt(d.dataset.dot, 10))));
   if (window.matchMedia) window.matchMedia('(orientation: portrait)').addEventListener('change', updateSliderMode);
   updateSliderMode();

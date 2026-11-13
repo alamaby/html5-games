@@ -184,11 +184,19 @@
   body.slider-on .menu-nav-row { display:flex; align-items:center; justify-content:center; gap:20px; padding-top:10px; }
   .menu-nav { width:44px; height:44px; border-radius:12px; border:1px solid rgba(255,255,255,.18); background:rgba(15,22,45,.72); color:#fff; font-size:22px; font-weight:800; cursor:pointer; }
   .menu-nav:disabled { opacity:.3; }
+  .menu-nav-mid { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  /* the current slide's name, so the player always knows which menu
+     they are on (Instruksi / Menu Utama / Toko) */
+  .menu-slide-label { font-size:11px; letter-spacing:2px; color:#ffd76a; font-weight:800; }
   .menu-dots { display:flex; gap:8px; }
   .menu-dots span { width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.3); cursor:pointer; }
   .menu-dots span.on { background:#ffd76a; }
+  /* explicit way back to the main menu — shown on Instruksi and Toko,
+     hidden on Utama itself (and in landscape / showcase) */
+  .menu-home { display:none; margin-top:10px; background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.2); border-radius:12px; padding:10px 18px; font-weight:800; font-size:13px; letter-spacing:1px; cursor:pointer; }
+  body.slider-on .menu-home.show { display:block; }
   /* showcase: the slider nav hides with the rest of the menu */
-  body.showcase .menu-nav-row { display:none; }
+  body.showcase .menu-nav-row, body.showcase .menu-home { display:none; }
   .barico { font-size:13px; line-height:1; }
   .iconbtn.small { width:36px; height:36px; border-radius:10px; font-size:13px; pointer-events:auto; }
   /* menu/pause buttons used to sit below the bars (margin-top:8px); in the
@@ -301,9 +309,13 @@
   </div>
   <div class="menu-nav-row">
     <button class="menu-nav" id="menuPrev" aria-label="Sebelumnya">‹</button>
-    <div class="menu-dots" id="menuDots"><span data-dot="0"></span><span data-dot="1" class="on"></span><span data-dot="2"></span></div>
+    <div class="menu-nav-mid">
+      <div class="menu-slide-label" id="menuSlideLabel" data-i18n="menuSlideUtama">MENU UTAMA</div>
+      <div class="menu-dots" id="menuDots"><span data-dot="0"></span><span data-dot="1" class="on"></span><span data-dot="2"></span></div>
+    </div>
     <button class="menu-nav" id="menuNext" aria-label="Berikutnya">›</button>
   </div>
+  <button class="menu-home" id="menuHome" data-i18n="menuHome">🏠 MENU UTAMA</button>
 </div>
 
 <div id="showcaseHint" data-i18n="showcaseHint">SHOWCASE · kamera mengorbit — pilih rute untuk main</div>

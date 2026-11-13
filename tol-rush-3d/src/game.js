@@ -69,6 +69,7 @@ const I18N = {
     shopTitle: 'UPGRADE', coins: 'KOIN', buy: 'BELI', shopMax: 'MAX', shopNeed: 'Koin kurang',
     carTitle: 'MOBIL', carUse: 'PAKAI', carUsed: 'DIPAKAI',
     missionTitle: 'MISI HARI INI', achTitle: 'ACHIEVEMENT', missionLabel: 'MISI', achLabel: 'ACHIEVEMENT', missionToast: 'Misi tercapai', challengeTitle: 'CHALLENGE', challengeLabel: 'CHALLENGE', showcaseHint: 'SHOWCASE · kamera mengorbit — pilih rute untuk main', showcaseBtn: '🔍 LIHAT MOBIL', showcaseBtnOff: '✕ TUTUP SHOWCASE',
+    menuSlideInstruksi: 'INSTRUSI', menuSlideUtama: 'MENU UTAMA', menuSlideToko: 'TOKO', menuHome: '🏠 MENU UTAMA',
     roadworkWarn: 'PERBAIKAN JALAN', laneWord: 'JALUR', closedWord: 'DITUTUP', convoyToast: 'Konvoi di depan — cari celah!', nudgedToast: 'Dipindahkan — jalur ditutup', laneClosedToast: 'Jalur ditutup!', laneClosingToast: 'Jalur akan ditutup!',
     pauseTitle: 'JEDA', pauseSub: 'Run dijeda', pauseNote: 'Tidak ada koin yang hilang — lanjutkan kapan saja.', resume: '▶ LANJUT',
     shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
@@ -91,6 +92,7 @@ const I18N = {
     restOpen: 'Rest area di depan! Tekan REST AREA untuk mampir.',
     restDone: 'Rest area! HP penuh, +250 poin.',
     restMissed: 'Rest area terlewat.',
+    skipRestToast: 'Tanpa henti! +150 poin.',
     combo: 'COMBO x',
     restSoon: 'REST AREA', exitSoon: 'EXIT',
     threeMissing: 'Three.js gagal dimuat. Periksa koneksi lalu muat ulang halaman.',
@@ -103,6 +105,7 @@ const I18N = {
     shopTitle: 'UPGRADES', coins: 'COINS', buy: 'BUY', shopMax: 'MAX', shopNeed: 'Not enough coins',
     carTitle: 'CARS', carUse: 'USE', carUsed: 'IN USE',
     missionTitle: "TODAY'S MISSIONS", achTitle: 'ACHIEVEMENTS', missionLabel: 'MISSIONS', achLabel: 'ACHIEVEMENTS', missionToast: 'Mission complete', challengeTitle: 'CHALLENGES', challengeLabel: 'CHALLENGES', showcaseHint: 'SHOWCASE · orbiting camera — pick a route to play', showcaseBtn: '🔍 VIEW CAR', showcaseBtnOff: '✕ CLOSE SHOWCASE',
+    menuSlideInstruksi: 'INSTRUCTIONS', menuSlideUtama: 'MAIN MENU', menuSlideToko: 'SHOP', menuHome: '🏠 MAIN MENU',
     roadworkWarn: 'ROADWORKS', laneWord: 'LANE', closedWord: 'CLOSED', convoyToast: 'Convoy ahead — find the gap!', nudgedToast: 'Moved — lane closed', laneClosedToast: 'Lane closed!', laneClosingToast: 'Lane closing ahead!',
     pauseTitle: 'PAUSED', pauseSub: 'Run paused', pauseNote: 'No coins lost — resume anytime.', resume: '▶ RESUME',
     shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
@@ -125,6 +128,7 @@ const I18N = {
     restOpen: 'Rest area ahead! Tap REST AREA to stop.',
     restDone: 'Rest area! Full HP, +250 points.',
     restMissed: 'Rest area missed.',
+    skipRestToast: 'Non-stop! +150 points.',
     combo: 'COMBO x',
     restSoon: 'REST AREA', exitSoon: 'EXIT',
     threeMissing: 'Three.js failed to load. Check your connection and reload.',
@@ -1528,7 +1532,10 @@ function handleEvents() {
     } else if (e.t === 'lanesChanged') {
       toast(t('lanesNow') + ' ' + e.lanes + ' ' + t('lanes'));
     } else if (e.t === 'restMissed') {
-      toast(t('restMissed'));
+      // Fase 2AI: a bonus field means the window was open and the player
+      // deliberately drove past it — a non-stop bonus, not a plain miss.
+      if (e.bonus) { toast(t('skipRestToast')); beep(660, 0.15, 'sine', 0.2); }
+      else toast(t('restMissed'));
     } else if (e.t === 'convoy') {
       toast(t('convoyToast')); beep(700, 0.15, 'square', 0.15);
     } else if (e.t === 'horn') {
@@ -1586,6 +1593,7 @@ function endGame(finished) {
     (Math.floor(st.dist) / 1000).toFixed(2) + ' km' +
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
     (st.shieldSaves ? '<br><b>🛡:</b> ' + st.shieldSaves + 'x' : '') +
+    (st.skipRestCount ? '<br><b>⏭:</b> ' + st.skipRestCount + 'x (+' + (st.skipRestCount * 150) + ')' : '') +
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
     (missionNew.length ? '<br><b>' + t('missionLabel') + ':</b> ' + missionNew.map(missionName).join(', ') + ' (+' + missionCoins + ')' : '') +
     (achNew.length ? '<br><b>' + t('achLabel') + ':</b> ' + achNew.map((k) => '🏆 ' + achName(k)).join(', ') + ' (+' + achCoins + ')' : '') +
@@ -1800,6 +1808,13 @@ function setMenuSlide(i) {
   const prev = $('menuPrev'), next = $('menuNext');
   if (prev) prev.disabled = menuSlide === 0;
   if (next) next.disabled = menuSlide === 2;
+  // Clear wayfinding: the label names the current slide, and the home
+  // button (visible off Utama) is the explicit way back to the main menu.
+  // The label carries data-i18n so a language switch re-applies its text.
+  const lbl = $('menuSlideLabel');
+  if (lbl) { lbl.dataset.i18n = ['menuSlideInstruksi', 'menuSlideUtama', 'menuSlideToko'][menuSlide]; lbl.textContent = t(lbl.dataset.i18n); }
+  const home = $('menuHome');
+  if (home) home.classList.toggle('show', menuSlide !== 1);
 }
 function updateSliderMode() {
   // Portrait-only slider; ?slider forces it on any orientation.
@@ -2352,6 +2367,8 @@ if (typeof THREE === 'undefined') {
   const menuPrev = $('menuPrev'), menuNext = $('menuNext');
   if (menuPrev) menuPrev.addEventListener('click', () => setMenuSlide(menuSlide - 1));
   if (menuNext) menuNext.addEventListener('click', () => setMenuSlide(menuSlide + 1));
+  const menuHome = $('menuHome');
+  if (menuHome) menuHome.addEventListener('click', () => setMenuSlide(1));
   document.querySelectorAll('#menuDots [data-dot]').forEach((d) => d.addEventListener('click', () => setMenuSlide(parseInt(d.dataset.dot, 10))));
   if (window.matchMedia) window.matchMedia('(orientation: portrait)').addEventListener('change', updateSliderMode);
   updateSliderMode();

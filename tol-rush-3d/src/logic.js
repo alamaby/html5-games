@@ -29,6 +29,7 @@ const TR = {
   },
   REST_OPEN_BEFORE: 300,   // window opens 300 m before the rest area
   REST_CLOSE_AFTER: 150,   // window closes 150 m after it
+  SKIP_REST_BONUS: 150,    // Fase 2AI: passing a rest area without stopping earns this (the skip is a real choice now, not a missed freebie)
   SIGNAL_TIME: 0.9,        // seconds of indicator before a car starts moving
   LANE_MOVE_TIME: 0.9,     // seconds for a traffic car to finish changing lane
   PLAYER_MOVE_TIME: 0.22,  // seconds for the player to snap to a new lane
@@ -124,7 +125,7 @@ const TR = {
       score: 0,
       bonus: 0,
       // run metrics for missions + achievements (Fase 2H) + challenges (2W)
-      crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, fuelEmpty: false, brakeUsed: false,
+      crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, skipRestCount: 0, fuelEmpty: false, brakeUsed: false,
       combo: 0,
       comboT: 0,
       nitro: 50,
@@ -256,7 +257,7 @@ const TR = {
     return 20 + Math.min(12, dist / 400);
   },
 
-  spawnInterval(dist) {
+  spawnInterval(dist, lanes, mode) {
     // Fase 2AD: tuned after the first autopilot measurement (interval 1.4
     // gave 37-59% braking and 14-20 live cars: the road was congested,
     // because moving cars linger ~3x longer ahead than static ones).
@@ -265,7 +266,25 @@ const TR = {
     // densified with distance, which compounds congestion once cars move
     // (they linger ~3x longer ahead) - the long route's 2-lane stretches
     // were braking 40-60% of the time.
-    return Math.max(1.8, 2.6 - dist / 6000);
+    // Fase 2AJ: the interval scales with the lane count, so the spawn rate
+    // PER LANE stays constant — a 2-lane stretch no longer packs the same
+    // number of cars into half the road. 3 lanes is the reference.
+    // Fase 2AK: in Endless only, past 5 km the road keeps getting busier
+    // (0.05 s per km, down to a 1.2 s floor) — the old formula flattened
+    // at 1.8 s, so Endless stopped escalating at ~5 km.
+    let base = Math.max(1.8, 2.6 - dist / 6000);
+    if (mode === 'endless' && dist > 5000) base = Math.max(1.2, base - (dist - 5000) / 20000);
+    const n = lanes || 3;
+    return base * (3 / n);
+  },
+
+  // Fase 2AK: Endless-only traffic speed bonus past 5 km (0.2 m/s per km,
+  // capped at +3). Faster traffic stays above the fastest braked player
+  // speed (12.9), so braking still holds — the challenge comes from the
+  // denser road, not from cars the player cannot hold behind.
+  endlessEscalation(st) {
+    if (st.mode !== 'endless') return 0;
+    return Math.min(3, Math.max(0, (st.dist - 5000) / 5000));
   },
 
   laneX(lane) { return TR.LANES[lane]; },
@@ -392,8 +411,10 @@ const TR = {
     // = 12.9), so braking always holds behind a car. Sedans run a touch
     // slower (13-17) than the first draft (14-18): they are the most common
     // car, and a slightly bigger speed gap keeps overtakes flowing.
+    // Fase 2AK: Endless past 5 km adds the escalation bonus on top.
+    const esc = TR.endlessEscalation(st);
     const speed = o.speed !== undefined ? o.speed
-      : ((kind === 'truck' || kind === 'bus') ? 13 + Math.random() * 3 : 13 + Math.random() * 4);
+      : ((kind === 'truck' || kind === 'bus') ? 13 + Math.random() * 3 + esc : 13 + Math.random() * 4 + esc);
     const v = {
       kind, lane, targetLane: lane, s, speed, len,
       x: st.laneXs[lane], startX: st.laneXs[lane], moveT: 1, moving: false,
@@ -544,7 +565,13 @@ const TR = {
         st.events.push({ t: 'restOpen', dist: st.dist, at: stop.at });
       } else if (stop.state === 'open' && st.dist > stop.at + TR.REST_CLOSE_AFTER) {
         stop.state = 'missed';
-        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at });
+        // Fase 2AI: the window WAS open and the player drove past it — a
+        // deliberate skip, worth the bonus. (The upcoming -> missed branch
+        // above is a teleport edge case: the window never opened, so no
+        // choice was made and no bonus is due.)
+        st.bonus += TR.SKIP_REST_BONUS;
+        st.skipRestCount += 1;
+        st.events.push({ t: 'restMissed', dist: st.dist, at: stop.at, bonus: TR.SKIP_REST_BONUS });
       }
     }
     if (st.mode === 'endless') {
@@ -570,7 +597,9 @@ const TR = {
     st.spawnT -= dt;
     if (st.spawnT <= 0) {
       if (st.traffic.length < 25) TR.spawnVehicle(st);
-      st.spawnT = TR.spawnInterval(st.dist) * (0.8 + Math.random() * 0.4);
+      // Fase 2AJ: the interval is measured against the lane count where
+      // the car will appear (~220 m ahead), not the player's current stretch.
+      st.spawnT = TR.spawnInterval(st.dist, TR.laneCountAt(st, st.dist + 220), st.mode) * (0.8 + Math.random() * 0.4);
     }
 
     // Fuel pickup spawner: never on top of a car in the same lane, and
@@ -645,7 +674,7 @@ const TR = {
         // One speed for the whole convoy (Fase 2AD): members used to draw
         // 11-13 each, which is fine while speed is vestigial but would
         // dissolve the formation once cars really move.
-        const convoySpeed = 13 + Math.random() * 1;
+        const convoySpeed = 13 + Math.random() * 1 + TR.endlessEscalation(st);
         for (let l = 0; l < lanes; l++) {
           if (l === gapLane) continue;
           const v = TR.spawnVehicle(st, { lane: l, gapAhead: at - st.dist + (Math.random() * 20 - 10), kind: Math.random() < 0.6 ? 'truck' : 'bus', speed: convoySpeed });

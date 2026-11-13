@@ -127,6 +127,35 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   TR.step(st2, 1 / 60);
   eq('rest missed after window', st2.restStops[0].state, 'missed');
   ok('missed rest rejected', !TR.tryRest(st2));
+
+  // Fase 2AI: driving past an OPEN rest window earns the non-stop bonus;
+  // teleporting past a never-opened window earns nothing, and the bonus
+  // is granted exactly once per stop.
+  {
+    const st3 = TR.createGame(); quiet(st3);
+    st3.traffic = []; st3.pickups = []; st3.nextPickupAt = 99999; st3.nextShieldAt = 99999;
+    st3.dist = TR.REST_AT - 100;
+    TR.step(st3, 1 / 60);
+    eq('skip case: window open', !!TR.openRestStop(st3), true);
+    const bonusBefore = st3.bonus;
+    for (let i = 0; i < 30 && st3.restStops[0].state === 'open'; i++) TR.step(st3, 0.5);
+    eq('skip case: stop missed', st3.restStops[0].state, 'missed');
+    eq('skip bonus is 150', st3.bonus - bonusBefore, TR.SKIP_REST_BONUS);
+    eq('skip counted', st3.skipRestCount, 1);
+    ok('skip event carries the bonus', st3.events.some((e) => e.t === 'restMissed' && e.bonus === 150));
+    for (let i = 0; i < 10; i++) TR.step(st3, 0.5);
+    eq('skip bonus granted once', st3.bonus - bonusBefore, TR.SKIP_REST_BONUS);
+  }
+  {
+    const st4 = TR.createGame(); quiet(st4);
+    st4.traffic = []; // else the teleported pre-seed cars count as near-misses (+150) and pollute the bonus measurement
+    const bonusBefore = st4.bonus;
+    st4.dist = TR.REST_AT + TR.REST_CLOSE_AFTER + 50; // teleport: window never opened
+    TR.step(st4, 1 / 60);
+    eq('teleport case: stop missed', st4.restStops[0].state, 'missed');
+    eq('teleport case: no skip bonus', st4.bonus - bonusBefore, 0);
+    eq('teleport case: not counted', st4.skipRestCount, 0);
+  }
 }
 
 // Long route: 10 km, 2 rest areas, no finish at the old 5 km mark
@@ -256,6 +285,38 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   eq('spawn interval at start', TR.spawnInterval(0), 2.6);
   eq('spawn interval floor', TR.spawnInterval(99999), 1.8);
   ok('spawn sparser than old floor', TR.spawnInterval(99999) > 0.65);
+}
+
+// Fase 2AJ: spawn interval scales with the lane count, so the spawn rate
+// PER LANE stays constant (a 2-lane stretch no longer packs the same cars
+// into half the road). 3 lanes is the reference, unchanged.
+{
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  ok('interval at start, 2 lanes', near(TR.spawnInterval(0, 2), 3.9));
+  ok('interval at start, 4 lanes', near(TR.spawnInterval(0, 4), 1.95));
+  ok('interval floor, 2 lanes', near(TR.spawnInterval(99999, 2), 2.7));
+  ok('interval floor, 4 lanes', near(TR.spawnInterval(99999, 4), 1.35));
+  const rate = (d, l) => 1 / (TR.spawnInterval(d, l) * l);
+  ok('per-lane rate equal at start', near(rate(0, 2), rate(0, 3)) && near(rate(0, 3), rate(0, 4)));
+  ok('per-lane rate equal at floor', near(rate(99999, 2), rate(99999, 4)));
+}
+
+// Fase 2AK: Endless keeps escalating past 5 km (interval + traffic speed);
+// mission routes never escalate.
+{
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  eq('endless interval at 5 km', TR.spawnInterval(5000, 3, 'endless'), 1.8);
+  ok('endless interval at 15 km', near(TR.spawnInterval(15000, 3, 'endless'), 1.3));
+  eq('endless interval floor at 25 km', TR.spawnInterval(25000, 3, 'endless'), 1.2);
+  eq('short route never escalates', TR.spawnInterval(15000, 3, 'short'), 1.8);
+  const e5 = TR.createGame({ mode: 'endless' }); e5.dist = 5000;
+  eq('no speed escalation at 5 km', TR.endlessEscalation(e5), 0);
+  const e15 = TR.createGame({ mode: 'endless' }); e15.dist = 15000;
+  eq('speed escalation +2 at 15 km', TR.endlessEscalation(e15), 2);
+  const e25 = TR.createGame({ mode: 'endless' }); e25.dist = 25000;
+  eq('speed escalation caps at +3', TR.endlessEscalation(e25), 3);
+  const s15 = TR.createGame({ mode: 'short' }); s15.dist = 15000;
+  eq('no speed escalation on mission routes', TR.endlessEscalation(s15), 0);
 }
 
 // Conditions: day default, night shortens sight range, rain slows snap + weakens brakes
