@@ -172,8 +172,8 @@ function loadCoins() { try { return parseInt(localStorage.getItem('tr_coins') ||
 function saveCoins(n) { try { localStorage.setItem('tr_coins', String(n)); } catch (e) {} }
 function renderShop() {
   const ups = loadUpgrades(), coins = loadCoins();
-  const coinEl = $('coinLine');
-  if (coinEl) coinEl.textContent = t('coins') + ': ' + coins.toLocaleString('id-ID');
+  const coinText = t('coins') + ': ' + coins.toLocaleString('id-ID');
+  for (const id of ['coinLine', 'coinLineMain']) { const el = $(id); if (el) el.textContent = coinText; }
   const list = $('shopList');
   if (!list) return;
   list.innerHTML = UPGRADE_DEFS.map((d) => {
@@ -1645,6 +1645,7 @@ function goToMenu() {
   if (lanesGroup) lanesGroup.visible = false;
   updateBestLine(); renderShop(); renderCars(); renderMissions(); renderAchievements(); refreshPlayerMesh();
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
+  setMenuSlide(1); // Fase 2AH: returning to the menu always lands on Utama
 }
 
 // ---------- rest-area drive-through set (Fase 2P) ----------
@@ -1786,6 +1787,29 @@ const DEBUG_SHOWCASE = new URLSearchParams(location.search).has('showcase');
 // can see every GLTF model. Ignored unless the key is a real car.
 const DEBUG_CAR = new URLSearchParams(location.search).get('car');
 const DEBUG_SPIN = new URLSearchParams(location.search).has('spindbg');
+// Debug only: ?slider forces the portrait menu slider on any screen, so a
+// browser check can verify the slides without a portrait viewport.
+// Fase 2AH: portrait menu slider — 0 instruksi, 1 utama (awal), 2 toko.
+const DEBUG_SLIDER = new URLSearchParams(location.search).has('slider');
+let menuSlide = 1;
+function setMenuSlide(i) {
+  menuSlide = Math.max(0, Math.min(2, i));
+  const slider = $('menuSlider');
+  if (slider) slider.style.transform = document.body.classList.contains('slider-on') ? 'translateX(' + (-menuSlide * 100) + '%)' : '';
+  document.querySelectorAll('#menuDots [data-dot]').forEach((d) => d.classList.toggle('on', parseInt(d.dataset.dot, 10) === menuSlide));
+  const prev = $('menuPrev'), next = $('menuNext');
+  if (prev) prev.disabled = menuSlide === 0;
+  if (next) next.disabled = menuSlide === 2;
+}
+function updateSliderMode() {
+  // Portrait-only slider; ?slider forces it on any orientation.
+  const on = DEBUG_SLIDER || (window.matchMedia && window.matchMedia('(orientation: portrait)').matches);
+  document.body.classList.toggle('slider-on', !!on);
+  setMenuSlide(menuSlide);
+}
+function menuSliderActive() {
+  return !$('startOverlay').classList.contains('hidden') && !showcaseOn;
+}
 let showcaseT = 0;
 let showcaseOn = DEBUG_SHOWCASE; // menu button toggles this; ?showcase starts it on
 function setShowcase(on) {
@@ -2099,8 +2123,8 @@ holdBtn($('nitroBtn'), (on) => TR.setNitro(st, on));
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { if (paused) setPaused(false); else if (restAnim) finishRestAnim(); else if (running) goToMenu(); }
   else if (e.key === 'p' || e.key === 'P') togglePause();
-  else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') lane(-1);
-  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') lane(1);
+  else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { if (menuSliderActive()) setMenuSlide(menuSlide - 1); else lane(-1); }
+  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { if (menuSliderActive()) setMenuSlide(menuSlide + 1); else lane(1); }
   else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') TR.setBrake(st, true);
   else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') TR.setNitro(st, true);
   else if (e.key === 'r' || e.key === 'R') rest();
@@ -2310,4 +2334,25 @@ if (typeof THREE === 'undefined') {
   if (DEBUG_SHOWCASE) setShowcase(true);
   applyCondition(currentCondition === 'random' ? 'day' : currentCondition);
   requestAnimationFrame(loop);
+}
+// Fase 2AH: portrait menu slider wiring — dots, arrows, swipe. Runs even
+// if THREE failed to load: the menu is DOM-only.
+{
+  const slider = $('menuSlider');
+  if (slider) {
+    let sx = null, sy = null;
+    slider.addEventListener('touchstart', (e) => { sx = e.changedTouches[0].clientX; sy = e.changedTouches[0].clientY; }, { passive: true });
+    slider.addEventListener('touchend', (e) => {
+      if (sx === null) return;
+      const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { if (dx < 0) setMenuSlide(menuSlide + 1); else setMenuSlide(menuSlide - 1); }
+      sx = null; sy = null;
+    }, { passive: true });
+  }
+  const menuPrev = $('menuPrev'), menuNext = $('menuNext');
+  if (menuPrev) menuPrev.addEventListener('click', () => setMenuSlide(menuSlide - 1));
+  if (menuNext) menuNext.addEventListener('click', () => setMenuSlide(menuSlide + 1));
+  document.querySelectorAll('#menuDots [data-dot]').forEach((d) => d.addEventListener('click', () => setMenuSlide(parseInt(d.dataset.dot, 10))));
+  if (window.matchMedia) window.matchMedia('(orientation: portrait)').addEventListener('change', updateSliderMode);
+  updateSliderMode();
 }

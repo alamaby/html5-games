@@ -40,7 +40,7 @@ const TR = {
   FUEL_DRAIN_BRAKE: 0.012,  // coasting/braking sips fuel
   FUEL_PICKUP: 30,
   FUEL_LIMP_SPEED: 8,       // crawl speed on an empty tank (not instant death)
-  UPGRADE_COSTS: [60, 120, 200, 300], // per level 1..3, same for every track
+  UPGRADE_COSTS: [150, 300, 600], // Fase 2AG: per level 1..3, same for every track (was 60/120/200; the old 4th entry was never charged, so it is gone)
   UPGRADE_MAX: 3,
   // Roadworks + convoys (Fase 2I): a roadwork zone closes ONE lane over a
   // stretch; convoys are slow truck/bus groups leaving exactly one gap lane.

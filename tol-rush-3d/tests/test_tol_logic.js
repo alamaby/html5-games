@@ -230,6 +230,19 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   const def = TR.createGame();
   eq('no upgrades = defaults', def.moveTime, 0.22);
   eq('no upgrades brake', def.brakeFactor, 0.36);
+}
+
+// Fase 2AG economy: upgrade costs raised so maxing is a long-term goal
+// (was 60/120/200 = 380/track, 1520 total — the one-time rewards alone
+// covered the whole tree, so a car maxed out in ~15-20 km of running)
+{
+  eq('upgrade costs are [150, 300, 600]', TR.UPGRADE_COSTS, [150, 300, 600]);
+  eq('costs have exactly 3 entries (no dead tier)', TR.UPGRADE_COSTS.length, TR.UPGRADE_MAX);
+  const perTrack = TR.UPGRADE_COSTS.reduce((a, b) => a + b, 0);
+  eq('one track costs 1050 to max', perTrack, 1050);
+  eq('all four tracks cost 4200 to max', perTrack * 4, 4200);
+  ok('maxing costs more than all one-time rewards (1600)', perTrack * 4 > 1600);
+}
 
 // Fase 2N balance: braking must hold behind the slowest truck (speed 12)
 // even at max base speed (32), and spawn must stay sparser than before
@@ -243,7 +256,6 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   eq('spawn interval at start', TR.spawnInterval(0), 2.6);
   eq('spawn interval floor', TR.spawnInterval(99999), 1.8);
   ok('spawn sparser than old floor', TR.spawnInterval(99999) > 0.65);
-}
 }
 
 // Conditions: day default, night shortens sight range, rain slows snap + weakens brakes
