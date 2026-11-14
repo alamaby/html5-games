@@ -30,6 +30,8 @@ const TR = {
   REST_OPEN_BEFORE: 300,   // window opens 300 m before the rest area
   REST_CLOSE_AFTER: 150,   // window closes 150 m after it
   SKIP_REST_BONUS: 150,    // Fase 2AI: passing a rest area without stopping earns this (the skip is a real choice now, not a missed freebie)
+  TIME_PAR: { short: 190, long: 380 }, // Fase 2AL: par time in seconds per mission route (measured: autopilot finishes 5 km in ~205 s, 10 km in ~380-425 s)
+  TIME_BONUS_PER_SEC: 10,  // Fase 2AL: +10 points per second under par
   SIGNAL_TIME: 0.9,        // seconds of indicator before a car starts moving
   LANE_MOVE_TIME: 0.9,     // seconds for a traffic car to finish changing lane
   PLAYER_MOVE_TIME: 0.22,  // seconds for the player to snap to a new lane
@@ -57,6 +59,7 @@ const TR = {
   // follows the car ahead in its lane within FOLLOW_DIST, matching its
   // speed so nobody drives through anybody.
   FOLLOW_DIST: 30,
+  PLATOON_BREAK_TIME: 4, // Fase 2AN: a sedan stuck behind the same leader this long signals and changes lanes instead of queuing forever
   CONVOY_FIRST: 1800, CONVOY_GAP_MIN: 2500, CONVOY_GAP_MAX: 4500,
   // Shield pickup (Fase 2K): rare, absorbs exactly one crash, never stacks.
   SHIELD_FIRST: 900, SHIELD_GAP_MIN: 2500, SHIELD_GAP_MAX: 4500, SHIELD_DUP_BONUS: 25,
@@ -123,7 +126,7 @@ const TR = {
       fuelLow: false,
       fuelCritical: false,
       score: 0,
-      bonus: 0,
+      bonus: 0, timeBonus: 0,
       // run metrics for missions + achievements (Fase 2H) + challenges (2W)
       crashes: 0, pickupCount: 0, nearMisses: 0, maxCombo: 0, restCount: 0, skipRestCount: 0, fuelEmpty: false, brakeUsed: false,
       combo: 0,
@@ -418,7 +421,7 @@ const TR = {
     const v = {
       kind, lane, targetLane: lane, s, speed, len,
       x: st.laneXs[lane], startX: st.laneXs[lane], moveT: 1, moving: false,
-      signalT: 0, changeCd: 2 + Math.random() * 4, passed: false,
+      signalT: 0, changeCd: 2 + Math.random() * 4, passed: false, followT: 0,
       swerveUsed: false,
       color: o.color !== undefined ? o.color : Math.floor(Math.random() * 360),
     };
@@ -702,7 +705,7 @@ const TR = {
       const ordered = [...st.traffic].sort((a, b) => b.s - a.s);
       const effSpeed = new Map();
       for (const v of ordered) {
-        if (v.s < st.dist) { effSpeed.set(v, 0); continue; }
+        if (v.s < st.dist) { effSpeed.set(v, 0); v.followT = 0; continue; }
         let sp = (typeof v.speed === 'number' ? v.speed : 0); // no speed = static
         const lane = v.moving ? v.targetLane : v.lane;
         let leader = null, leaderGap = Infinity;
@@ -717,6 +720,15 @@ const TR = {
           const minGap = (leader.len + v.len) / 2 + 2;
           sp = Math.min(sp, leaderGap <= minGap ? Math.max(0, leaderSp - 2) : leaderSp);
         }
+        // Fase 2AN: followT accumulates only while the car is actually
+        // speed-limited by the car ahead (a slower car ahead of a faster
+        // leader is not stuck — the gap grows on its own). The gap hovers
+        // right at FOLLOW_DIST, so a hard reset on a single unclamped step
+        // (floating-point wobble at the boundary) would keep resetting it —
+        // decay instead, so a brief blip costs little and a genuinely free
+        // car drains it in ~2 s.
+        if (sp < (typeof v.speed === 'number' ? v.speed : 0)) v.followT = (v.followT || 0) + dt;
+        else v.followT = Math.max(0, (v.followT || 0) - dt * 2);
         effSpeed.set(v, sp);
         v.s += sp * dt;
       }
@@ -790,16 +802,41 @@ const TR = {
           }
         }
       } else if ((v.kind === 'sedan') && st.status === 'play') {
+        // Platoon breaker (Fase 2AN): a sedan stuck behind the same leader
+        // for PLATOON_BREAK_TIME signals and moves to a freer adjacent
+        // lane, so platoons dissolve instead of queuing forever. Same
+        // guards as any lane change (canChangeLane); if no lane is free it
+        // waits and retries next frame. Trucks/buses never break (their
+        // formations hold) and the Penghadang keeps its one swerve.
+        let broke = false;
+        if ((v.followT || 0) >= TR.PLATOON_BREAK_TIME) {
+          const dirs = [-1, 1].filter((d) => v.lane + d >= 0 && v.lane + d < st.laneCount);
+          const nearby = (t) => st.traffic.filter((o) => o !== v && (o.lane === t || o.targetLane === t) && Math.abs(o.s - v.s) < 60).length;
+          dirs.sort((a, b) => nearby(v.lane + a) - nearby(v.lane + b));
+          for (const d of dirs) {
+            const target = v.lane + d;
+            if (TR.canChangeLane(st, v, target)) {
+              v.targetLane = target;
+              v.signalT = TR.SIGNAL_TIME;
+              v.followT = 0;
+              st.events.push({ t: 'signal', lane: v.lane, target });
+              broke = true;
+              break;
+            }
+          }
+        }
         // Only sedans change lanes, and only after signalling.
-        v.changeCd -= dt;
-        if (v.changeCd <= 0) {
-          v.changeCd = 3 + Math.random() * 5;
-          const dir = Math.random() < 0.5 ? -1 : 1;
-          const target = v.lane + dir;
-          if (TR.canChangeLane(st, v, target)) {
-            v.targetLane = target;
-            v.signalT = TR.SIGNAL_TIME;
-            st.events.push({ t: 'signal', lane: v.lane, target });
+        if (!broke) {
+          v.changeCd -= dt;
+          if (v.changeCd <= 0) {
+            v.changeCd = 3 + Math.random() * 5;
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            const target = v.lane + dir;
+            if (TR.canChangeLane(st, v, target)) {
+              v.targetLane = target;
+              v.signalT = TR.SIGNAL_TIME;
+              st.events.push({ t: 'signal', lane: v.lane, target });
+            }
           }
         }
       }
@@ -877,9 +914,14 @@ const TR = {
     if (st.status === 'play' && st.mode !== 'endless' && st.dist >= st.routeLen) {
       st.dist = st.routeLen;
       st.bonus += 500 + st.hp * 200;
+      // Fase 2AL: the time bonus the tagline promises — beating the par
+      // time pays for fast driving (nitro, skipping rests, clean lines).
+      const par = TR.TIME_PAR[st.mode];
+      st.timeBonus = par ? Math.max(0, Math.round((par - st.time) * TR.TIME_BONUS_PER_SEC)) : 0;
+      st.bonus += st.timeBonus;
       st.score = Math.floor(st.dist) + st.bonus;
       st.status = 'finished';
-      st.events.push({ t: 'finish', score: st.score, hp: st.hp });
+      st.events.push({ t: 'finish', score: st.score, hp: st.hp, timeBonus: st.timeBonus });
     }
   },
 
@@ -924,7 +966,7 @@ const TR = {
   CHALLENGE_DEFS: [
     { key: 'irit', coins: 100, check: (st, finished) => finished && st.mode === 'short' && st.pickupCount === 0 },
     { key: 'tanpaRem', coins: 100, check: (st, finished) => finished && st.mode === 'short' && !st.brakeUsed },
-    { key: 'komboMaster', coins: 150, check: (st, finished) => finished && st.combo >= 5 },
+    { key: 'komboMaster', coins: 150, check: (st, finished) => finished && st.maxCombo >= 5 },
     { key: 'badai', coins: 200, check: (st, finished) => finished && st.mode === 'short' && st.condition === 'rain' && st.crashes === 0 },
     { key: 'tamuRest', coins: 150, check: (st, finished) => finished && st.mode === 'long' && st.restCount >= 2 },
   ],

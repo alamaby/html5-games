@@ -355,7 +355,7 @@ function renderAchievements() {
 const CHALLENGE_TEXT = {
   irit: { id: 'Si Irit', en: 'Fuel Saver', descId: 'Finis Rute 5 km tanpa ambil jeriken', descEn: 'Finish the 5 km route without a jerrycan' },
   tanpaRem: { id: 'Kaki Dingin', en: 'Cool Foot', descId: 'Finis Rute 5 km tanpa rem', descEn: 'Finish the 5 km route without braking' },
-  komboMaster: { id: 'Raja Salip', en: 'Overtake King', descId: 'Kombo x5 sampai finis', descEn: 'Hold combo x5 to the finish' },
+  komboMaster: { id: 'Raja Salip', en: 'Overtake King', descId: 'Raih kombo x5 dalam satu run', descEn: 'Reach combo x5 in one run' },
   badai: { id: 'Penakluk Badai', en: 'Storm Tamer', descId: 'Finis Rute 5 km di hujan tanpa tabrakan', descEn: 'Finish the 5 km route in the rain without crashing' },
   tamuRest: { id: 'Pelanggan Setia', en: 'Regular Guest', descId: 'Mampir ke 2 rest area di Rute 10 km', descEn: 'Stop at both rest areas on the 10 km route' },
 };
@@ -509,6 +509,7 @@ const pickupMeshes = new Map(); // pickup object -> group
 let shieldMesh = null; // translucent bubble around the player while shielded
 // ---------- visual polish (Fase 2L, view-only, no logic) ----------
 let skyDome = null, starPoints = null, moonMesh = null, nitroFlame = null;
+let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboards = [];
 const debrisBursts = [];
 const debrisGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 function setSkyColors(topHex, bottomHex) {
@@ -882,14 +883,15 @@ function parseGLB(buf) {
   (json.nodes || []).forEach((n) => { if (n.mesh !== undefined) meshNode[n.mesh] = n.name || ''; });
   return { meshes, meshNode };
 }
-function buildGltfCar(kind, colorHex) {
+function buildGltfCar(kind, colorHex, opts) {
+  const isTraffic = !!(opts && opts.traffic); // Fase 2AO: traffic variant — one centre beam cone, no spin markers
   const g = new THREE.Group();
   const parsed = parseGLB(b64ToArrayBuffer(GLB_CARS_B64[kind]));
   const byNode = {};
   parsed.meshes.forEach((m) => { (byNode[m.meshIndex] = byNode[m.meshIndex] || []).push(m); });
   const body = new THREE.Group();
   const steerPivots = [], spinNodes = [], rearSpins = [];
-  let wheelR = 0, wheelMinY = 0, seenWheel = false, bodyMinZ = 1e9;
+  let wheelR = 0, wheelMinY = 0, seenWheel = false, bodyMinZ = 1e9, bodyMaxZ = -1e9;
   Object.keys(byNode).forEach((mi) => {
     const name = parsed.meshNode[mi] || '';
     const parts = byNode[mi];
@@ -908,11 +910,17 @@ function buildGltfCar(kind, colorHex) {
       // body: recolor the paint material — the material with the most
       // triangles in this node (Blue / LightBlue / White / Orange per
       // model) — to the car's color; windows/lights/trim keep GLB colors.
-      // Track the front-most body point: the headlight position (Fase 2AE).
+      // Track the front-most body point: the headlight position (Fase 2AE),
+      // and the rear-most: the turn-signal position (Fase 2AO).
       if (mn[2] < bodyMinZ) bodyMinZ = mn[2];
+      if (mx[2] > bodyMaxZ) bodyMaxZ = mx[2];
       let paintName = '', paintTris = -1;
       parts.forEach((p) => { if (p.tris > paintTris) { paintTris = p.tris; paintName = p.matName; } });
-      parts.forEach((p) => { body.add(new THREE.Mesh(p.geo, p.matName === paintName ? mat(colorHex) : p.mat)); });
+      parts.forEach((p) => {
+        const m = new THREE.Mesh(p.geo, p.matName === paintName ? mat(colorHex) : p.mat);
+        if (p.matName === paintName) m.userData.isPaint = true; // Fase 2AO: traffic clones recolor this mesh
+        body.add(m);
+      });
       return;
     }
     const isRear = /Back/i.test(name);
@@ -929,16 +937,19 @@ function buildGltfCar(kind, colorHex) {
     // Turntable marker: one bright red box per wheel face. The GLB rims
     // have ~10 near-identical thin spokes, so the spin is hard to read
     // from the rims alone; the marker makes the turn unmistakable (the
-    // spin itself was proven working via ?spindbg, 2026-11-12).
-    const ms = r / 0.262; // marker size relative to the sedan's wheels
-    const markerGeo = new THREE.BoxGeometry(0.04 * ms, 0.09 * ms, 0.06 * ms);
-    const markerMat = mat(0xd43d2a);
-    const faces = isRear ? [mx[0], mn[0]] : [(c[0] > 0 ? mx[0] : mn[0])];
-    faces.forEach((fx) => {
-      const mk = new THREE.Mesh(markerGeo, markerMat);
-      mk.position.set(fx - c[0] + Math.sign(fx - c[0]) * 0.02 * ms, 0.6 * r, 0);
-      spin.add(mk);
-    });
+    // spin itself was proven working via ?spindbg, 2026-11-12). Traffic
+    // cars get none — the markers are a player-car debug aid, not paint.
+    if (!isTraffic) {
+      const ms = r / 0.262; // marker size relative to the sedan's wheels
+      const markerGeo = new THREE.BoxGeometry(0.04 * ms, 0.09 * ms, 0.06 * ms);
+      const markerMat = mat(0xd43d2a);
+      const faces = isRear ? [mx[0], mn[0]] : [(c[0] > 0 ? mx[0] : mn[0])];
+      faces.forEach((fx) => {
+        const mk = new THREE.Mesh(markerGeo, markerMat);
+        mk.position.set(fx - c[0] + Math.sign(fx - c[0]) * 0.02 * ms, 0.6 * r, 0);
+        spin.add(mk);
+      });
+    }
     if (isRear) {
       spin.position.set(c[0], c[1], c[2]);
       g.add(spin);
@@ -974,8 +985,12 @@ function buildGltfCar(kind, colorHex) {
   g.userData.headlightX = 0.6;
   const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.20, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
   const beamCones = [];
-  for (const bx of [-0.6, 0.6]) {
-    const beam = new THREE.Mesh(new THREE.ConeGeometry(1.3, 12, 12, 1, true), beamMat);
+  // Traffic: one centre cone (radius 2.2, like the procedural traffic
+  // cone); player: two cones, one per lamp (Fase 2AF).
+  const beamXs = isTraffic ? [0] : [-0.6, 0.6];
+  const beamR = isTraffic ? 2.2 : 1.3;
+  for (const bx of beamXs) {
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(beamR, 12, 12, 1, true), beamMat);
     beam.rotation.x = Math.PI / 2; // apex toward the car (+z), base forward (-z)
     beam.position.set(bx, 0.65, bodyMinZ - 6);
     beam.visible = false;
@@ -983,10 +998,50 @@ function buildGltfCar(kind, colorHex) {
     beamCones.push(beam);
   }
   g.userData.beamCones = beamCones;
+  // Turn signals (Fase 2AO): the GLTF models have none, but the game
+  // drives userData.signals for traffic (syncTrafficMeshes, unguarded)
+  // and the player (guarded) — so every GLTF car gets two small amber
+  // boxes at the rear corners, hidden until they blink.
+  const sigMat = new THREE.MeshBasicMaterial({ color: 0xffb020 });
+  const sigL = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), sigMat);
+  sigL.position.set(-0.6, 0.75, bodyMaxZ - 0.05); sigL.visible = false; sigL.userData.isSignal = 'left';
+  const sigR = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), sigMat);
+  sigR.position.set(0.6, 0.75, bodyMaxZ - 0.05); sigR.visible = false; sigR.userData.isSignal = 'right';
+  g.add(sigL); g.add(sigR);
+  g.userData.signals = { left: sigL, right: sigR };
   if (steerPivots.length) g.userData.steer = steerPivots;
   if (spinNodes.length) g.userData.spin = spinNodes;
-  // No userData.signals/tails: these models have no signal meshes; every
-  // game access to them is guarded, so the cars simply have no blinkers.
+  // No userData.tails: these models have no tail-light meshes of their
+  // own to brighten (the model's own red tail lights are used instead);
+  // the brake-light access in the loop is guarded, so nothing breaks.
+  return g;
+}
+
+// Fase 2AO: traffic sedans use the GLTF sedan model — one parsed template
+// cloned per car (geometry shared, so ~15 live traffic cars cost one
+// parse). The paint is recolored per car and the runtime userData
+// (signals, beam cone) is rebuilt on the clone.
+let gltfTrafficSedan = null;
+function buildTrafficGltfCar(colorHex) {
+  if (!gltfTrafficSedan) gltfTrafficSedan = buildGltfCar('sedan', 0xffffff, { traffic: true });
+  // clone() JSON-stringifies userData, and the template's holds Mesh/Group
+  // refs (beamCones, steer, spin, body) — strip it for the clone, then
+  // restore it and rebuild the clone's runtime userData by traversing.
+  const saved = gltfTrafficSedan.userData;
+  gltfTrafficSedan.userData = {};
+  const g = gltfTrafficSedan.clone();
+  gltfTrafficSedan.userData = saved;
+  const signals = {};
+  let cone = null;
+  g.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.userData.isPaint) o.material = mat(colorHex);
+    if (o.userData.isSignal) signals[o.userData.isSignal] = o;
+    if (o.geometry.type === 'ConeGeometry') cone = o;
+  });
+  g.userData.beamCones = cone ? [cone] : [];
+  if (signals.left && signals.right) g.userData.signals = signals;
+  g.userData.wheelR = saved.wheelR;
   return g;
 }
 function makeCar(kind, colorHex, highPoly) {
@@ -995,6 +1050,13 @@ function makeCar(kind, colorHex, highPoly) {
   // of breaking the game.
   if (highPoly && GLB_CARS_B64[kind] && GLB_CARS_B64[kind] !== '__GLB_' + kind.toUpperCase() + '_B64__') {
     try { return buildGltfCar(kind, colorHex); } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF ' + kind + ' failed, using procedural:', e); }
+  }
+  // Fase 2AO: traffic sedans (incl. the Penghadang) use the GLTF sedan
+  // model too — the player stares at traffic, so the crudest geometry in
+  // the scene was the one most often on screen. Trucks/buses have no GLB
+  // model and stay procedural.
+  if (!highPoly && (kind === 'sedan' || kind === 'aggressive') && GLB_CARS_B64.sedan && GLB_CARS_B64.sedan !== '__GLB_' + 'SEDAN' + '_B64__') {
+    try { return buildTrafficGltfCar(colorHex); } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF traffic sedan failed, using procedural:', e); }
   }
   const g = new THREE.Group();
   const col = colorHex;
@@ -1281,6 +1343,46 @@ function initThree() {
     tree.position.set(side * (10 + Math.random() * 6), 0, -10 - i * 9);
     scene.add(tree); trees.push(tree);
   }
+  // Horizon depth (Fase 2AP): a mountain ridge + drifting clouds +
+  // roadside billboards. The camera never moves forward (the world
+  // scrolls past a fixed camera), so the mountains sit at a fixed
+  // distance and never need recycling; the clouds drift sideways and
+  // wrap; the billboards scroll and recycle like the trees. The
+  // mountains are fog-proof — their colour is set per condition in
+  // applyCondition, so they read as haze by day and as silhouettes
+  // at night.
+  mountainMat = new THREE.MeshLambertMaterial({ color: 0x7488a8, fog: false });
+  mountains = new THREE.Group();
+  const ridge = [[-190, -150, 42, 34], [-140, -165, 55, 48], [-95, -145, 38, 30], [-50, -160, 48, 42], [0, -150, 58, 50], [50, -162, 44, 38], [95, -148, 40, 32], [145, -165, 52, 45], [195, -152, 40, 33]];
+  for (const [x, z, r, h] of ridge) {
+    const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 6), mountainMat);
+    m.position.set(x, h / 2 - 1, z);
+    mountains.add(m);
+  }
+  scene.add(mountains);
+  cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75, fog: false });
+  for (let i = 0; i < 7; i++) {
+    const c = new THREE.Group();
+    const n = 3 + Math.floor(Math.random() * 3);
+    for (let j = 0; j < n; j++) {
+      const s = new THREE.Mesh(new THREE.SphereGeometry(4 + Math.random() * 4, 10, 8), cloudMat);
+      s.position.set((j - n / 2) * 5 + Math.random() * 2, Math.random() * 2, Math.random() * 3);
+      s.scale.y = 0.45;
+      c.add(s);
+    }
+    c.position.set((Math.random() - 0.5) * 240, 45 + Math.random() * 25, -100 - Math.random() * 140);
+    scene.add(c); clouds.push(c);
+  }
+  const bbTexts = [['TOL RUSH', '3D'], ['REST AREA', '1 KM'], ['KOPI PANAS', 'DI REST AREA']];
+  for (let i = 0; i < 3; i++) {
+    const b = new THREE.Group();
+    for (const px of [-3.5, 3.5]) b.add(box(0.4, 5, 0.4, 0x888888, px, 2.5, 0));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(9, 3),
+      new THREE.MeshBasicMaterial({ map: makeSignTexture(bbTexts[i][0], bbTexts[i][1]) }));
+    sign.position.set(0, 6.5, 0); b.add(sign);
+    b.position.set((i % 2 === 0 ? -1 : 1) * 12, 0, -50 - i * 60);
+    scene.add(b); billboards.push(b);
+  }
   // rest-area buildings (right side, shown near the rest zone)
   restGroup = new THREE.Group();
   restGroup.add(box(10, 3, 8, 0xe8e2d2, 13, 1.5, 0));
@@ -1363,6 +1465,10 @@ function placeHeadlights(cx, cz, fx, fz, hf, hy, hx) {
     headlightR.target.updateMatrixWorld();
   }
 }
+// Fase 2AP: clouds drift sideways and wrap; called in the play and menu branches.
+function driftClouds(dt) {
+  for (const c of clouds) { c.position.x += 1.5 * dt; if (c.position.x > 140) c.position.x = -140; }
+}
 // Toggle a car's beam cones (one for traffic, two for the player).
 function setBeamCones(mesh, on) {
   const cs = mesh && mesh.userData.beamCones;
@@ -1383,6 +1489,8 @@ function applyCondition(cond) {
     setSkyColors(0x050914, 0x1b2b4d);
     if (starPoints) starPoints.visible = true;
     if (moonMesh) moonMesh.visible = true;
+    if (mountainMat) mountainMat.color.set(0x141c2e);
+    if (cloudMat) { cloudMat.color.set(0x8a93a5); cloudMat.opacity = 0.10; }
   } else if (cond === 'rain') {
     scene.background.set(0x5a6a7d); scene.fog.color.set(0x5a6a7d); scene.fog.near = 25; scene.fog.far = 130;
     hemiLight.intensity = 0.6; sunLight.intensity = 0.35;
@@ -1393,6 +1501,8 @@ function applyCondition(cond) {
     setSkyColors(0x55606e, 0x8d97a3);
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
+    if (mountainMat) mountainMat.color.set(0x5a6470);
+    if (cloudMat) { cloudMat.color.set(0x9aa2ad); cloudMat.opacity = 0.55; }
   } else {
     scene.background.set(0x87b5e0); scene.fog.color.set(0x87b5e0); scene.fog.near = 30; scene.fog.far = 170;
     hemiLight.intensity = 0.95; sunLight.intensity = 0.7;
@@ -1403,6 +1513,8 @@ function applyCondition(cond) {
     setSkyColors(0x3f8fe0, 0xcfe8ff);
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
+    if (mountainMat) mountainMat.color.set(0x7488a8);
+    if (cloudMat) { cloudMat.color.set(0xffffff); cloudMat.opacity = 0.75; }
   }
   // Fase 2AE/2AF: the player's beam cones follow the condition (covers the
   // menu/showcase, where the per-frame loop does not run).
@@ -1594,6 +1706,7 @@ function endGame(finished) {
     '<br><b>HP:</b> ' + st.hp + '/' + st.maxHp +
     (st.shieldSaves ? '<br><b>🛡:</b> ' + st.shieldSaves + 'x' : '') +
     (st.skipRestCount ? '<br><b>⏭:</b> ' + st.skipRestCount + 'x (+' + (st.skipRestCount * 150) + ')' : '') +
+    (st.timeBonus ? '<br><b>⏱:</b> +' + st.timeBonus : '') +
     '<br><b>' + t('coins') + ':</b> +' + coinsEarned + ' (total ' + coinsTotal.toLocaleString('id-ID') + ')' +
     (missionNew.length ? '<br><b>' + t('missionLabel') + ':</b> ' + missionNew.map(missionName).join(', ') + ' (+' + missionCoins + ')' : '') +
     (achNew.length ? '<br><b>' + t('achLabel') + ':</b> ' + achNew.map((k) => '🏆 ' + achName(k)).join(', ') + ' (+' + achCoins + ')' : '') +
@@ -1690,9 +1803,14 @@ function buildRestSeqGroup() {
   g.add(box(7, 0.5, 7, 0x2a6b4a, -29, 3.2, -132));
   g.add(box(0.8, 5, 0.8, 0xf2ede2, -25.5, 2.5, -132));
   g.add(box(8, 2.5, 4, 0x9fb6c3, -29, 1.25, -98));
-  // SPBU: canopy + pillars + pump beside the drive lane + kiosk + sign
-  g.add(box(16, 0.6, 10, 0xcc2222, -16, 4.5, -169));
-  for (const px of [-21, -11]) for (const pz of [-172, -166])
+  // SPBU: canopy + pillars + pump beside the drive lane + kiosk + sign.
+  // Fase 2AQ: the canopy used to span the drive lane (x -24..-8), so the
+  // rest-sequence camera (y 6.2, 10 m behind the car, looking down at it)
+  // saw the solid red slab fill the frame and hide the car during drive2.
+  // It now covers only the pump area (x -25..-17); the drive lane (x -15)
+  // is clear, so the car stays visible while the canopy still reads.
+  g.add(box(8, 0.6, 10, 0xcc2222, -21, 4.5, -169));
+  for (const px of [-24.5, -17.5]) for (const pz of [-172, -166])
     g.add(box(0.5, 4.5, 0.5, 0xeeeeee, px, 2.25, pz));
   g.add(box(1.2, 2.2, 0.8, 0xf2f2f2, -18.5, 1.1, -169));
   g.add(box(3, 2.5, 3, 0xe8e2d2, -22, 1.25, -169));
@@ -2223,6 +2341,8 @@ function loop(now) {
     for (const d of dashes) { d.position.z += move; if (d.position.z > 12) d.position.z -= 192; }
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
     for (const tr of trees) { tr.position.z += move; if (tr.position.z > 12) { tr.position.z -= 198; tr.position.x = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 6); } }
+    for (const b of billboards) { b.position.z += move; if (b.position.z > 12) { b.position.z -= 180; b.position.x = (Math.random() < 0.5 ? -1 : 1) * 12; } }
+    driftClouds(dt);
     // rest + exit set pieces follow their route position
     const nextRest = TR.nextRestStop(st);
     const restGap = nextRest ? nextRest.at - st.dist : Infinity;
@@ -2317,6 +2437,7 @@ function loop(now) {
       playerMesh.userData.signals.right.visible = false;
     }
     for (const d of dashes) { d.position.z += 4 * dt; if (d.position.z > 12) d.position.z -= 192; }
+    driftClouds(dt);
     if (showcaseOn && playerMesh) {
       // Showcase orbit: the car is re-centred here (after a run it would
       // otherwise sit in its last lane), then the camera circles it.

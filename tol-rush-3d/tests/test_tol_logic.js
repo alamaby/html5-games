@@ -198,6 +198,30 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   ok('finish event fired', st.events.some((e) => e.t === 'finish'));
 }
 
+// Fase 2AL: beating the par time pays a time bonus (+10/s under par);
+// missing par pays nothing. (st.time advances by dt during the step,
+// so the time is set 0.5 s under the target before stepping.)
+{
+  const st = TR.createGame({ mode: 'short' }); quiet(st);
+  st.traffic = []; st.pickups = []; st.nextPickupAt = 99999; st.nextShieldAt = 99999;
+  st.dist = TR.ROUTE_LEN - 5; st.time = 179.5; // finishes at 180 s: 10 s under the 190 s par
+  TR.step(st, 0.5);
+  eq('finished under par', st.status, 'finished');
+  eq('time bonus is 100', st.timeBonus, 100);
+  eq('score includes time bonus', st.score, 5000 + 500 + 3 * 200 + 100);
+  ok('finish event carries time bonus', st.events.some((e) => e.t === 'finish' && e.timeBonus === 100));
+  const st2 = TR.createGame({ mode: 'short' }); quiet(st2);
+  st2.traffic = []; st2.dist = TR.ROUTE_LEN - 5; st2.time = 250; // 60 s over par
+  TR.step(st2, 0.5);
+  eq('finished over par', st2.status, 'finished');
+  eq('no time bonus over par', st2.timeBonus, 0);
+  const st3 = TR.createGame({ mode: 'long' }); quiet(st3);
+  st3.traffic = []; st3.pickups = []; st3.nextPickupAt = 99999; st3.nextShieldAt = 99999;
+  st3.dist = 9995; st3.time = 369.5; // finishes at 370 s: 10 s under the 380 s par
+  TR.step(st3, 0.5);
+  eq('long route time bonus is 100', st3.timeBonus, 100);
+}
+
 // Fuel: drains per metre, nitro burns double, braking sips, empty = crawl
 {
   function runWith(flag, seconds) {
@@ -749,18 +773,62 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
     TR.step(st, 1);
     eq('car advances at its speed', Math.round(v.s), 316);
   }
-  // follow rule: a fast car behind a slow car in the same lane matches speed
+  // Fase 2AN: platoon breaker — a sedan stuck behind a slower leader for
+  // 4 s signals and moves to a freer lane; a follower behind a faster
+  // leader never accumulates followT; an aggressive car never breaks;
+  // a blocked sedan waits (no signal) instead of forcing its way out.
+  // (The player brakes throughout, so the cars stay ahead of it.)
   {
     const st = TR.createGame({ mode: 'short' }); quiet(st);
-    const slow = TR.spawnVehicle(st, { kind: 'truck', lane: 0, gapAhead: 300, speed: 12 });
-    const fast = TR.spawnVehicle(st, { kind: 'sedan', lane: 0, gapAhead: 260, speed: 19 });
-    fast.changeCd = 99; // no random lane change during the test
-    TR.step(st, 1); // gap 40 -> 33 (follower still outside FOLLOW_DIST)
-    TR.step(st, 1); // gap 33 -> 26
-    TR.step(st, 1); // gap 26 < 30: follower matches the leader's 12
-    eq('follower matches leader speed', Math.round(slow.s - fast.s), 26);
-    for (let i = 0; i < 10; i++) TR.step(st, 1); // 10 s more: never overlaps
-    ok('follower never overlaps leader', slow.s - fast.s >= (slow.len + fast.len) / 2 + 2 && fast.s < slow.s + 100);
+    st.traffic = [];
+    TR.setBrake(st, true);
+    const leader = TR.spawnVehicle(st, { kind: 'truck', lane: 1, gapAhead: 80, speed: 13 });
+    const follower = TR.spawnVehicle(st, { kind: 'sedan', lane: 1, gapAhead: 40, speed: 17 });
+    follower.changeCd = 999; // no random lane change during the test
+    for (let i = 0; i < 60; i++) TR.step(st, 0.1); // 6 s: gap 40 -> 30, then ~3.5 s clamped (a boundary blip or two costs a little via the decay)
+    ok('followT accumulates while clamped', follower.followT >= 3.0 && follower.followT <= 3.6);
+    eq('no signal before 4 s of following', follower.signalT, 0);
+    for (let i = 0; i < 12; i++) TR.step(st, 0.1); // past 4 s
+    ok('platoon breaker signals after 4 s', follower.signalT > 0);
+    eq('breaker moves to the freer lane (left)', follower.targetLane, 0);
+    ok('followT resets when the signal starts', follower.followT < 1);
+  }
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.traffic = [];
+    TR.setBrake(st, true);
+    TR.spawnVehicle(st, { kind: 'truck', lane: 1, gapAhead: 80, speed: 17 });
+    const follower = TR.spawnVehicle(st, { kind: 'sedan', lane: 1, gapAhead: 40, speed: 13 });
+    follower.changeCd = 999;
+    for (let i = 0; i < 70; i++) TR.step(st, 0.1);
+    eq('no followT behind a faster leader', follower.followT, 0);
+    eq('no signal behind a faster leader', follower.signalT, 0);
+  }
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.traffic = [];
+    TR.setBrake(st, true);
+    TR.spawnVehicle(st, { kind: 'truck', lane: 1, gapAhead: 80, speed: 13 });
+    const agg = TR.spawnVehicle(st, { kind: 'aggressive', lane: 1, gapAhead: 40, speed: 17 });
+    agg.changeCd = 999;
+    for (let i = 0; i < 70; i++) TR.step(st, 0.1);
+    eq('aggressive car never platoon-breaks', agg.signalT, 0);
+  }
+  {
+    const st = TR.createGame({ mode: 'short' }); quiet(st);
+    st.traffic = [];
+    TR.setBrake(st, true);
+    TR.spawnVehicle(st, { kind: 'truck', lane: 1, gapAhead: 80, speed: 13 });
+    const follower = TR.spawnVehicle(st, { kind: 'sedan', lane: 1, gapAhead: 40, speed: 17 });
+    follower.changeCd = 999;
+    const b0 = TR.spawnVehicle(st, { kind: 'sedan', lane: 0, gapAhead: 45, speed: 13 });
+    // b2 sits 30 m behind the follower (still inside the 45 m clearance
+    // check) — a blocker at the same s as b0 would trip the spawn wall rule.
+    const b2 = TR.spawnVehicle(st, { kind: 'sedan', lane: 2, gapAhead: 10, speed: 13 });
+    b0.changeCd = 999; b2.changeCd = 999;
+    for (let i = 0; i < 70; i++) TR.step(st, 0.1);
+    eq('blocked sedan waits (no signal)', follower.signalT, 0);
+    ok('blocked sedan keeps waiting', follower.followT >= TR.PLATOON_BREAK_TIME);
   }
   // braking holds behind a truck: gap grows while braking
   {
@@ -1003,13 +1071,15 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
     st.brakeUsed = true;
     eq('tanpaRem fails after braking', ch(st, true), []);
   }
-  // komboMaster: combo x5 held to the finish (isolated by jerrycan + brake)
+  // komboMaster (Fase 2AM): reaching combo x5 once in the run is the
+  // skill — holding it to the exact finish instant was mostly luck
+  // (measured: x5 reached in 7/9 runs, held at finish in only 2/4).
   {
     const st = TR.createGame({ mode: 'short' }); quiet(st);
-    st.pickupCount = 1; st.brakeUsed = true; st.combo = 5;
-    eq('komboMaster passes at combo x5', ch(st, true), ['komboMaster']);
-    st.combo = 4;
-    eq('komboMaster fails at combo x4', ch(st, true), []);
+    st.pickupCount = 1; st.brakeUsed = true; st.maxCombo = 5; st.combo = 0;
+    eq('komboMaster passes on maxCombo x5 even if combo dropped', ch(st, true), ['komboMaster']);
+    st.maxCombo = 4;
+    eq('komboMaster fails at maxCombo x4', ch(st, true), []);
   }
   // badai: short + rain + zero crashes (isolated by jerrycan + brake)
   {
