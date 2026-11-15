@@ -3199,6 +3199,7 @@ function setHighwayHidden(hidden) {
   if (exitGroup) exitGroup.visible = false;
   for (const p of posts) p.visible = !hidden;
   for (const tr of trees) tr.visible = !hidden;
+  for (const b of billboards) b.visible = !hidden;
   for (const m of trafficMeshes.values()) m.visible = !hidden;
   for (const m of pickupMeshes.values()) m.visible = !hidden;
   for (const m of roadworkMeshes.values()) m.visible = !hidden;
