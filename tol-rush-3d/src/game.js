@@ -673,7 +673,7 @@ function blobShadowMaterial() {
     const c = cv.getContext('2d');
     const gr = c.createRadialGradient(64, 64, 4, 64, 64, 62);
     gr.addColorStop(0, 'rgba(0,0,0,0.5)');
-    gr.addColorStop(0.7, 'rgba(0,0,0,0.28)');
+    gr.addColorStop(0.7, 'rgba(0,0,0,0.35)'); // 2AY: was 0.28 — the rim must read once the shadow extends past the body
     gr.addColorStop(1, 'rgba(0,0,0,0)');
     c.fillStyle = gr; c.fillRect(0, 0, 128, 128);
     blobShadowTex = new THREE.CanvasTexture(cv);
@@ -690,32 +690,38 @@ function addBlobShadow(g, len, wid, cx, cz) {
   sh.rotation.x = -Math.PI / 2;
   // the -90° X rotation maps the plane's local Y to world Z, so the
   // scale is (width, length): world X gets wid, world Z gets len.
-  sh.scale.set(wid, len, 1);
+  // Fase 2AY: 1.25x the footprint — a shadow exactly the body's size is
+  // hidden under the car from the chase camera, so it must extend past
+  // the outline to read at all.
+  sh.scale.set(wid * 1.25, len * 1.25, 1);
   sh.position.set(cx || 0, 0.08, cz || 0);
   sh.renderOrder = 1;
   sh.userData.isShadow = true;
   g.add(sh);
   return sh;
 }
-// Fase 2AX: subtle asphalt grain for the road — a light-grey noise canvas
+// Fase 2AX/2AY: asphalt grain for the road — a light-grey noise canvas
 // so the road colour (set per condition) still dominates; the texture
 // only breaks up the flat Lambert plane. Seeded, so the grain is the
-// same every session.
+// same every session. 2AY raised the contrast hard: the subtle version
+// was invisible in a live check (light texture x dark road = ~7 RGB
+// units of variation), so speckles now run dark-to-light at high alpha.
 function makeAsphaltTexture() {
   const cv = document.createElement('canvas'); cv.width = cv.height = 256;
   const c = cv.getContext('2d');
   c.fillStyle = '#d2d2d2'; c.fillRect(0, 0, 256, 256);
   let seed = 1337;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  for (let i = 0; i < 2600; i++) {
-    const g = 150 + Math.floor(rnd() * 105);
-    c.fillStyle = 'rgba(' + g + ',' + g + ',' + g + ',' + (0.10 + rnd() * 0.12).toFixed(2) + ')';
+  for (let i = 0; i < 4200; i++) {
+    const g = 60 + Math.floor(rnd() * 195);
+    c.fillStyle = 'rgba(' + g + ',' + g + ',' + g + ',' + (0.25 + rnd() * 0.25).toFixed(2) + ')';
     c.fillRect(rnd() * 256, rnd() * 256, 1 + rnd() * 2, 1 + rnd() * 2);
   }
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 12; i++) {
     const x = rnd() * 256, y = rnd() * 256, r = 20 + rnd() * 45;
+    const pa = 0.14 + rnd() * 0.10;
     const gr = c.createRadialGradient(x, y, 2, x, y, r);
-    gr.addColorStop(0, 'rgba(90,90,90,0.10)'); gr.addColorStop(1, 'rgba(90,90,90,0)');
+    gr.addColorStop(0, 'rgba(90,90,90,' + pa.toFixed(2) + ')'); gr.addColorStop(1, 'rgba(90,90,90,0)');
     c.fillStyle = gr; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
   }
   const tex = new THREE.CanvasTexture(cv);
@@ -1080,12 +1086,17 @@ function buildGltfCar(kind, colorHex, opts) {
   // finally shows braking. Positioned from the measured body width so
   // they sit on the rear face for every kind, not floating past it.
   const rearHalfW = (bodyMaxX - bodyMinX) / 2;
-  const tailMatL = new THREE.MeshBasicMaterial({ color: 0xff2a3c });
-  const tailMatR = new THREE.MeshBasicMaterial({ color: 0xff2a3c });
-  const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), tailMatL);
-  tlL.position.set(-rearHalfW * 0.8, 0.5, bodyMaxZ - 0.05); tlL.userData.isBrake = 'left';
-  const tlR = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), tailMatR);
-  tlR.position.set(rearHalfW * 0.8, 0.5, bodyMaxZ - 0.05); tlR.userData.isBrake = 'right';
+  // Fase 2AY: x 0.62 (was 0.8) — the rear face tapers narrower than the
+  // body's max width, so 0.8 put the boxes' outer edges past the rear
+  // face; 0.28 wide (was 0.3) keeps them on the face for every kind.
+  // Dim is a dark red (0x7a1620), bright is vivid (0xff5a6e) — the old
+  // 0xff2a3c -> 0xff7a85 step was too subtle in daylight.
+  const tailMatL = new THREE.MeshBasicMaterial({ color: 0x7a1620 });
+  const tailMatR = new THREE.MeshBasicMaterial({ color: 0x7a1620 });
+  const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.06), tailMatL);
+  tlL.position.set(-rearHalfW * 0.62, 0.5, bodyMaxZ - 0.05); tlL.userData.isBrake = 'left';
+  const tlR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.06), tailMatR);
+  tlR.position.set(rearHalfW * 0.62, 0.5, bodyMaxZ - 0.05); tlR.userData.isBrake = 'right';
   g.add(tlL); g.add(tlR);
   g.userData.tails = [tailMatL, tailMatR];
   // Blob shadow (Fase 2AU): a soft dark ellipse under the car, from the
@@ -1122,7 +1133,7 @@ function buildTrafficGltfCar(colorHex) {
     // template's are shared with the player sedan, and the loop brightens
     // the player's tails when braking, which would flash every traffic
     // sedan's brake lights too if they shared the material.
-    if (o.userData.isBrake) { o.material = new THREE.MeshBasicMaterial({ color: 0xff2a3c }); tails.push(o.material); }
+    if (o.userData.isBrake) { o.material = new THREE.MeshBasicMaterial({ color: 0x7a1620 }); tails.push(o.material); }
     if (o.geometry.type === 'ConeGeometry') cone = o;
   });
   g.userData.beamCones = cone ? [cone] : [];
@@ -1275,7 +1286,7 @@ function makeCar(kind, colorHex, highPoly) {
   for (const x of [-lightX, lightX]) {
     const hl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }));
     hl.position.set(x, lightY, lightFront); g.add(hl);
-    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0xff2a3c }));
+    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), new THREE.MeshBasicMaterial({ color: 0x7a1620 }));
     tl.position.set(x, lightY, lightRear); g.add(tl); tails.push(tl.material);
   }
   g.userData.tails = tails; // brake lights, brightened by the loop while braking
@@ -2531,7 +2542,7 @@ function loop(now) {
       psig.right.visible = blinking && toRight;
     }
     const ptails = playerMesh.userData.tails;
-    if (ptails) for (const m of ptails) m.color.set(st.brake ? 0xff7a85 : 0xff2a3c);
+    if (ptails) for (const m of ptails) m.color.set(st.brake ? 0xff5a6e : 0x7a1620); // 2AY: dark dim -> vivid bright, unmistakable in daylight
     // nitro flame, flickering while nitro is held
     if (nitroFlame) {
       nitroFlame.visible = !!st.nitroOn;
