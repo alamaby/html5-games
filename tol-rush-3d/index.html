@@ -1845,7 +1845,7 @@ const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
 let shieldMesh = null; // translucent bubble around the player while shielded
 // ---------- visual polish (Fase 2L, view-only, no logic) ----------
-let skyDome = null, starPoints = null, moonMesh = null, nitroFlame = null;
+let skyDome = null, starPoints = null, moonMesh = null, sunMesh = null, sunGlow = null, nitroFlame = null;
 let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboards = [];
 const debrisBursts = [];
 const debrisGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
@@ -1998,6 +1998,66 @@ function makeSignTexture(line1, line2) {
   g.fillText(line1, 256, 110);
   g.font = '700 44px Arial'; g.fillText(line2 || '', 256, 190);
   const tex = new THREE.CanvasTexture(cv); return tex;
+}
+// Fase 2AU: one shared soft blob-shadow texture/material — a dark radial
+// gradient on a transparent canvas, so every car grounds itself on the
+// road without a shadow map (too costly on a phone). The material is
+// shared by all shadows; the texture is made once, lazily.
+let blobShadowTex = null, blobShadowMat = null;
+function blobShadowMaterial() {
+  if (!blobShadowMat) {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const c = cv.getContext('2d');
+    const gr = c.createRadialGradient(64, 64, 4, 64, 64, 62);
+    gr.addColorStop(0, 'rgba(0,0,0,0.5)');
+    gr.addColorStop(0.7, 'rgba(0,0,0,0.28)');
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = gr; c.fillRect(0, 0, 128, 128);
+    blobShadowTex = new THREE.CanvasTexture(cv);
+    blobShadowMat = new THREE.MeshBasicMaterial({ map: blobShadowTex, transparent: true, depthWrite: false });
+  }
+  return blobShadowMat;
+}
+function addBlobShadow(g, len, wid, cx, cz) {
+  // len/wid/cx/cz are in the car group's LOCAL coords (model coords for
+  // GLTF, world coords for procedural groups, which are unscaled), so
+  // the footprint stays right for every kind. y 0.08 sits above the
+  // rest ribbon (0.04) and the lane markings (0.02).
+  const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), blobShadowMaterial());
+  sh.rotation.x = -Math.PI / 2;
+  // the -90° X rotation maps the plane's local Y to world Z, so the
+  // scale is (width, length): world X gets wid, world Z gets len.
+  sh.scale.set(wid, len, 1);
+  sh.position.set(cx || 0, 0.08, cz || 0);
+  sh.renderOrder = 1;
+  sh.userData.isShadow = true;
+  g.add(sh);
+  return sh;
+}
+// Fase 2AX: subtle asphalt grain for the road — a light-grey noise canvas
+// so the road colour (set per condition) still dominates; the texture
+// only breaks up the flat Lambert plane. Seeded, so the grain is the
+// same every session.
+function makeAsphaltTexture() {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#d2d2d2'; c.fillRect(0, 0, 256, 256);
+  let seed = 1337;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < 2600; i++) {
+    const g = 150 + Math.floor(rnd() * 105);
+    c.fillStyle = 'rgba(' + g + ',' + g + ',' + g + ',' + (0.10 + rnd() * 0.12).toFixed(2) + ')';
+    c.fillRect(rnd() * 256, rnd() * 256, 1 + rnd() * 2, 1 + rnd() * 2);
+  }
+  for (let i = 0; i < 9; i++) {
+    const x = rnd() * 256, y = rnd() * 256, r = 20 + rnd() * 45;
+    const gr = c.createRadialGradient(x, y, 2, x, y, r);
+    gr.addColorStop(0, 'rgba(90,90,90,0.10)'); gr.addColorStop(1, 'rgba(90,90,90,0)');
+    c.fillStyle = gr; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
 }
 // Fase 2T/2X: high-poly player bodies — extruded side profiles with a bevel.
 // Fase 2X: the body is split into a lower slab (full width, rocker to
@@ -2228,7 +2288,7 @@ function buildGltfCar(kind, colorHex, opts) {
   parsed.meshes.forEach((m) => { (byNode[m.meshIndex] = byNode[m.meshIndex] || []).push(m); });
   const body = new THREE.Group();
   const steerPivots = [], spinNodes = [], rearSpins = [];
-  let wheelR = 0, wheelMinY = 0, seenWheel = false, bodyMinZ = 1e9, bodyMaxZ = -1e9;
+  let wheelR = 0, wheelMinY = 0, seenWheel = false, bodyMinZ = 1e9, bodyMaxZ = -1e9, bodyMinX = 1e9, bodyMaxX = -1e9;
   Object.keys(byNode).forEach((mi) => {
     const name = parsed.meshNode[mi] || '';
     const parts = byNode[mi];
@@ -2251,6 +2311,8 @@ function buildGltfCar(kind, colorHex, opts) {
       // and the rear-most: the turn-signal position (Fase 2AO).
       if (mn[2] < bodyMinZ) bodyMinZ = mn[2];
       if (mx[2] > bodyMaxZ) bodyMaxZ = mx[2];
+      if (mn[0] < bodyMinX) bodyMinX = mn[0];
+      if (mx[0] > bodyMaxX) bodyMaxX = mx[0];
       let paintName = '', paintTris = -1;
       parts.forEach((p) => { if (p.tris > paintTris) { paintTris = p.tris; paintName = p.matName; } });
       parts.forEach((p) => {
@@ -2266,6 +2328,7 @@ function buildGltfCar(kind, colorHex, opts) {
     if (!seenWheel || mn[1] < wheelMinY) wheelMinY = mn[1];
     seenWheel = true;
     const spin = new THREE.Group();
+    spin.userData.isSpin = true; // Fase 2AT: traffic clones rebuild userData.spin from this tag
     parts.forEach((p) => {
       const mesh = new THREE.Mesh(p.geo, p.mat);
       mesh.position.set(-c[0], -c[1], -c[2]); // centre the wheel on the pivot
@@ -2348,9 +2411,24 @@ function buildGltfCar(kind, colorHex, opts) {
   g.userData.signals = { left: sigL, right: sigR };
   if (steerPivots.length) g.userData.steer = steerPivots;
   if (spinNodes.length) g.userData.spin = spinNodes;
-  // No userData.tails: these models have no tail-light meshes of their
-  // own to brighten (the model's own red tail lights are used instead);
-  // the brake-light access in the loop is guarded, so nothing breaks.
+  // Brake lights (Fase 2AW): two small red boxes at the rear, below the
+  // signals — the loop already brightens userData.tails while braking
+  // (the procedural cars use the same code), so the GLTF player car
+  // finally shows braking. Positioned from the measured body width so
+  // they sit on the rear face for every kind, not floating past it.
+  const rearHalfW = (bodyMaxX - bodyMinX) / 2;
+  const tailMatL = new THREE.MeshBasicMaterial({ color: 0xff2a3c });
+  const tailMatR = new THREE.MeshBasicMaterial({ color: 0xff2a3c });
+  const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), tailMatL);
+  tlL.position.set(-rearHalfW * 0.8, 0.5, bodyMaxZ - 0.05); tlL.userData.isBrake = 'left';
+  const tlR = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.06), tailMatR);
+  tlR.position.set(rearHalfW * 0.8, 0.5, bodyMaxZ - 0.05); tlR.userData.isBrake = 'right';
+  g.add(tlL); g.add(tlR);
+  g.userData.tails = [tailMatL, tailMatR];
+  // Blob shadow (Fase 2AU): a soft dark ellipse under the car, from the
+  // measured body footprint — grounds the car on the road without a
+  // shadow map. Added last so it never lands inside the body subgroup.
+  addBlobShadow(g, bodyMaxZ - bodyMinZ, bodyMaxX - bodyMinX, (bodyMinX + bodyMaxX) / 2, (bodyMinZ + bodyMaxZ) / 2);
   return g;
 }
 
@@ -2369,15 +2447,25 @@ function buildTrafficGltfCar(colorHex) {
   const g = gltfTrafficSedan.clone();
   gltfTrafficSedan.userData = saved;
   const signals = {};
+  const spins = [];
+  const tails = [];
   let cone = null;
   g.traverse((o) => {
+    if (o.userData.isSpin) spins.push(o); // Fase 2AT: rebuild the spin list for the clone
     if (!o.isMesh) return;
     if (o.userData.isPaint) o.material = mat(colorHex);
     if (o.userData.isSignal) signals[o.userData.isSignal] = o;
+    // Fase 2AW: the clone's brake lights get FRESH materials — the
+    // template's are shared with the player sedan, and the loop brightens
+    // the player's tails when braking, which would flash every traffic
+    // sedan's brake lights too if they shared the material.
+    if (o.userData.isBrake) { o.material = new THREE.MeshBasicMaterial({ color: 0xff2a3c }); tails.push(o.material); }
     if (o.geometry.type === 'ConeGeometry') cone = o;
   });
   g.userData.beamCones = cone ? [cone] : [];
   if (signals.left && signals.right) g.userData.signals = signals;
+  if (spins.length) g.userData.spin = spins;
+  if (tails.length) g.userData.tails = tails;
   g.userData.wheelR = saved.wheelR;
   return g;
 }
@@ -2601,6 +2689,11 @@ function makeCar(kind, colorHex, highPoly) {
     g.add(body);
     g.userData.body = body;
   }
+  // Blob shadow (Fase 2AU): same soft ellipse, from the known body extents
+  // (front/rear are symmetric around 0, bw is the body width). Added
+  // after the body split so it stays a direct child of the group and
+  // never rolls with the body mid-turn.
+  addBlobShadow(g, rear - front, bw, 0, 0);
   return g;
 }
 function initThree() {
@@ -2633,6 +2726,12 @@ function initThree() {
     starPoints.visible = false; scene.add(starPoints);
     moonMesh = new THREE.Mesh(new THREE.CircleGeometry(9, 24), new THREE.MeshBasicMaterial({ color: 0xf4f1de, fog: false }));
     moonMesh.position.set(-60, 55, -220); moonMesh.visible = false; scene.add(moonMesh);
+    // Fase 2AV: the day sky had no sun (night has the moon + stars) — a
+    // warm disc opposite the moon, with a soft glow behind it.
+    sunMesh = new THREE.Mesh(new THREE.CircleGeometry(9, 24), new THREE.MeshBasicMaterial({ color: 0xfff2b0, fog: false }));
+    sunMesh.position.set(60, 55, -220); sunMesh.visible = true; scene.add(sunMesh);
+    sunGlow = new THREE.Mesh(new THREE.CircleGeometry(16, 24), new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.22, fog: false }));
+    sunGlow.position.set(60, 55, -221); sunGlow.visible = true; scene.add(sunGlow);
   }
   // nitro flame, synced to st.nitroOn in the loop (separate mesh: the
   // player mesh is rebuilt on car change, so it cannot own the flame)
@@ -2642,7 +2741,14 @@ function initThree() {
 
   // road
   roadMat = new THREE.MeshLambertMaterial({ color: 0x2b3038 });
+  roadMat.map = makeAsphaltTexture(); // Fase 2AX: subtle grain on the flat road
   const road = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 400), roadMat);
+  // Fase 2AX: UVs in 5 m tile units (the plane's 0..1 UVs would stretch
+  // one texture over the whole 400 m road).
+  {
+    const uv = road.geometry.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (14.5 / 5), uv.getY(i) * (400 / 5));
+  }
   road.rotation.x = -Math.PI / 2; road.position.set(0, 0, -90); scene.add(road);
   const grassL = new THREE.Mesh(new THREE.PlaneGeometry(60, 400), mat(0x4a7a3a));
   grassL.rotation.x = -Math.PI / 2; grassL.position.set(-37.5, -0.05, -90); scene.add(grassL);
@@ -2826,6 +2932,8 @@ function applyCondition(cond) {
     setSkyColors(0x050914, 0x1b2b4d);
     if (starPoints) starPoints.visible = true;
     if (moonMesh) moonMesh.visible = true;
+    if (sunMesh) sunMesh.visible = false;
+    if (sunGlow) sunGlow.visible = false;
     if (mountainMat) mountainMat.color.set(0x141c2e);
     if (cloudMat) { cloudMat.color.set(0x8a93a5); cloudMat.opacity = 0.10; }
   } else if (cond === 'rain') {
@@ -2838,6 +2946,8 @@ function applyCondition(cond) {
     setSkyColors(0x55606e, 0x8d97a3);
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
+    if (sunMesh) sunMesh.visible = false;
+    if (sunGlow) sunGlow.visible = false;
     if (mountainMat) mountainMat.color.set(0x5a6470);
     if (cloudMat) { cloudMat.color.set(0x9aa2ad); cloudMat.opacity = 0.55; }
   } else {
@@ -2850,6 +2960,8 @@ function applyCondition(cond) {
     setSkyColors(0x3f8fe0, 0xcfe8ff);
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
+    if (sunMesh) sunMesh.visible = true;
+    if (sunGlow) sunGlow.visible = true;
     if (mountainMat) mountainMat.color.set(0x7488a8);
     if (cloudMat) { cloudMat.color.set(0xffffff); cloudMat.opacity = 0.75; }
   }
@@ -2857,7 +2969,7 @@ function applyCondition(cond) {
   // menu/showcase, where the per-frame loop does not run).
   setBeamCones(playerMesh, cond === 'night');
 }
-function syncTrafficMeshes() {
+function syncTrafficMeshes(dt) {
   const alive = new Set(st.traffic);
   for (const [v, mesh] of trafficMeshes) {
     if (!alive.has(v)) { scene.remove(mesh); trafficMeshes.delete(v); }
@@ -2880,6 +2992,18 @@ function syncTrafficMeshes() {
     const toRight = v.targetLane > v.lane;
     sig.left.visible = blinking && !toRight;
     sig.right.visible = blinking && toRight;
+    // Fase 2AT: traffic wheels roll with the car's own speed (the player
+    // wheels already did; traffic wheels were frozen — obvious now that
+    // traffic are real GLTF cars). v.speed is the car's own speed, not
+    // the follow-clamped one, so a car queued behind a leader spins a
+    // touch fast — invisible at game-view distance. Procedural
+    // trucks/buses have plain cylinder wheels with no spin groups, so
+    // they keep static wheels (a uniform cylinder's spin would not read).
+    const sp = mesh.userData.spin;
+    if (sp && typeof v.speed === 'number') {
+      const rate = v.speed / (mesh.userData.wheelR || 0.38);
+      for (const s of sp) s.rotation.x -= rate * dt;
+    }
   }
 }
 function syncPickups() {
@@ -3324,12 +3448,17 @@ function restDistAtZ(curve, zTarget) {
 // (a hedge wall). offset is metres right of the path centreline.
 function restStrip(curve, u0, u1, offset, halfW, y0, y1, material) {
   const N = 60;
-  const pos = [], idx = [];
+  const pos = [], uv = [], idx = [];
   for (let i = 0; i <= N; i++) {
     const u = u0 + (u1 - u0) * (i / N);
     const p = curve.getPointAt(u);
     const tg = curve.getTangentAt(u);
     const rx = -tg.z, rz = tg.x; // right normal in XZ
+    // Fase 2AX: UVs in 5 m tile units, matching the highway road — the
+    // ribbon shares roadMat, and without UVs the texture would sample a
+    // single texel across the whole strip.
+    const uu = u * (curve.getLength() / 5);
+    const vv = y0 === y1 ? (2 * halfW) / 5 : (y1 - y0) / 5;
     if (y0 === y1) {
       pos.push(p.x + rx * (offset - halfW), y0, p.z + rz * (offset - halfW));
       pos.push(p.x + rx * (offset + halfW), y0, p.z + rz * (offset + halfW));
@@ -3337,6 +3466,7 @@ function restStrip(curve, u0, u1, offset, halfW, y0, y1, material) {
       pos.push(p.x + rx * offset, y0, p.z + rz * offset);
       pos.push(p.x + rx * offset, y1, p.z + rz * offset);
     }
+    uv.push(uu, 0, uu, vv);
   }
   for (let i = 0; i < N; i++) {
     const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
@@ -3344,6 +3474,7 @@ function restStrip(curve, u0, u1, offset, halfW, y0, y1, material) {
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
   return new THREE.Mesh(geo, material);
@@ -3761,7 +3892,7 @@ function loop(now) {
     // forward, so the spin angle decreases).
     const spinN = playerMesh.userData.spin;
     if (spinN) for (const s of spinN) s.rotation.x -= (st.speed / (playerMesh.userData.wheelR || 0.38)) * dt;
-    syncTrafficMeshes();
+    syncTrafficMeshes(dt);
     syncPickups();
     syncRoadworkMeshes();
     if (st.condition === 'night') {
