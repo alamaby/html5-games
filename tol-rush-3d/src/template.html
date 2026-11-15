@@ -13,6 +13,10 @@
          touch-action:none; user-select:none; -webkit-user-select:none; }
   #c { position:fixed; inset:0; }
   #c canvas { display:block; }
+  /* Fase 2BI: a subtle cinematic frame over the 3D view — above the
+     canvas (z 0), below the HUD (z 5); it never intercepts input. */
+  #vignette { position:fixed; inset:0; pointer-events:none; z-index:2;
+    background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.32) 100%); }
   .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
              justify-content:center; z-index:10; text-align:center; padding:24px;
              background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
@@ -211,6 +215,7 @@
 </head>
 <body>
 <div id="c"></div>
+<div id="vignette"></div>
 
 <div id="hud" class="hidden">
   <div class="hudrow"><span><button id="menuBtn" data-i18n="menu">MENU</button>
@@ -279,6 +284,7 @@
     <button class="bigbtn condbtn" data-cond="day" data-i18n="condDay">SIANG</button>
     <button class="bigbtn condbtn" data-cond="night" data-i18n="condNight">MALAM</button>
     <button class="bigbtn condbtn" data-cond="rain" data-i18n="condRain">HUJAN</button>
+    <button class="bigbtn condbtn" data-cond="dusk" data-i18n="condDusk">SENJA</button>
     <button class="bigbtn condbtn" data-cond="random" data-i18n="condRandom">ACAK</button>
   </div>
   <div class="moderow showcase-row"><button class="bigbtn modebtn" id="showcaseBtn" data-i18n="showcaseBtn">🔍 LIHAT MOBIL</button></div>

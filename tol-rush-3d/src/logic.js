@@ -83,8 +83,9 @@ const TR = {
     const car = TR.CARS[carKey];
     const maxHp = TR.MAX_HP + upgrades.armor + car.hp;
     const maxFuel = 100 + upgrades.tank * 20;
-    // Condition: day / night / rain; 'random' picks one per run, unknown falls back to day.
-    const conds = ['day', 'night', 'rain'];
+    // Condition: day / night / rain / dusk; 'random' picks one per run, unknown falls back to day.
+    // Dusk plays like day (sightRange 190, no rain effects) — only the look changes.
+    const conds = ['day', 'night', 'rain', 'dusk'];
     let condition = conds.includes(o.condition) ? o.condition : 'day';
     if (o.condition === 'random') condition = conds[Math.floor(Math.random() * conds.length)];
     let moveTime = Math.max(0.10, Math.max(0.13, TR.PLAYER_MOVE_TIME - upgrades.handling * 0.03) * car.move);

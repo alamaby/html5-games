@@ -75,7 +75,7 @@ const I18N = {
     shieldToast: 'Perisai aktif! Menahan satu tabrakan.', shieldDup: 'Perisai sudah aktif (+25).', shieldSaveToast: 'Perisai menahan tabrakan!',
     bought: 'Upgrade dibeli!', fuelPlus: '+30 BENSIN', fuelLow: 'Bensin menipis!',
     fuelCrit: 'Bensin hampir habis — cari pickup atau rest area!',
-    condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condRandom: 'ACAK',
+    condLabel: 'KONDISI:', condDay: 'SIANG', condNight: 'MALAM', condRain: 'HUJAN', condDusk: 'SENJA', condRandom: 'ACAK',
     menu: 'MENU', restTitle: 'REST AREA', restSub: 'Belok kiri • isi bensin',
     restInfo: 'HP penuh + bensin penuh (+250)', restSkip: 'SKIP ⏭',
     restS1: 'Keluar dari tol…', restS2: 'Mengelilingi rest area…', restS3: 'Antri di SPBU…', restS4: 'Mengisi bensin…', restS5: 'Kembali ke jalan tol…',
@@ -111,7 +111,7 @@ const I18N = {
     shieldToast: 'Shield active! Absorbs one crash.', shieldDup: 'Shield already active (+25).', shieldSaveToast: 'Shield absorbed the crash!',
     bought: 'Upgrade bought!', fuelPlus: '+30 FUEL', fuelLow: 'Fuel low!',
     fuelCrit: 'Fuel almost empty — find a pickup or rest area!',
-    condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condRandom: 'RANDOM',
+    condLabel: 'CONDITIONS:', condDay: 'DAY', condNight: 'NIGHT', condRain: 'RAIN', condDusk: 'DUSK', condRandom: 'RANDOM',
     menu: 'MENU', restTitle: 'REST AREA', restSub: 'Turn left • refuel',
     restInfo: 'Full HP + full fuel (+250)', restSkip: 'SKIP ⏭',
     restS1: 'Leaving the highway…', restS2: 'Driving through the rest area…', restS3: 'Queuing at the fuel station…', restS4: 'Refuelling…', restS5: 'Merging back onto the highway…',
@@ -140,7 +140,7 @@ function t(k) { return (I18N[lang] && I18N[lang][k]) || I18N.id[k] || k; }
 let currentCondition = 'day';
 try {
   const c = localStorage.getItem('tr_condition');
-  if (['day', 'night', 'rain', 'random'].includes(c)) currentCondition = c;
+  if (['day', 'night', 'rain', 'dusk', 'random'].includes(c)) currentCondition = c;
 } catch (e) {}
 function updateConditionUI() {
   document.querySelectorAll('[data-cond]').forEach((btn) => btn.classList.toggle('sel', btn.dataset.cond === currentCondition));
@@ -513,6 +513,12 @@ let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboar
 // Fase 2BE: skid-mark pool (braking / crash), recycled by fading.
 const skidMarks = [];
 let skidSpawnT = 0, prevCrashT = 0;
+// Fase 2BG: rain-splash pool (rings where rain hits the road).
+const splashMarks = [];
+let splashSpawnT = 0;
+// Fase 2BH: exhaust-smoke pool (puffs at the rear while nitro is on).
+const smokePuffs = [];
+let smokeSpawnT = 0;
 const debrisBursts = [];
 const debrisGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 function setSkyColors(topHex, bottomHex) {
@@ -1438,6 +1444,22 @@ function initThree() {
     mk.rotation.x = -Math.PI / 2; mk.visible = false; scene.add(mk);
     skidMarks.push({ mesh: mk, life: 0 });
   }
+  // Fase 2BG: rain splashes — flat rings on the road, one material each
+  // so they fade independently; reused oldest-first like the skid marks.
+  for (let i = 0; i < 24; i++) {
+    const sp = new THREE.Mesh(new THREE.RingGeometry(0.15, 0.3, 16),
+      new THREE.MeshBasicMaterial({ color: 0xbfd4e0, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+    sp.rotation.x = -Math.PI / 2; sp.visible = false; scene.add(sp);
+    splashMarks.push({ mesh: sp, life: 0 });
+  }
+  // Fase 2BH: exhaust smoke — small grey spheres at the rear, rising +
+  // expanding + fading while nitro is on.
+  for (let i = 0; i < 12; i++) {
+    const pf = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0x9aa2ad, transparent: true, opacity: 0, depthWrite: false }));
+    pf.visible = false; scene.add(pf);
+    smokePuffs.push({ mesh: pf, life: 0 });
+  }
 
   // road
   roadMat = new THREE.MeshLambertMaterial({ color: 0x2b3038 });
@@ -1490,7 +1512,14 @@ function initThree() {
     const side = i % 2 === 0 ? -1 : 1;
     const tree = new THREE.Group();
     tree.add(box(0.5, 2.2, 0.5, 0x6b4a2a, 0, 1.1, 0));
-    tree.add(box(2.2, 2.2, 2.2, Math.random() < 0.5 ? 0x2f6b2f : 0x357a35, 0, 3.0, 0));
+    if (i % 3 === 0) {
+      // Fase 2BJ: a pine variant — a cone instead of the cube, so the
+      // roadside is not 22 identical boxes.
+      const pine = new THREE.Mesh(new THREE.ConeGeometry(1.4, 3.2, 8), mat(0x1f5a2a));
+      pine.position.set(0, 3.0, 0); tree.add(pine);
+    } else {
+      tree.add(box(2.2, 2.2, 2.2, Math.random() < 0.5 ? 0x2f6b2f : 0x357a35, 0, 3.0, 0));
+    }
     const ts = 0.8 + Math.random() * 0.6;
     tree.scale.set(ts, ts, ts);
     tree.position.set(side * (10 + Math.random() * 6), 0, -10 - i * 9);
@@ -1631,6 +1660,9 @@ function setBeamCones(mesh, on) {
 // so the menu previews the saved condition (random previews as day).
 function applyCondition(cond) {
   if (!scene || !hemiLight || !sunLight) return;
+  // Fase 2BF: reset the sun light colour first — the dusk branch warms it,
+  // and a stale orange would otherwise leak into the next condition.
+  sunLight.color.set(0xffffff);
   if (cond === 'night') {
     scene.background.set(0x0b1226); scene.fog.color.set(0x0b1226); scene.fog.near = 20; scene.fog.far = 120;
     hemiLight.intensity = 0.25; sunLight.intensity = 0.15;
@@ -1662,6 +1694,23 @@ function applyCondition(cond) {
     if (sunGlow) sunGlow.visible = false;
     if (mountainMat) mountainMat.color.set(0x5a6470);
     if (cloudMat) { cloudMat.color.set(0x9aa2ad); cloudMat.opacity = 0.55; }
+  } else if (cond === 'dusk') {
+    // Fase 2BF: dusk — a low orange sun, warm haze, purple zenith. Plays
+    // like day (sightRange 190, no rain effects); only the look changes.
+    scene.background.set(0x7a4a5e); scene.fog.color.set(0x7a4a5e); scene.fog.near = 25; scene.fog.far = 150;
+    hemiLight.intensity = 0.55; sunLight.intensity = 0.5; sunLight.color.set(0xffb070);
+    if (roadMat) roadMat.color.set(0x2a2a30);
+    if (headlightL) headlightL.intensity = 0;
+    if (headlightR) headlightR.intensity = 0;
+    if (rainPoints) rainPoints.visible = false;
+    setSkyColors(0x3a2a5a, 0xff7e3d);
+    if (starPoints) starPoints.visible = false;
+    if (moonMesh) moonMesh.visible = false;
+    if (moonGlow) moonGlow.visible = false;
+    if (sunMesh) { sunMesh.visible = true; sunMesh.position.set(60, 12, -220); sunMesh.material.color.set(0xff6a2a); }
+    if (sunGlow) { sunGlow.visible = true; sunGlow.position.set(60, 12, -221); sunGlow.material.color.set(0xff8c42); sunGlow.material.opacity = 0.35; }
+    if (mountainMat) mountainMat.color.set(0x4a2a4a);
+    if (cloudMat) { cloudMat.color.set(0xffb090); cloudMat.opacity = 0.6; }
   } else {
     scene.background.set(0x87b5e0); scene.fog.color.set(0x87b5e0); scene.fog.near = 30; scene.fog.far = 170;
     hemiLight.intensity = 0.95; sunLight.intensity = 0.7;
@@ -1673,8 +1722,8 @@ function applyCondition(cond) {
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
     if (moonGlow) moonGlow.visible = false;
-    if (sunMesh) sunMesh.visible = true;
-    if (sunGlow) sunGlow.visible = true;
+    if (sunMesh) { sunMesh.visible = true; sunMesh.position.set(60, 55, -220); sunMesh.material.color.set(0xfff2b0); }
+    if (sunGlow) { sunGlow.visible = true; sunGlow.position.set(60, 55, -221); sunGlow.material.color.set(0xfff2b0); sunGlow.material.opacity = 0.22; }
     if (mountainMat) mountainMat.color.set(0x7488a8);
     if (cloudMat) { cloudMat.color.set(0xffffff); cloudMat.opacity = 0.75; }
   }
@@ -1702,6 +1751,52 @@ function updateSkidMarks(dt, move) {
     s.life -= dt / 2.5;
     if (s.life <= 0) { s.mesh.visible = false; s.mesh.material.opacity = 0; }
     else s.mesh.material.opacity = 0.5 * s.life;
+  }
+}
+// Fase 2BG: rain splashes — a ring where a drop hits the road; it grows
+// and fades in ~0.5 s while scrolling with the world. Reused
+// oldest-first when the pool is full.
+function spawnSplash(x, z) {
+  let best = null;
+  for (const s of splashMarks) if (s.life <= 0) { best = s; break; }
+  if (!best) for (const s of splashMarks) if (!best || s.life < best.life) best = s;
+  if (!best) return;
+  best.mesh.position.set(x, 0.04, z);
+  best.mesh.scale.set(0.5, 0.5, 1);
+  best.mesh.visible = true; best.life = 1; best.mesh.material.opacity = 0.4;
+}
+function updateSplashes(dt, move) {
+  for (const s of splashMarks) {
+    if (s.life <= 0) continue;
+    s.mesh.position.z += move;
+    s.life -= dt / 0.5;
+    const k = 0.5 + (1 - Math.max(0, s.life)) * 1.0;
+    s.mesh.scale.set(k, k, 1);
+    if (s.life <= 0) { s.mesh.visible = false; s.mesh.material.opacity = 0; }
+    else s.mesh.material.opacity = 0.4 * s.life;
+  }
+}
+// Fase 2BH: exhaust smoke — a puff at the rear while nitro is on; it
+// rises, grows and fades in ~0.8 s while scrolling with the world.
+function spawnSmoke(x, y, z) {
+  let best = null;
+  for (const s of smokePuffs) if (s.life <= 0) { best = s; break; }
+  if (!best) for (const s of smokePuffs) if (!best || s.life < best.life) best = s;
+  if (!best) return;
+  best.mesh.position.set(x, y, z);
+  best.mesh.scale.set(1, 1, 1);
+  best.mesh.visible = true; best.life = 1; best.mesh.material.opacity = 0.35;
+}
+function updateSmoke(dt, move) {
+  for (const s of smokePuffs) {
+    if (s.life <= 0) continue;
+    s.mesh.position.z += move;
+    s.mesh.position.y += 1.5 * dt;
+    s.life -= dt / 0.8;
+    const k = 1 + (1 - Math.max(0, s.life)) * 1.5;
+    s.mesh.scale.set(k, k, k);
+    if (s.life <= 0) { s.mesh.visible = false; s.mesh.material.opacity = 0; }
+    else s.mesh.material.opacity = 0.35 * s.life;
   }
 }
 function syncTrafficMeshes(dt) {
@@ -2080,6 +2175,8 @@ function setHighwayHidden(hidden) {
   for (const m of pickupMeshes.values()) m.visible = !hidden;
   for (const m of roadworkMeshes.values()) m.visible = !hidden;
   for (const s of skidMarks) s.mesh.visible = !hidden && s.life > 0;
+  for (const s of splashMarks) s.mesh.visible = !hidden && s.life > 0;
+  for (const s of smokePuffs) s.mesh.visible = !hidden && s.life > 0;
 }
 function clearRestSeq() {
   if (restSeqGroup) {
@@ -2637,6 +2734,12 @@ function loop(now) {
       const f = 0.85 + 0.3 * Math.sin(st.time * 42);
       nitroFlame.scale.set(f, f, f);
     }
+    // Fase 2BH: exhaust smoke — a puff at the rear while nitro is on.
+    if (st.nitroOn) {
+      smokeSpawnT += dt;
+      if (smokeSpawnT >= 0.08) { smokeSpawnT = 0; spawnSmoke(st.player.x, 0.4, 2.5); }
+    } else smokeSpawnT = 0;
+    updateSmoke(dt, move);
     updateDebris(dt);
     playerMesh.rotation.y = (st.laneXs[st.player.targetLane] - st.player.x) * -0.05;
     playerMesh.rotation.z = st.crashT > 0 ? (Math.random() - 0.5) * 0.06 : 0;
@@ -2672,7 +2775,11 @@ function loop(now) {
         pos.setY(i, y);
       }
       pos.needsUpdate = true;
+      // Fase 2BG: rain splashes — a ring where a drop hits the road.
+      splashSpawnT += dt;
+      if (splashSpawnT >= 0.08) { splashSpawnT = 0; spawnSplash((Math.random() - 0.5) * 12, -40 + Math.random() * 45); }
     }
+    updateSplashes(dt, move);
     const shake = st.crashT > 0 ? (Math.random() - 0.5) * 0.3 : 0;
     camera.position.set(st.player.x * 0.5 + shake, 5.4, 9);
     camera.lookAt(st.player.x * 0.65, 0.8, -12);

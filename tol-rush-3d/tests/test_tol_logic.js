@@ -355,11 +355,17 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   eq('rain condition', rain.condition, 'rain');
   ok('rain lane change slower', rain.moveTime > TR.createGame().moveTime);
   ok('rain brakes weaker', rain.brakeFactor > TR.createGame().brakeFactor);
+  // Fase 2BF: dusk plays like day (sightRange 190, no rain effects).
+  const dusk = TR.createGame({ condition: 'dusk' });
+  eq('dusk condition', dusk.condition, 'dusk');
+  eq('dusk sight range', dusk.sightRange, 190);
+  eq('dusk lane change like day', dusk.moveTime, TR.createGame().moveTime);
+  eq('dusk brakes like day', dusk.brakeFactor, TR.createGame().brakeFactor);
   const unk = TR.createGame({ condition: 'salju' });
   eq('unknown condition falls back to day', unk.condition, 'day');
   const seen = new Set();
   for (let i = 0; i < 30; i++) seen.add(TR.createGame({ condition: 'random' }).condition);
-  ok('random picks a real condition', [...seen].every((c) => ['day', 'night', 'rain'].includes(c)));
+  ok('random picks a real condition', [...seen].every((c) => ['day', 'night', 'rain', 'dusk'].includes(c)));
   ok('random varies', seen.size > 1);
 }
 
