@@ -2009,8 +2009,14 @@ function blobShadowMaterial() {
     const cv = document.createElement('canvas'); cv.width = cv.height = 128;
     const c = cv.getContext('2d');
     const gr = c.createRadialGradient(64, 64, 4, 64, 64, 62);
-    gr.addColorStop(0, 'rgba(0,0,0,0.5)');
-    gr.addColorStop(0.7, 'rgba(0,0,0,0.35)'); // 2AY: was 0.28 — the rim must read once the shadow extends past the body
+    // Fase 2AZ: the dark core must reach the body's edge — the old stops
+    // (0.5 centre fading to 0 at the edge) left the visible rim (past the
+    // body outline) at ~0.12 average alpha, invisible against the
+    // speckled road. The core now holds 0.6 out to 0.8 radius (the body's
+    // outline sits at 0.8 of the 1.25x plane) and only then fades.
+    gr.addColorStop(0, 'rgba(0,0,0,0.65)');
+    gr.addColorStop(0.8, 'rgba(0,0,0,0.6)');
+    gr.addColorStop(0.95, 'rgba(0,0,0,0.3)');
     gr.addColorStop(1, 'rgba(0,0,0,0)');
     c.fillStyle = gr; c.fillRect(0, 0, 128, 128);
     blobShadowTex = new THREE.CanvasTexture(cv);
@@ -2295,6 +2301,7 @@ function buildGltfCar(kind, colorHex, opts) {
   const body = new THREE.Group();
   const steerPivots = [], spinNodes = [], rearSpins = [];
   let wheelR = 0, wheelMinY = 0, seenWheel = false, bodyMinZ = 1e9, bodyMaxZ = -1e9, bodyMinX = 1e9, bodyMaxX = -1e9;
+  const tailMats = []; // Fase 2AZ: fresh materials for the model's TailLights meshes (the brake lights)
   Object.keys(byNode).forEach((mi) => {
     const name = parsed.meshNode[mi] || '';
     const parts = byNode[mi];
@@ -2322,8 +2329,20 @@ function buildGltfCar(kind, colorHex, opts) {
       let paintName = '', paintTris = -1;
       parts.forEach((p) => { if (p.tris > paintTris) { paintTris = p.tris; paintName = p.matName; } });
       parts.forEach((p) => {
-        const m = new THREE.Mesh(p.geo, p.matName === paintName ? mat(colorHex) : p.mat);
+        // Fase 2AZ: the model's own TailLights material IS the brake
+        // light — one mesh per car, already shaped to the rear face, so
+        // it can never stick out past it (the added boxes of 2AW/2AY
+        // did: the rear face at trunk height is far narrower than the
+        // body's max width). Fresh Basic material per car, dark red dim;
+        // the loop brightens it while braking.
+        let pmat = p.matName === paintName ? mat(colorHex) : p.mat;
+        if (p.matName === 'TailLights') {
+          pmat = new THREE.MeshBasicMaterial({ color: 0x7a1620 });
+          tailMats.push(pmat);
+        }
+        const m = new THREE.Mesh(p.geo, pmat);
         if (p.matName === paintName) m.userData.isPaint = true; // Fase 2AO: traffic clones recolor this mesh
+        if (p.matName === 'TailLights') m.userData.isTailLight = true; // Fase 2AZ: traffic clones rebuild userData.tails from this tag
         body.add(m);
       });
       return;
@@ -2410,32 +2429,21 @@ function buildGltfCar(kind, colorHex, opts) {
   // boxes at the rear corners, hidden until they blink.
   const sigMat = new THREE.MeshBasicMaterial({ color: 0xffb020 });
   const sigL = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), sigMat);
-  sigL.position.set(-0.6, 0.75, bodyMaxZ - 0.05); sigL.visible = false; sigL.userData.isSignal = 'left';
+  // Fase 2AZ: z bodyMaxZ - 0.25 (was -0.05) — the trunk's rear face sits
+  // ~0.15-0.35 in front of bodyMaxZ (the bumper sticks out further), so
+  // the signals floated just behind the trunk; now they sit on its face.
+  sigL.position.set(-0.6, 0.75, bodyMaxZ - 0.25); sigL.visible = false; sigL.userData.isSignal = 'left';
   const sigR = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.18, 0.06), sigMat);
-  sigR.position.set(0.6, 0.75, bodyMaxZ - 0.05); sigR.visible = false; sigR.userData.isSignal = 'right';
+  sigR.position.set(0.6, 0.75, bodyMaxZ - 0.25); sigR.visible = false; sigR.userData.isSignal = 'right';
   g.add(sigL); g.add(sigR);
   g.userData.signals = { left: sigL, right: sigR };
   if (steerPivots.length) g.userData.steer = steerPivots;
   if (spinNodes.length) g.userData.spin = spinNodes;
-  // Brake lights (Fase 2AW): two small red boxes at the rear, below the
-  // signals — the loop already brightens userData.tails while braking
-  // (the procedural cars use the same code), so the GLTF player car
-  // finally shows braking. Positioned from the measured body width so
-  // they sit on the rear face for every kind, not floating past it.
-  const rearHalfW = (bodyMaxX - bodyMinX) / 2;
-  // Fase 2AY: x 0.62 (was 0.8) — the rear face tapers narrower than the
-  // body's max width, so 0.8 put the boxes' outer edges past the rear
-  // face; 0.28 wide (was 0.3) keeps them on the face for every kind.
-  // Dim is a dark red (0x7a1620), bright is vivid (0xff5a6e) — the old
-  // 0xff2a3c -> 0xff7a85 step was too subtle in daylight.
-  const tailMatL = new THREE.MeshBasicMaterial({ color: 0x7a1620 });
-  const tailMatR = new THREE.MeshBasicMaterial({ color: 0x7a1620 });
-  const tlL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.06), tailMatL);
-  tlL.position.set(-rearHalfW * 0.62, 0.5, bodyMaxZ - 0.05); tlL.userData.isBrake = 'left';
-  const tlR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.06), tailMatR);
-  tlR.position.set(rearHalfW * 0.62, 0.5, bodyMaxZ - 0.05); tlR.userData.isBrake = 'right';
-  g.add(tlL); g.add(tlR);
-  g.userData.tails = [tailMatL, tailMatR];
+  // Brake lights (Fase 2AZ): the model's own TailLights mesh (see the
+  // body branch above) — userData.tails holds its fresh material(s), and
+  // the loop brightens them while braking. The added boxes of 2AW/2AY
+  // are gone: they stuck out past the tapered rear face on every kind.
+  if (tailMats.length) g.userData.tails = tailMats;
   // Blob shadow (Fase 2AU): a soft dark ellipse under the car, from the
   // measured body footprint — grounds the car on the road without a
   // shadow map. Added last so it never lands inside the body subgroup.
@@ -2466,11 +2474,12 @@ function buildTrafficGltfCar(colorHex) {
     if (!o.isMesh) return;
     if (o.userData.isPaint) o.material = mat(colorHex);
     if (o.userData.isSignal) signals[o.userData.isSignal] = o;
-    // Fase 2AW: the clone's brake lights get FRESH materials — the
-    // template's are shared with the player sedan, and the loop brightens
-    // the player's tails when braking, which would flash every traffic
-    // sedan's brake lights too if they shared the material.
-    if (o.userData.isBrake) { o.material = new THREE.MeshBasicMaterial({ color: 0x7a1620 }); tails.push(o.material); }
+    // Fase 2AZ: the clone's tail lights (the model's own TailLights mesh)
+    // get FRESH materials — the template's are shared with the player
+    // sedan, and the loop brightens the player's tails when braking,
+    // which would flash every traffic sedan's brake lights too if they
+    // shared the material.
+    if (o.userData.isTailLight) { o.material = new THREE.MeshBasicMaterial({ color: 0x7a1620 }); tails.push(o.material); }
     if (o.geometry.type === 'ConeGeometry') cone = o;
   });
   g.userData.beamCones = cone ? [cone] : [];
