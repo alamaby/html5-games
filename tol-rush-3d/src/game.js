@@ -1914,6 +1914,11 @@ const DEBUG_SHOWCASE = new URLSearchParams(location.search).has('showcase');
 // can see every GLTF model. Ignored unless the key is a real car.
 const DEBUG_CAR = new URLSearchParams(location.search).get('car');
 const DEBUG_SPIN = new URLSearchParams(location.search).has('spindbg');
+// Debug only: ?restdbg shows the live rest-sequence state in the rest
+// overlay (phase, distance, car position, car NDC, camera position,
+// visibility), so a browser check can tell whether the car is really at
+// the pump and in frame during the fuel stages.
+const DEBUG_RESTDBG = new URLSearchParams(location.search).has('restdbg');
 // Debug only: ?slider forces the portrait menu slider on any screen, so a
 // browser check can verify the slides without a portrait viewport.
 // Fase 2AH: portrait menu slider — 0 instruksi, 1 utama (awal), 2 toko.
@@ -2181,6 +2186,23 @@ function updateRestAnim(dt) {
   // camera: chase, slightly higher than normal play so the curves read
   camera.position.set(pos.x - tan.x * 10, 6.2, pos.z - tan.z * 10);
   camera.lookAt(pos.x + tan.x * 12, 0.8, pos.z + tan.z * 12);
+  // Debug only: ?restdbg live readout — phase, distance along the path,
+  // car position, car NDC (in-frame iff |x|,|y| <= 1), camera position,
+  // and the car mesh visibility flag. Written into #restDbg in the rest
+  // overlay; the browser check reads it from the screenshot.
+  if (DEBUG_RESTDBG) {
+    const dbg = $('restDbg');
+    if (dbg) {
+      dbg.style.display = 'block';
+      camera.updateMatrixWorld();
+      const pv = playerMesh.position.clone(); pv.y = 0.6; pv.project(camera);
+      dbg.textContent = 'ph=' + a.phase + ' d=' + Math.round(a.d) + '/' + Math.round(a.len) +
+        ' car=(' + playerMesh.position.x.toFixed(1) + ',' + playerMesh.position.z.toFixed(1) + ')' +
+        ' ndc=(' + pv.x.toFixed(2) + ',' + pv.y.toFixed(2) + ')' +
+        ' cam=(' + camera.position.x.toFixed(1) + ',' + camera.position.z.toFixed(1) + ')' +
+        ' vis=' + (playerMesh.visible ? 1 : 0);
+    }
+  }
   // Speedo fix, part 2: the HUD refresh lives at the end of the play
   // branch, which is paused during the sequence — refresh it here too, so
   // the speedometer follows st.speed (mirrored from a.v above) instead of
