@@ -1845,8 +1845,11 @@ const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
 let shieldMesh = null; // translucent bubble around the player while shielded
 // ---------- visual polish (Fase 2L, view-only, no logic) ----------
-let skyDome = null, starPoints = null, moonMesh = null, sunMesh = null, sunGlow = null, nitroFlame = null;
+let skyDome = null, starPoints = null, moonMesh = null, moonGlow = null, sunMesh = null, sunGlow = null, nitroFlame = null;
 let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboards = [];
+// Fase 2BE: skid-mark pool (braking / crash), recycled by fading.
+const skidMarks = [];
+let skidSpawnT = 0, prevCrashT = 0;
 const debrisBursts = [];
 const debrisGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
 function setSkyColors(topHex, bottomHex) {
@@ -2746,6 +2749,10 @@ function initThree() {
     starPoints.visible = false; scene.add(starPoints);
     moonMesh = new THREE.Mesh(new THREE.CircleGeometry(9, 24), new THREE.MeshBasicMaterial({ color: 0xf4f1de, fog: false }));
     moonMesh.position.set(-60, 55, -220); moonMesh.visible = false; scene.add(moonMesh);
+    // Fase 2BD: the sun has a glow (2AV) but the moon was a bare disc —
+    // a soft halo behind it, same pattern as the sun's.
+    moonGlow = new THREE.Mesh(new THREE.CircleGeometry(16, 24), new THREE.MeshBasicMaterial({ color: 0xf4f1de, transparent: true, opacity: 0.15, fog: false }));
+    moonGlow.position.set(-60, 55, -221); moonGlow.visible = false; scene.add(moonGlow);
     // Fase 2AV: the day sky had no sun (night has the moon + stars) — a
     // warm disc opposite the moon, with a soft glow behind it.
     sunMesh = new THREE.Mesh(new THREE.CircleGeometry(9, 24), new THREE.MeshBasicMaterial({ color: 0xfff2b0, fog: false }));
@@ -2758,6 +2765,16 @@ function initThree() {
   nitroFlame = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.6, 12),
     new THREE.MeshBasicMaterial({ color: 0xff9a1f, transparent: true, opacity: 0.9, fog: false }));
   nitroFlame.rotation.x = Math.PI / 2; nitroFlame.visible = false; scene.add(nitroFlame);
+  // Fase 2BE: skid-mark pool — dark strips that appear under the rear
+  // wheels while braking (and a burst on crash), then fade. One material
+  // per mark so each fades independently; the pool is reused
+  // oldest-first when a long brake outruns it.
+  for (let i = 0; i < 40; i++) {
+    const mk = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 1.8),
+      new THREE.MeshBasicMaterial({ color: 0x0d0d0d, transparent: true, opacity: 0, depthWrite: false }));
+    mk.rotation.x = -Math.PI / 2; mk.visible = false; scene.add(mk);
+    skidMarks.push({ mesh: mk, life: 0 });
+  }
 
   // road
   roadMat = new THREE.MeshLambertMaterial({ color: 0x2b3038 });
@@ -2789,11 +2806,21 @@ function initThree() {
     markingGroups[count] = grp; dashesByCount[count] = ds;
   }
   dashes = dashesByCount[3];
-  // guard posts + side trees, recycled
+  // guard posts + rails + side trees, recycled. The posts were already
+  // there; the road edges still read as bare because the horizontal
+  // rail was missing. Each unit is a group (post + one 20 m rail centred
+  // on it, so adjacent rails meet end to end) — the play branch and
+  // setHighwayHidden already treat `posts` as positionable + hideable
+  // objects, so groups drop in with no other change. The offset is +10
+  // (not -10) so the rail also covers the road right in front of the
+  // camera (z 0..12); the far end stays past the fog.
   for (let i = 0; i < 10; i++) {
     for (const x of [-7.6, 7.6]) {
-      const p = box(0.25, 0.9, 0.25, 0xd8dee9, x, 0.45, -10 - i * 20);
-      scene.add(p); posts.push(p);
+      const g = new THREE.Group();
+      g.add(box(0.25, 0.9, 0.25, 0xd8dee9, 0, 0.45, 0));
+      g.add(box(0.12, 0.35, 20, 0x9aa2ad, 0, 0.75, 0));
+      g.position.set(x, 0, 10 - i * 20);
+      scene.add(g); posts.push(g);
     }
   }
   for (let i = 0; i < 22; i++) {
@@ -2952,6 +2979,7 @@ function applyCondition(cond) {
     setSkyColors(0x050914, 0x1b2b4d);
     if (starPoints) starPoints.visible = true;
     if (moonMesh) moonMesh.visible = true;
+    if (moonGlow) moonGlow.visible = true;
     if (sunMesh) sunMesh.visible = false;
     if (sunGlow) sunGlow.visible = false;
     if (mountainMat) mountainMat.color.set(0x141c2e);
@@ -2966,6 +2994,7 @@ function applyCondition(cond) {
     setSkyColors(0x55606e, 0x8d97a3);
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
+    if (moonGlow) moonGlow.visible = false;
     if (sunMesh) sunMesh.visible = false;
     if (sunGlow) sunGlow.visible = false;
     if (mountainMat) mountainMat.color.set(0x5a6470);
@@ -2980,6 +3009,7 @@ function applyCondition(cond) {
     setSkyColors(0x3f8fe0, 0xcfe8ff);
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
+    if (moonGlow) moonGlow.visible = false;
     if (sunMesh) sunMesh.visible = true;
     if (sunGlow) sunGlow.visible = true;
     if (mountainMat) mountainMat.color.set(0x7488a8);
@@ -2988,6 +3018,28 @@ function applyCondition(cond) {
   // Fase 2AE/2AF: the player's beam cones follow the condition (covers the
   // menu/showcase, where the per-frame loop does not run).
   setBeamCones(playerMesh, cond === 'night');
+}
+// Fase 2BE: skid marks — spawn a pair at the rear wheels, fade + scroll
+// with the world. A pair is two 0.3 x 1.8 strips at x +/- 0.7 (the rear
+// track); when the pool is full the oldest mark is reused.
+function spawnSkidPair(x, z) {
+  for (let k = 0; k < 2; k++) {
+    let best = null;
+    for (const s of skidMarks) if (s.life <= 0) { best = s; break; }
+    if (!best) for (const s of skidMarks) if (!best || s.life < best.life) best = s;
+    if (!best) return;
+    best.mesh.position.set(x + (k === 0 ? -0.7 : 0.7), 0.03, z);
+    best.mesh.visible = true; best.life = 1; best.mesh.material.opacity = 0.5;
+  }
+}
+function updateSkidMarks(dt, move) {
+  for (const s of skidMarks) {
+    if (s.life <= 0) continue;
+    s.mesh.position.z += move;
+    s.life -= dt / 2.5;
+    if (s.life <= 0) { s.mesh.visible = false; s.mesh.material.opacity = 0; }
+    else s.mesh.material.opacity = 0.5 * s.life;
+  }
 }
 function syncTrafficMeshes(dt) {
   const alive = new Set(st.traffic);
@@ -3023,6 +3075,21 @@ function syncTrafficMeshes(dt) {
     if (sp && typeof v.speed === 'number') {
       const rate = v.speed / (mesh.userData.wheelR || 0.38);
       for (const s of sp) s.rotation.x -= rate * dt;
+    }
+    // Fase 2BB: traffic brake lights — brighten when the car is held back
+    // by a slower leader ahead in the same lane (the follow rule's clamp),
+    // so traffic reads as braking, not just slowing. The leader check is
+    // a visual heuristic (same lane, within FOLLOW_DIST, slower than us);
+    // the loop sets the colour every frame, like the player's tails.
+    const ttails = mesh.userData.tails;
+    if (ttails) {
+      let braking = false;
+      for (const u of st.traffic) {
+        if (u === v || u.lane !== v.lane) continue;
+        const gapAhead = u.s - v.s;
+        if (gapAhead > 0 && gapAhead < TR.FOLLOW_DIST && typeof u.speed === 'number' && typeof v.speed === 'number' && u.speed < v.speed) { braking = true; break; }
+      }
+      for (const m of ttails) m.color.set(braking ? 0xff5a6e : 0x7a1620);
     }
   }
 }
@@ -3349,6 +3416,7 @@ function setHighwayHidden(hidden) {
   for (const m of trafficMeshes.values()) m.visible = !hidden;
   for (const m of pickupMeshes.values()) m.visible = !hidden;
   for (const m of roadworkMeshes.values()) m.visible = !hidden;
+  for (const s of skidMarks) s.mesh.visible = !hidden && s.life > 0;
 }
 function clearRestSeq() {
   if (restSeqGroup) {
@@ -3853,6 +3921,16 @@ function loop(now) {
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
     for (const tr of trees) { tr.position.z += move; if (tr.position.z > 12) { tr.position.z -= 198; tr.position.x = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 6); } }
     for (const b of billboards) { b.position.z += move; if (b.position.z > 12) { b.position.z -= 180; b.position.x = (Math.random() < 0.5 ? -1 : 1) * 12; } }
+    // Fase 2BE: skid marks — a pair at the rear wheels while braking at
+    // speed, plus a burst when a crash starts; they scroll with the
+    // world and fade over ~2.5 s.
+    if (st.brake && st.speed > 8) {
+      skidSpawnT += dt;
+      if (skidSpawnT >= 0.1) { skidSpawnT = 0; spawnSkidPair(st.player.x, 1.2); }
+    } else skidSpawnT = 0;
+    if (st.crashT > 0 && prevCrashT <= 0) { spawnSkidPair(st.player.x, 1.2); spawnSkidPair(st.player.x, 1.2); }
+    prevCrashT = st.crashT;
+    updateSkidMarks(dt, move);
     driftClouds(dt);
     // rest + exit set pieces follow their route position
     const nextRest = TR.nextRestStop(st);
@@ -3937,6 +4015,12 @@ function loop(now) {
     camera.lookAt(st.player.x * 0.65, 0.8, -12);
     engineUpdate(st.speed, true);
     updateHUD();
+    // Fase 2BA: the FOV was fixed at 62 at every speed, so 165 km/h felt
+    // as flat as 60. It now widens with speed (62 base, +8 at 144 km/h,
+    // +2 more on nitro) and lerps, so it breathes instead of snapping.
+    const targetFov = 62 + Math.min(1, st.speed / 40) * 8 + (st.nitroOn ? 2 : 0);
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 3);
+    if (Math.abs(camera.fov - targetFov) > 0.01) camera.updateProjectionMatrix();
     }
   } else if (!paused) {
     // idle scene: slow drift so the start screen is not frozen
@@ -3966,6 +4050,10 @@ function loop(now) {
       camera.position.set(0, 5.4, 9);
       camera.lookAt(0, 0.8, -12);
     }
+    // Fase 2BA: ease the FOV back to 62 off-run (menu/showcase), so a
+    // fast run does not leave the menu zoomed out.
+    camera.fov += (62 - camera.fov) * Math.min(1, dt * 3);
+    if (Math.abs(camera.fov - 62) > 0.01) camera.updateProjectionMatrix();
   }
   renderer.render(scene, camera);
 }
