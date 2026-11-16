@@ -3574,6 +3574,14 @@ const DEBUG_SPIN = new URLSearchParams(location.search).has('spindbg');
 // visibility), so a browser check can tell whether the car is really at
 // the pump and in frame during the fuel stages.
 const DEBUG_RESTDBG = new URLSearchParams(location.search).has('restdbg');
+// Fase 2BL: reusable objects for the ?restdbg frustum test — the car is a
+// Group (no geometry), so Frustum.intersectsObject would throw; test a
+// 3 m sphere at the car's position instead. Module-level so the debug
+// readout allocates nothing per frame.
+const restDbgFrustum = new THREE.Frustum();
+const restDbgProjMat = new THREE.Matrix4();
+const restDbgSphere = new THREE.Sphere();
+const restDbgVec = new THREE.Vector3();
 // Debug only: ?slider forces the portrait menu slider on any screen, so a
 // browser check can verify the slides without a portrait viewport.
 // Fase 2AH: portrait menu slider — 0 instruksi, 1 utama (awal), 2 toko.
@@ -3852,17 +3860,28 @@ function updateRestAnim(dt) {
   // car position, car NDC (in-frame iff |x|,|y| <= 1), camera position,
   // and the car mesh visibility flag. Written into #restDbg in the rest
   // overlay; the browser check reads it from the screenshot.
+  // Fase 2BL: also the triangle count of the last rendered frame
+  // (renderer.info.render.triangles) and a frustum test — a 3 m sphere
+  // at the car's position — so a check can tell whether the car is in
+  // the draw list at all, and whether the camera thinks it is in frame.
+  // If tri drops by ~3000 (the car) during queue/fuel while frustum=1,
+  // the car is culled/hidden, not occluded.
   if (DEBUG_RESTDBG) {
     const dbg = $('restDbg');
     if (dbg) {
       dbg.style.display = 'block';
       camera.updateMatrixWorld();
       const pv = playerMesh.position.clone(); pv.y = 0.6; pv.project(camera);
+      restDbgProjMat.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      restDbgFrustum.setFromProjectionMatrix(restDbgProjMat);
+      const frustum = restDbgFrustum.intersectsSphere(restDbgSphere.set(restDbgVec.set(playerMesh.position.x, 0.6, playerMesh.position.z), 3)) ? 1 : 0;
+      const tri = (renderer && renderer.info && renderer.info.render) ? renderer.info.render.triangles : -1;
       dbg.textContent = 'ph=' + a.phase + ' d=' + Math.round(a.d) + '/' + Math.round(a.len) +
         ' car=(' + playerMesh.position.x.toFixed(1) + ',' + playerMesh.position.z.toFixed(1) + ')' +
         ' ndc=(' + pv.x.toFixed(2) + ',' + pv.y.toFixed(2) + ')' +
         ' cam=(' + camera.position.x.toFixed(1) + ',' + camera.position.z.toFixed(1) + ')' +
-        ' vis=' + (playerMesh.visible ? 1 : 0);
+        ' vis=' + (playerMesh.visible ? 1 : 0) +
+        ' tri=' + tri + ' frustum=' + frustum;
     }
   }
   // Speedo fix, part 2: the HUD refresh lives at the end of the play
