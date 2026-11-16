@@ -1707,8 +1707,8 @@ function applyCondition(cond) {
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
     if (moonGlow) moonGlow.visible = false;
-    if (sunMesh) { sunMesh.visible = true; sunMesh.position.set(60, 12, -220); sunMesh.material.color.set(0xff6a2a); }
-    if (sunGlow) { sunGlow.visible = true; sunGlow.position.set(60, 12, -221); sunGlow.material.color.set(0xff8c42); sunGlow.material.opacity = 0.35; }
+    if (sunMesh) { sunMesh.visible = true; sunMesh.position.set(60, 12, -130); sunMesh.material.color.set(0xff6a2a); }
+    if (sunGlow) { sunGlow.visible = true; sunGlow.position.set(60, 12, -131); sunGlow.material.color.set(0xff8c42); sunGlow.material.opacity = 0.35; }
     if (mountainMat) mountainMat.color.set(0x4a2a4a);
     if (cloudMat) { cloudMat.color.set(0xffb090); cloudMat.opacity = 0.6; }
   } else {

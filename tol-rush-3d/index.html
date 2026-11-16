@@ -13,10 +13,12 @@
          touch-action:none; user-select:none; -webkit-user-select:none; }
   #c { position:fixed; inset:0; }
   #c canvas { display:block; }
-  /* Fase 2BI: a subtle cinematic frame over the 3D view — above the
-     canvas (z 0), below the HUD (z 5); it never intercepts input. */
+  /* Fase 2BI/2BK: a subtle cinematic frame over the 3D view — above the
+     canvas (z 0), below the HUD (z 5); it never intercepts input.
+     2BK strengthened it (0.32 -> 0.45, centre 55% -> 50%) because the
+     first version was too faint for the browser check to see. */
   #vignette { position:fixed; inset:0; pointer-events:none; z-index:2;
-    background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.32) 100%); }
+    background:radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%); }
   .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
              justify-content:center; z-index:10; text-align:center; padding:24px;
              background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
@@ -3051,8 +3053,8 @@ function applyCondition(cond) {
     if (starPoints) starPoints.visible = false;
     if (moonMesh) moonMesh.visible = false;
     if (moonGlow) moonGlow.visible = false;
-    if (sunMesh) { sunMesh.visible = true; sunMesh.position.set(60, 12, -220); sunMesh.material.color.set(0xff6a2a); }
-    if (sunGlow) { sunGlow.visible = true; sunGlow.position.set(60, 12, -221); sunGlow.material.color.set(0xff8c42); sunGlow.material.opacity = 0.35; }
+    if (sunMesh) { sunMesh.visible = true; sunMesh.position.set(60, 12, -130); sunMesh.material.color.set(0xff6a2a); }
+    if (sunGlow) { sunGlow.visible = true; sunGlow.position.set(60, 12, -131); sunGlow.material.color.set(0xff8c42); sunGlow.material.opacity = 0.35; }
     if (mountainMat) mountainMat.color.set(0x4a2a4a);
     if (cloudMat) { cloudMat.color.set(0xffb090); cloudMat.opacity = 0.6; }
   } else {

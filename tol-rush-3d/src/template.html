@@ -13,10 +13,12 @@
          touch-action:none; user-select:none; -webkit-user-select:none; }
   #c { position:fixed; inset:0; }
   #c canvas { display:block; }
-  /* Fase 2BI: a subtle cinematic frame over the 3D view — above the
-     canvas (z 0), below the HUD (z 5); it never intercepts input. */
+  /* Fase 2BI/2BK: a subtle cinematic frame over the 3D view — above the
+     canvas (z 0), below the HUD (z 5); it never intercepts input.
+     2BK strengthened it (0.32 -> 0.45, centre 55% -> 50%) because the
+     first version was too faint for the browser check to see. */
   #vignette { position:fixed; inset:0; pointer-events:none; z-index:2;
-    background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.32) 100%); }
+    background:radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%); }
   .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
              justify-content:center; z-index:10; text-align:center; padding:24px;
              background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
