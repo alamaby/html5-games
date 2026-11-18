@@ -3491,11 +3491,18 @@ function buildRestSeqGroup() {
   // (top y 4.8) instead of intersecting it.
   const spbuSign = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.2),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('SPBU', '') }));
-  spbuSign.position.set(-16, 5.5, -172); g.add(spbuSign);
+  // Fase 2BQ: raised from y 5.5 — the sign sits at the chase camera's
+  // height (y 6.2) and the camera drives past it, so at d=182 the sign
+  // filled the frame and overlapped the car (NDC-verified). At y 6.5 the
+  // car passes clearly underneath (clean at every d).
+  spbuSign.position.set(-16, 6.5, -172); g.add(spbuSign);
   // exit sign + lamp posts on the building side (basic-material heads glow at night)
   const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.5),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('KELUAR', '') }));
-  exitSign.position.set(-13, 4, -232); g.add(exitSign);
+  // Fase 2BQ: raised from y 4 — same cause as the SPBU sign: at d=236-240
+  // the camera drives past it at its height and it overlapped the car
+  // (NDC-verified). At y 7 the car passes clearly underneath.
+  exitSign.position.set(-13, 7, -232); g.add(exitSign);
   for (const lz of [-110, -140, -170, -200]) {
     g.add(box(0.3, 5, 0.3, 0x888888, -19, 2.5, lz));
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.3, 0.9),
