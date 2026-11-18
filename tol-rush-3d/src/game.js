@@ -508,6 +508,7 @@ const trafficMeshes = new Map(); // vehicle object -> group
 const pickupMeshes = new Map(); // pickup object -> group
 let shieldMesh = null; // translucent bubble around the player while shielded
 let restDbgMarker = null; // Fase 2BM: bright red beacon above the car, ?restdbg only
+let restDbgMarker2 = null; // Fase 2BN: green beacon high above the car, ?restdbg only
 // ---------- visual polish (Fase 2L, view-only, no logic) ----------
 let skyDome = null, starPoints = null, moonMesh = null, moonGlow = null, sunMesh = null, sunGlow = null, nitroFlame = null;
 let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboards = [];
@@ -1603,9 +1604,17 @@ function initThree() {
   // car, shown only with ?restdbg. If the beacon is visible while the car
   // is not, the car's own meshes/material are at fault; if the beacon is
   // invisible too, something occludes that screen region.
+  // Fase 2BN: the beacon ignores the depth buffer (depthTest:false) and
+  // renders last (renderOrder 999), so it draws on top of every 3D
+  // object. If it is STILL invisible during advance/fuel, the problem is
+  // not 3D occlusion. A second, green beacon floats high (y=6) above the
+  // car, to test whether the hidden region depends on height.
   restDbgMarker = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12),
-    new THREE.MeshBasicMaterial({ color: 0xff0000 }));
-  restDbgMarker.visible = false; scene.add(restDbgMarker);
+    new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false }));
+  restDbgMarker.visible = false; restDbgMarker.renderOrder = 999; scene.add(restDbgMarker);
+  restDbgMarker2 = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0x00ff00, depthTest: false }));
+  restDbgMarker2.visible = false; restDbgMarker2.renderOrder = 999; scene.add(restDbgMarker2);
 
   // Player headlight beams (night only; intensity set by applyCondition).
   // TWO SpotLights, one per lamp (Fase 2AF): the car has two headlights
@@ -2507,6 +2516,7 @@ function updateRestAnim(dt) {
   // ?restdbg is on, so a check can see whether anything at the car's
   // screen position renders at all.
   if (restDbgMarker && DEBUG_RESTDBG) { restDbgMarker.visible = true; restDbgMarker.position.set(pos.x, 2.5, pos.z); }
+  if (restDbgMarker2 && DEBUG_RESTDBG) { restDbgMarker2.visible = true; restDbgMarker2.position.set(pos.x, 6, pos.z); }
   if (st.condition === 'night') {
     // Fase 2AE/2AF: two beams, one per lamp, along the path tangent.
     const hf = playerMesh.userData.headlightFront || 2.0;
@@ -2542,6 +2552,10 @@ function updateRestAnim(dt) {
       restDbgFrustum.setFromProjectionMatrix(restDbgProjMat);
       const frustum = restDbgFrustum.intersectsSphere(restDbgSphere.set(restDbgVec.set(playerMesh.position.x, 0.6, playerMesh.position.z), 3)) ? 1 : 0;
       const tri = (renderer && renderer.info && renderer.info.render) ? renderer.info.render.triangles : -1;
+      // Fase 2BN: draw-call count, so a check can confirm the renderer is
+      // issuing calls at all during the rest sequence (a frozen 0 would
+      // mean the scene is not being drawn, not that the car is hidden).
+      const calls = (renderer && renderer.info && renderer.info.render) ? renderer.info.render.calls : -1;
       // Fase 2BM: the paint material's colour, so a check can rule out a
       // wrong/transparent paint (the car renders orange on the highway).
       let paintHex = '?';
@@ -2551,7 +2565,7 @@ function updateRestAnim(dt) {
         ' ndc=(' + pv.x.toFixed(2) + ',' + pv.y.toFixed(2) + ')' +
         ' cam=(' + camera.position.x.toFixed(1) + ',' + camera.position.z.toFixed(1) + ')' +
         ' vis=' + (playerMesh.visible ? 1 : 0) +
-        ' tri=' + tri + ' frustum=' + frustum + ' paint=' + paintHex;
+        ' tri=' + tri + ' calls=' + calls + ' frustum=' + frustum + ' paint=' + paintHex;
     }
   }
   // Speedo fix, part 2: the HUD refresh lives at the end of the play
