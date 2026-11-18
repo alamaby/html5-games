@@ -2137,9 +2137,15 @@ function buildRestSeqGroup() {
     g.add(box(0.5, 4.5, 0.5, 0xeeeeee, px, 2.25, pz));
   g.add(box(1.2, 2.2, 0.8, 0xf2f2f2, -18.5, 1.1, -169));
   g.add(box(3, 2.5, 3, 0xe8e2d2, -22, 1.25, -169));
-  const spbuSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 1.6),
+  // Fase 2BP: the SPBU sign was 8x1.6 at z -164.4, only ~5 m from the
+  // fuel-stage camera — in portrait only ~2.9 m fits the frame, so 'SPBU'
+  // read as 'PB'. Moved back to z -172 and shrunk to 6x1.2: at 13 m the
+  // frame fits 7.0 m, so the whole sign (and its text) is readable at
+  // fuel, queue and advance. Raised to y 5.5 so it clears the canopy
+  // (top y 4.8) instead of intersecting it.
+  const spbuSign = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.2),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('SPBU', '') }));
-  spbuSign.position.set(-16, 4.5, -164.4); g.add(spbuSign);
+  spbuSign.position.set(-16, 5.5, -172); g.add(spbuSign);
   // exit sign + lamp posts on the building side (basic-material heads glow at night)
   const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.5),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('KELUAR', '') }));
