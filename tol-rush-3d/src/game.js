@@ -2188,6 +2188,13 @@ function setHighwayHidden(hidden) {
   for (const p of posts) p.visible = !hidden;
   for (const tr of trees) tr.visible = !hidden;
   for (const b of billboards) b.visible = !hidden;
+  // Fase 2BO: the mountain ridge (2AP) is static at z -145..-165, but the
+  // rest-sequence camera drives forward through it (z 0 -> -268) while the
+  // highway camera never moves — so during rest the camera ends up inside
+  // the ridge and a mountain occludes the car (proven at d=152 by the 2BN
+  // readout: beacons visible, car 0 pixels). Hide the ridge during rest
+  // like the billboards; it reappears when the rest ends.
+  if (mountains) mountains.visible = !hidden;
   for (const m of trafficMeshes.values()) m.visible = !hidden;
   for (const m of pickupMeshes.values()) m.visible = !hidden;
   for (const m of roadworkMeshes.values()) m.visible = !hidden;
