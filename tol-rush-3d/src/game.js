@@ -511,7 +511,7 @@ let restDbgMarker = null; // Fase 2BM: bright red beacon above the car, ?restdbg
 let restDbgMarker2 = null; // Fase 2BN: green beacon high above the car, ?restdbg only
 // ---------- visual polish (Fase 2L, view-only, no logic) ----------
 let skyDome = null, starPoints = null, moonMesh = null, moonGlow = null, sunMesh = null, sunGlow = null, nitroFlame = null;
-let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboards = [];
+let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboards = [], cloudShadows = [];
 // Fase 2BE: skid-mark pool (braking / crash), recycled by fading.
 const skidMarks = [];
 let skidSpawnT = 0, prevCrashT = 0;
@@ -659,6 +659,11 @@ function syncTaperGroup(from, to) {
 }
 
 function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
+// Fase 2BR: glossy car paint — the GLB paint was Lambert (matte, like
+// plastic). Phong with a grey specular + shininess reads as real car
+// paint under the sun/headlights. Only the paint uses this; everything
+// else keeps mat() (Lambert).
+function paintMat(color) { return new THREE.MeshPhongMaterial({ color, specular: 0x777777, shininess: 55 }); }
 function box(w, h, d, color, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
   m.position.set(x, y, z); return m;
@@ -1009,7 +1014,7 @@ function buildGltfCar(kind, colorHex, opts) {
         // did: the rear face at trunk height is far narrower than the
         // body's max width). Fresh Basic material per car, dark red dim;
         // the loop brightens it while braking.
-        let pmat = p.matName === paintName ? mat(colorHex) : p.mat;
+        let pmat = p.matName === paintName ? paintMat(colorHex) : p.mat;
         if (p.matName === 'TailLights') {
           pmat = new THREE.MeshBasicMaterial({ color: 0x7a1620 });
           tailMats.push(pmat);
@@ -1146,7 +1151,7 @@ function buildTrafficGltfCar(colorHex) {
   g.traverse((o) => {
     if (o.userData.isSpin) spins.push(o); // Fase 2AT: rebuild the spin list for the clone
     if (!o.isMesh) return;
-    if (o.userData.isPaint) o.material = mat(colorHex);
+    if (o.userData.isPaint) o.material = paintMat(colorHex);
     if (o.userData.isSignal) signals[o.userData.isSignal] = o;
     // Fase 2AZ: the clone's tail lights (the model's own TailLights mesh)
     // get FRESH materials — the template's are shared with the player
@@ -1464,7 +1469,11 @@ function initThree() {
   }
 
   // road
-  roadMat = new THREE.MeshLambertMaterial({ color: 0x2b3038 });
+  // Fase 2BS: Phong (not Lambert) so the road can take a specular sheen
+  // in rain. Specular black + shininess 0 reads exactly like Lambert,
+  // so day/night/dusk look unchanged; applyCondition raises the sheen
+  // only in rain.
+  roadMat = new THREE.MeshPhongMaterial({ color: 0x2b3038, specular: 0x000000, shininess: 0 });
   roadMat.map = makeAsphaltTexture(); // Fase 2AX: subtle grain on the flat road
   const road = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 400), roadMat);
   // Fase 2AX: UVs in 5 m tile units (the plane's 0..1 UVs would stretch
@@ -1479,6 +1488,13 @@ function initThree() {
   const grassR = grassL.clone(); grassR.position.x = 37.5; scene.add(grassR);
   // road markings, one group per lane count (only the current one is visible)
   const MARKINGS = { 2: { edges: [-3.4, 3.4], dividers: [0] }, 3: { edges: [-5.1, 5.1], dividers: [-1.7, 1.7] }, 4: { edges: [-6.8, 6.8], dividers: [-3.4, 0, 3.4] } };
+  // Fase 2BT: tire wear — two dark translucent strips per lane, at the
+  // wheel positions (lane centre ± 0.7, the same offset the skid marks
+  // use). Static 400 m strips inside the per-count marking group, so
+  // they follow the lane layout and need no recycling; translucent so
+  // they read as wear, not painted lines.
+  const LANE_CENTERS = { 2: [-1.7, 1.7], 3: [-3.4, 0, 3.4], 4: [-5.1, -1.7, 1.7, 5.1] };
+  const trackMat = new THREE.MeshLambertMaterial({ color: 0x14161a, transparent: true, opacity: 0.35 });
   for (const count of [2, 3, 4]) {
     const grp = new THREE.Group();
     for (const x of MARKINGS[count].edges) grp.add(box(0.22, 0.02, 400, 0xffffff, x, 0.02, -90));
@@ -1487,6 +1503,12 @@ function initThree() {
       for (let i = 0; i < 16; i++) {
         const d = box(0.16, 0.02, 3.2, 0xffffff, x, 0.02, -12 - i * 12);
         grp.add(d); ds.push(d);
+      }
+    }
+    for (const cx of LANE_CENTERS[count]) {
+      for (const off of [-0.7, 0.7]) {
+        const t = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.02, 400), trackMat);
+        t.position.set(cx + off, 0.015, -90); grp.add(t);
       }
     }
     grp.visible = count === 3; scene.add(grp);
@@ -1556,6 +1578,26 @@ function initThree() {
     }
     c.position.set((Math.random() - 0.5) * 240, 45 + Math.random() * 25, -100 - Math.random() * 140);
     scene.add(c); clouds.push(c);
+  }
+  // Fase 2BV: cloud shadows — big soft dark ellipses on the road that
+  // drift with the clouds (same 1.5 m/s, same ±140 wrap). A separate,
+  // much lighter gradient than the car blob shadows (max alpha 0.18, so
+  // they read as passing shade, not a stain). Fixed z slots along the
+  // visible road; visibility is per condition in applyCondition.
+  {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const c2 = cv.getContext('2d');
+    const gr = c2.createRadialGradient(64, 64, 4, 64, 64, 62);
+    gr.addColorStop(0, 'rgba(0,0,0,0.18)');
+    gr.addColorStop(0.7, 'rgba(0,0,0,0.15)');
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    c2.fillStyle = gr; c2.fillRect(0, 0, 128, 128);
+    const shMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false });
+    for (const [x, z, w, l] of [[-60, -40, 14, 22], [40, -80, 18, 26], [-30, -120, 12, 20], [70, -160, 16, 24]]) {
+      const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shMat);
+      sh.rotation.x = -Math.PI / 2; sh.scale.set(w, l, 1); sh.position.set(x, 0.03, z);
+      sh.renderOrder = 1; scene.add(sh); cloudShadows.push(sh);
+    }
   }
   const bbTexts = [['TOL RUSH', '3D'], ['REST AREA', '1 KM'], ['KOPI PANAS', 'DI REST AREA']];
   for (let i = 0; i < 3; i++) {
@@ -1667,6 +1709,8 @@ function placeHeadlights(cx, cz, fx, fz, hf, hy, hx) {
 // Fase 2AP: clouds drift sideways and wrap; called in the play and menu branches.
 function driftClouds(dt) {
   for (const c of clouds) { c.position.x += 1.5 * dt; if (c.position.x > 140) c.position.x = -140; }
+  // Fase 2BV: the shadows drift with the clouds (same rate, same wrap).
+  for (const s of cloudShadows) { s.position.x += 1.5 * dt; if (s.position.x > 140) s.position.x = -140; }
 }
 // Toggle a car's beam cones (one for traffic, two for the player).
 function setBeamCones(mesh, on) {
@@ -1744,6 +1788,16 @@ function applyCondition(cond) {
     if (mountainMat) mountainMat.color.set(0x7488a8);
     if (cloudMat) { cloudMat.color.set(0xffffff); cloudMat.opacity = 0.75; }
   }
+  // Fase 2BS: wet-road sheen — only in rain does the asphalt get a
+  // specular highlight; other conditions stay matte (specular black,
+  // shininess 0), so the day/night/dusk look is unchanged.
+  if (roadMat) {
+    if (cond === 'rain') { roadMat.specular.set(0x777777); roadMat.shininess = 60; }
+    else { roadMat.specular.set(0x000000); roadMat.shininess = 0; }
+  }
+  // Fase 2BV: cloud shadows only when the sun is out (day/dusk); hidden
+  // at night and in rain (no direct sun to cast them).
+  for (const s of cloudShadows) s.visible = (cond === 'day' || cond === 'dusk');
   // Fase 2AE/2AF: the player's beam cones follow the condition (covers the
   // menu/showcase, where the per-frame loop does not run).
   setBeamCones(playerMesh, cond === 'night');
@@ -2121,6 +2175,26 @@ function buildRestSeqGroup() {
   const bldSign = new THREE.Mesh(new THREE.PlaneGeometry(8, 2.5),
     new THREE.MeshBasicMaterial({ map: makeSignTexture('REST AREA', '') }));
   bldSign.rotation.y = Math.PI / 2; bldSign.position.set(-19.3, 2.8, -112); g.add(bldSign);
+  // Fase 2BU: rest-area dressing — the main building was a plain cream
+  // box. Windows + door on its south face (z=-106.5, the face the car
+  // approaches), so the building reads as a building, not a block. Two
+  // benches facing the drive lane, and a small kopi stall (counter +
+  // roof + KOPI sign) on the way to the SPBU. All clear of the drive
+  // lane (x=-15) and the parked cars (x=-21).
+  for (const wx of [-30, -27, -24]) g.add(box(1.5, 1.2, 0.1, 0x2a3a4a, wx, 2.5, -106.4));
+  g.add(box(1.2, 2.2, 0.1, 0x5a3a2a, -21, 1.1, -106.4));
+  for (const [bx, bz] of [[-19, -100], [-19, -122]]) {
+    g.add(box(0.6, 0.15, 2, 0x8a6a4a, bx, 0.45, bz));
+    g.add(box(0.15, 0.7, 2, 0x8a6a4a, bx - 0.25, 0.85, bz));
+    for (const lz of [-0.8, 0.8]) g.add(box(0.12, 0.45, 0.12, 0x5a4a3a, bx, 0.225, bz + lz));
+  }
+  g.add(box(3, 1, 1.5, 0x8a5a3a, -25, 0.5, -140));
+  g.add(box(3.5, 0.15, 2, 0xcc2222, -25, 2.4, -140));
+  for (const px of [-26.6, -23.4]) for (const pz of [-140.9, -139.1])
+    g.add(box(0.12, 2.4, 0.12, 0x888888, px, 1.2, pz));
+  const kopiSign = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 1.2),
+    new THREE.MeshBasicMaterial({ map: makeSignTexture('KOPI', '') }));
+  kopiSign.rotation.y = Math.PI / 2; kopiSign.position.set(-23.2, 2.9, -140); g.add(kopiSign);
   // musholla + toilet block
   g.add(box(6, 3, 6, 0xf2ede2, -29, 1.5, -132));
   g.add(box(7, 0.5, 7, 0x2a6b4a, -29, 3.2, -132));
@@ -2214,6 +2288,10 @@ function setHighwayHidden(hidden) {
   for (const s of skidMarks) s.mesh.visible = !hidden && s.life > 0;
   for (const s of splashMarks) s.mesh.visible = !hidden && s.life > 0;
   for (const s of smokePuffs) s.mesh.visible = !hidden && s.life > 0;
+  // Fase 2BV: cloud shadows live on the highway road, so they hide during
+  // rest like the markings; restore them only if the run's condition has
+  // sun (day/dusk), matching applyCondition.
+  { const cond = st ? st.condition : null; for (const s of cloudShadows) s.visible = !hidden && (cond === 'day' || cond === 'dusk'); }
 }
 function clearRestSeq() {
   if (restSeqGroup) {
