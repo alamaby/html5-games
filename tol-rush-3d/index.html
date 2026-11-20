@@ -19,6 +19,13 @@
      first version was too faint for the browser check to see. */
   #vignette { position:fixed; inset:0; pointer-events:none; z-index:2;
     background:radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%); }
+  /* Fase 2BZ: speed lines — radial streaks at the screen edges, masked
+     to the outer ring so the centre stays clear; opacity is set from
+     game.js (0 below 100 km/h, up to ~0.7 at top speed, +0.15 nitro). */
+  #speedlines { position:fixed; inset:0; pointer-events:none; z-index:3; opacity:0;
+    background:repeating-conic-gradient(from 0deg at 50% 50%, transparent 0deg 5deg, rgba(255,255,255,0.10) 5deg 6deg, transparent 6deg 12deg);
+    -webkit-mask-image:radial-gradient(ellipse at center, transparent 52%, black 88%);
+    mask-image:radial-gradient(ellipse at center, transparent 52%, black 88%); }
   .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
              justify-content:center; z-index:10; text-align:center; padding:24px;
              background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
@@ -218,6 +225,7 @@
 <body>
 <div id="c"></div>
 <div id="vignette"></div>
+<div id="speedlines"></div>
 
 <div id="hud" class="hidden">
   <div class="hudrow"><span><button id="menuBtn" data-i18n="menu">MENU</button>
@@ -1861,6 +1869,8 @@ let mountains = null, mountainMat = null, clouds = [], cloudMat = null, billboar
 // Fase 2BE: skid-mark pool (braking / crash), recycled by fading.
 const skidMarks = [];
 let skidSpawnT = 0, prevCrashT = 0;
+// Fase 2BZ: speed-line overlay element (cached once, opacity set per frame).
+let speedlinesEl = null;
 // Fase 2BG: rain-splash pool (rings where rain hits the road).
 const splashMarks = [];
 let splashSpawnT = 0;
@@ -1961,7 +1971,7 @@ function syncRoadworkMeshes() {
   }
 }
 let dashes = [];
-const posts = [], trees = [];
+const posts = [], trees = [], roadside = []; // Fase 2BX: bushes + rocks on the verge
 let restGroup = null, exitGroup = null, lanesGroup = null, lanesSignMat = null;
 let markingGroups = {}, dashesByCount = {}, currentMarkings = 3;
 const lanesTex = {};
@@ -2480,16 +2490,19 @@ function buildGltfCar(kind, colorHex, opts) {
 // cloned per car (geometry shared, so ~15 live traffic cars cost one
 // parse). The paint is recolored per car and the runtime userData
 // (signals, beam cone) is rebuilt on the clone.
-let gltfTrafficSedan = null;
-function buildTrafficGltfCar(colorHex) {
-  if (!gltfTrafficSedan) gltfTrafficSedan = buildGltfCar('sedan', 0xffffff, { traffic: true });
+// Fase 2BW: one template per kind — traffic is no longer sedan-only.
+const gltfTrafficTemplates = {};
+function buildTrafficGltfCar(colorHex, kind) {
+  const k = kind || 'sedan';
+  if (!gltfTrafficTemplates[k]) gltfTrafficTemplates[k] = buildGltfCar(k, 0xffffff, { traffic: true });
+  const tpl = gltfTrafficTemplates[k];
   // clone() JSON-stringifies userData, and the template's holds Mesh/Group
   // refs (beamCones, steer, spin, body) — strip it for the clone, then
   // restore it and rebuild the clone's runtime userData by traversing.
-  const saved = gltfTrafficSedan.userData;
-  gltfTrafficSedan.userData = {};
-  const g = gltfTrafficSedan.clone();
-  gltfTrafficSedan.userData = saved;
+  const saved = tpl.userData;
+  tpl.userData = {};
+  const g = tpl.clone();
+  tpl.userData = saved;
   const signals = {};
   const spins = [];
   const tails = [];
@@ -2521,12 +2534,24 @@ function makeCar(kind, colorHex, highPoly) {
   if (highPoly && GLB_CARS_B64[kind] && GLB_CARS_B64[kind] !== '__GLB_' + kind.toUpperCase() + '_B64__') {
     try { return buildGltfCar(kind, colorHex); } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF ' + kind + ' failed, using procedural:', e); }
   }
-  // Fase 2AO: traffic sedans (incl. the Penghadang) use the GLTF sedan
-  // model too — the player stares at traffic, so the crudest geometry in
-  // the scene was the one most often on screen. Trucks/buses have no GLB
-  // model and stay procedural.
+  // Fase 2AO/2BW: traffic sedans (incl. the Penghadang) use GLTF models
+  // too — the player stares at traffic, so the crudest geometry in the
+  // scene was the one most often on screen. 2BW: any of the four GLB
+  // kinds (sedan/hatch/suv/sport) as the skin, sedan logic unchanged.
+  // Trucks/buses have no GLB model and stay procedural.
   if (!highPoly && (kind === 'sedan' || kind === 'aggressive') && GLB_CARS_B64.sedan && GLB_CARS_B64.sedan !== '__GLB_' + 'SEDAN' + '_B64__') {
-    try { return buildTrafficGltfCar(colorHex); } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF traffic sedan failed, using procedural:', e); }
+    try {
+      // Fase 2BW: the hatch, SUV and sport GLBs already exist for the
+      // player, so traffic gets a random one — the road stops being a
+      // sedan parade. The Penghadang stays a sedan (its dark body is the
+      // tell), and a kind whose GLB is missing falls back to sedan.
+      // NOTE: the logic length stays 4.4 m (sedan) whatever the skin, so
+      // a shorter skin (hatch 3.47 m) reads ~0.5 m of air at the exact
+      // crash frame — a cosmetic gap, not a physics change.
+      const visualKind = kind === 'aggressive' ? 'sedan' : ['sedan', 'hatch', 'suv', 'sport'][Math.floor(Math.random() * 4)];
+      const vk = GLB_CARS_B64[visualKind] && GLB_CARS_B64[visualKind] !== '__GLB_' + visualKind.toUpperCase() + '_B64__' ? visualKind : 'sedan';
+      return buildTrafficGltfCar(colorHex, vk);
+    } catch (e) { if (typeof console !== 'undefined') console.warn('GLTF traffic sedan failed, using procedural:', e); }
   }
   const g = new THREE.Group();
   const col = colorHex;
@@ -2841,6 +2866,12 @@ function initThree() {
   // they read as wear, not painted lines.
   const LANE_CENTERS = { 2: [-1.7, 1.7], 3: [-3.4, 0, 3.4], 4: [-5.1, -1.7, 1.7, 5.1] };
   const trackMat = new THREE.MeshLambertMaterial({ color: 0x14161a, transparent: true, opacity: 0.35 });
+  // Fase 2CA: reflective road studs ("mata kucing") — one bright dot on
+  // each lane divider dash. MeshBasicMaterial is unlit, so the studs
+  // stay visible at night where the white Lambert dashes go dim. The
+  // stud is a CHILD of its dash, so it recycles, hides and tapers with
+  // the dash for free — no extra array or loop.
+  const studMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0 });
   for (const count of [2, 3, 4]) {
     const grp = new THREE.Group();
     for (const x of MARKINGS[count].edges) grp.add(box(0.22, 0.02, 400, 0xffffff, x, 0.02, -90));
@@ -2848,6 +2879,8 @@ function initThree() {
     for (const x of MARKINGS[count].dividers) {
       for (let i = 0; i < 16; i++) {
         const d = box(0.16, 0.02, 3.2, 0xffffff, x, 0.02, -12 - i * 12);
+        const stud = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 0.45), studMat);
+        stud.position.set(0, 0.03, 0); d.add(stud);
         grp.add(d); ds.push(d);
       }
     }
@@ -2894,6 +2927,25 @@ function initThree() {
     tree.scale.set(ts, ts, ts);
     tree.position.set(side * (10 + Math.random() * 6), 0, -10 - i * 9);
     scene.add(tree); trees.push(tree);
+  }
+  // Fase 2BX: bushes + rocks on the verge — the strip between the
+  // guardrail and the trees was bare flat grass. Bushes sit just
+  // outside the rail (x 8.6..9.6, clear of it), rocks beyond the
+  // trees (x 17..22). Recycled like the trees in the play branch.
+  const bushMat = mat(0x2a5a2a), rockMat = mat(0x8a8a8a);
+  for (let i = 0; i < 24; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    let r;
+    if (i % 2 === 0) {
+      r = new THREE.Mesh(new THREE.SphereGeometry(0.8, 8, 6), bushMat);
+      r.scale.y = 0.7; r.userData.kind = 'bush';
+      r.position.set(side * (8.6 + Math.random() * 1.0), 0.55, -10 - i * 8);
+    } else {
+      r = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.6), rockMat);
+      r.rotation.y = Math.random() * Math.PI; r.userData.kind = 'rock';
+      r.position.set(side * (17 + Math.random() * 5), 0.25, -10 - i * 8);
+    }
+    scene.add(r); roadside.push(r);
   }
   // Horizon depth (Fase 2AP): a mountain ridge + drifting clouds +
   // roadside billboards. The camera never moves forward (the world
@@ -3620,6 +3672,7 @@ function setHighwayHidden(hidden) {
   if (exitGroup) exitGroup.visible = false;
   for (const p of posts) p.visible = !hidden;
   for (const tr of trees) tr.visible = !hidden;
+  for (const r of roadside) r.visible = !hidden;
   for (const b of billboards) b.visible = !hidden;
   // Fase 2BO: the mountain ridge (2AP) is static at z -145..-165, but the
   // rest-sequence camera drives forward through it (z 0 -> -268) while the
@@ -4173,6 +4226,7 @@ function loop(now) {
     for (const d of dashes) { d.position.z += move; if (d.position.z > 12) d.position.z -= 192; }
     for (const p of posts) { p.position.z += move; if (p.position.z > 12) p.position.z -= 200; }
     for (const tr of trees) { tr.position.z += move; if (tr.position.z > 12) { tr.position.z -= 198; tr.position.x = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 6); } }
+    for (const r of roadside) { r.position.z += move; if (r.position.z > 12) { r.position.z -= 192; r.position.x = (Math.random() < 0.5 ? -1 : 1) * (r.userData.kind === 'bush' ? 8.6 + Math.random() * 1.0 : 17 + Math.random() * 5); } }
     for (const b of billboards) { b.position.z += move; if (b.position.z > 12) { b.position.z -= 180; b.position.x = (Math.random() < 0.5 ? -1 : 1) * 12; } }
     // Fase 2BE: skid marks — a pair at the rear wheels while braking at
     // speed, plus a burst when a crash starts; they scroll with the
@@ -4264,8 +4318,14 @@ function loop(now) {
       const pos = rainPoints.geometry.attributes.position;
       for (let i = 0; i < pos.count; i++) {
         let y = pos.getY(i) - 34 * dt;
-        if (y < 0) { y = 16; pos.setX(i, (Math.random() - 0.5) * 50); pos.setZ(i, -80 + Math.random() * 90); }
-        pos.setY(i, y);
+        // Fase 2BY: the rain fell straight down, but the car drives into
+        // it — the drops drift toward the camera (+Z) at 0.45x the car's
+        // speed, so the rain slants instead of falling in vertical
+        // columns (~23 deg at top speed; full speed would read almost
+        // horizontal). Respawn also when a drop passes the camera.
+        let z = pos.getZ(i) + st.speed * 0.45 * dt;
+        if (y < 0 || z > 12) { y = 16; z = -80 + Math.random() * 90; pos.setX(i, (Math.random() - 0.5) * 50); }
+        pos.setY(i, y); pos.setZ(i, z);
       }
       pos.needsUpdate = true;
       // Fase 2BG: rain splashes — a ring where a drop hits the road.
@@ -4284,12 +4344,18 @@ function loop(now) {
     const targetFov = 62 + Math.min(1, st.speed / 40) * 8 + (st.nitroOn ? 2 : 0);
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 3);
     if (Math.abs(camera.fov - targetFov) > 0.01) camera.updateProjectionMatrix();
+    // Fase 2BZ: speed lines — faint radial streaks at the screen edges,
+    // fading in above 100 km/h and stronger on nitro, so high speed
+    // reads even when the road ahead is empty.
+    if (!speedlinesEl) speedlinesEl = document.getElementById('speedlines');
+    if (speedlinesEl) speedlinesEl.style.opacity = Math.min(0.85, Math.min(0.7, Math.max(0, (st.speed * 3.6 - 100) / 60)) + (st.nitroOn ? 0.15 : 0));
     }
   } else if (!paused) {
     // idle scene: slow drift so the start screen is not frozen
     // (skipped while paused so the frame stays frozen, not drifting)
     if (shieldMesh) shieldMesh.visible = false;
     if (nitroFlame) nitroFlame.visible = false;
+    if (speedlinesEl) speedlinesEl.style.opacity = 0;
     if (playerMesh && playerMesh.userData.signals) {
       playerMesh.userData.signals.left.visible = false;
       playerMesh.userData.signals.right.visible = false;

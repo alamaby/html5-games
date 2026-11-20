@@ -19,6 +19,13 @@
      first version was too faint for the browser check to see. */
   #vignette { position:fixed; inset:0; pointer-events:none; z-index:2;
     background:radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%); }
+  /* Fase 2BZ: speed lines — radial streaks at the screen edges, masked
+     to the outer ring so the centre stays clear; opacity is set from
+     game.js (0 below 100 km/h, up to ~0.7 at top speed, +0.15 nitro). */
+  #speedlines { position:fixed; inset:0; pointer-events:none; z-index:3; opacity:0;
+    background:repeating-conic-gradient(from 0deg at 50% 50%, transparent 0deg 5deg, rgba(255,255,255,0.10) 5deg 6deg, transparent 6deg 12deg);
+    -webkit-mask-image:radial-gradient(ellipse at center, transparent 52%, black 88%);
+    mask-image:radial-gradient(ellipse at center, transparent 52%, black 88%); }
   .overlay { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
              justify-content:center; z-index:10; text-align:center; padding:24px;
              background:radial-gradient(ellipse at 50% 35%, rgba(20,28,58,.55), rgba(5,8,18,.88)); }
@@ -218,6 +225,7 @@
 <body>
 <div id="c"></div>
 <div id="vignette"></div>
+<div id="speedlines"></div>
 
 <div id="hud" class="hidden">
   <div class="hudrow"><span><button id="menuBtn" data-i18n="menu">MENU</button>
