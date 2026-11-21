@@ -49,6 +49,9 @@ const TR = {
   // stretch; convoys are slow truck/bus groups leaving exactly one gap lane.
   ROADWORK_LEN: 220, ROADWORK_GAP_MIN: 1500, ROADWORK_GAP_MAX: 2600,
   ROADWORK_FIRST: 1200, ROADWORK_WARN: 300,
+  ROADWORK_MERGE_AHEAD: 150, // Fase 2CB: a car in the closed lane starts merging out this far before a zone (300 m was worse — the longer window let the player catch up and block the merge via the player-proximity guard)
+  ROADWORK_MERGE_GAP: 12, // Fase 2CB: the forced merge accepts a 12 m gap (not the usual 45 m) — the lane is closing, so the car must get out, and the follow rule keeps the spacing safe (traffic never collides with traffic; only the player-proximity guard still applies). 12 m centre-to-centre still clears the truck+sedan minimum gap (9.2 m).
+  ROADWORK_LOOKAHEAD: 300, // Fase 2CB: spawns/lane changes refuse a lane a zone will close within this distance
   // Penghadang (Fase 2AC): an aggressive sedan that deliberately swerves
   // into the player's lane once. It only fires while the player is 40-70 m
   // behind (closer is unfair, farther is meaningless), only from 1500 m on,
@@ -299,6 +302,22 @@ const TR = {
   zoneAt(st, s) {
     return st.roadworks.find((z) => s >= z.at && s < z.at + z.len && z.lane < TR.laneCountAt(st, s)) || null;
   },
+  // Is `lane` closed by a roadwork zone anywhere in [s, s + ahead]? The
+  // old checks only looked at the car's exact position (zoneAt), so a car
+  // could spawn or change into the closed lane just before a zone and then
+  // drive straight through it. Spawns and lane changes use this to refuse
+  // a lane a zone ahead will close.
+  isLaneClosedAhead(st, lane, s, ahead) {
+    return st.roadworks.some((z) => z.lane === lane && z.lane < TR.laneCountAt(st, s) && z.at < s + ahead && z.at + z.len > s);
+  },
+  // Roadwork zone the car is sitting in (closed lane) or approaching in
+  // that lane, or null. The merge must start BEFORE the zone (the cones
+  // are at the zone start), so the check looks ahead by
+  // ROADWORK_MERGE_AHEAD; a car already inside the zone still merges out
+  // (late, but better than driving the whole zone in the closed lane).
+  roadworkAhead(st, v) {
+    return st.roadworks.find((z) => v.lane === z.lane && z.lane < TR.laneCountAt(st, v.s) && v.s >= z.at - TR.ROADWORK_MERGE_AHEAD && v.s < z.at + z.len) || null;
+  },
   nextRoadwork(st) {
     return st.roadworks.find((z) => z.at > st.dist) || null;
   },
@@ -367,9 +386,10 @@ const TR = {
 
   canChangeLane(st, v, target) {
     if (target < 0 || target > st.laneCount - 1 || target === v.lane) return false;
-    // Sedans never change into a roadwork-closed lane.
-    const zone = TR.zoneAt(st, v.s);
-    if (zone && target === zone.lane) return false;
+    // Never change into a lane a roadwork zone will close ahead (the old
+    // check only looked at the car's exact position, so a car could move
+    // into the closed lane just before a zone and drive through it).
+    if (TR.isLaneClosedAhead(st, target, v.s, TR.ROADWORK_LOOKAHEAD)) return false;
     // Never change into a lane that is about to vanish (decrease approach).
     if (TR.isDoomedLaneAt(st, target, v.s)) return false;
     for (const o of st.traffic) {
@@ -392,9 +412,10 @@ const TR = {
     const lane = o.lane !== undefined ? o.lane : Math.floor(Math.random() * st.laneCount);
     const gapAhead = o.gapAhead !== undefined ? o.gapAhead : 180 + Math.random() * 80;
     const s = st.dist + gapAhead;
-    // Never spawn traffic inside a roadwork-closed lane.
-    const zoneAtS = TR.zoneAt(st, s);
-    if (zoneAtS && lane === zoneAtS.lane) return null;
+    // Never spawn traffic in a lane a roadwork zone will close ahead (the
+    // old check only looked at the spawn position itself, so a car could
+    // spawn in the closed lane just before a zone and drive through it).
+    if (TR.isLaneClosedAhead(st, lane, s, TR.ROADWORK_LOOKAHEAD)) return null;
     // Never spawn in a lane that is about to vanish (decrease approach/taper).
     if (TR.isDoomedLaneAt(st, lane, s)) return null;
     for (const v of st.traffic) {
@@ -674,7 +695,15 @@ const TR = {
       const lanes = TR.laneCountAt(st, at);
       const fits = st.mode === 'endless' || at < st.routeLen - 100;
       if (lanes >= 2 && fits) {
-        const gapLane = Math.floor(Math.random() * lanes);
+        // Fase 2CB: if a roadwork zone ahead closes a lane the convoy will
+        // drive into, leave THAT lane as the gap lane. A convoy truck in
+        // the closed lane cannot merge out — the adjacent lane is occupied
+        // by another convoy truck in formation — so it would drive the
+        // whole zone through the cones.
+        let gapLane = Math.floor(Math.random() * lanes);
+        for (const z of st.roadworks) {
+          if (z.lane < lanes && z.at + z.len > at && z.at < at + TR.ROADWORK_LOOKAHEAD) { gapLane = z.lane; break; }
+        }
         // One speed for the whole convoy (Fase 2AD): members used to draw
         // 11-13 each, which is fine while speed is vestigial but would
         // dissolve the formation once cars really move.
@@ -767,6 +796,50 @@ const TR = {
         if (fz && target === fz.lane) clear = false;
         const gapToPlayer = v.s - st.dist;
         if (target === st.player.targetLane && gapToPlayer > -5 && gapToPlayer < 40) clear = false;
+        if (clear) {
+          v.targetLane = target;
+          v.signalT = TR.SIGNAL_TIME;
+          st.events.push({ t: 'signal', lane: v.lane, target });
+        }
+      } else if (v.s >= st.dist && st.status === 'play' && TR.roadworkAhead(st, v)) {
+        // Forced merge (Fase 2CB): ANY vehicle sitting in a roadwork-closed
+        // lane must vacate it before the zone starts. The player gets a
+        // 300 m warning plus an auto-nudge on entry; traffic got neither,
+        // so it drove straight through the cones (reproduced: up to 4 cars
+        // at once in the closed lane inside a zone, incl. trucks). The
+        // closed lane is an edge lane at the zone, so the neighbouring lane
+        // toward the centre is the way out (if a segment line between the
+        // car and the zone makes it a middle lane here, either adjacent
+        // open lane will do). Clearance mirrors the doomed-lane merge (no
+        // wall rule — the lane is going away) but keeps the player-proximity
+        // guard; the 45 m gap is relaxed to ROADWORK_MERGE_GAP (20 m) because
+        // a forced merge cannot wait for a motorway-sized hole — the follow
+        // rule keeps the spacing safe once the car is in, and traffic never
+        // collides with traffic. A blocked car waits and retries; if it
+        // still cannot move by the zone start it drives in (a late merge
+        // still beats a full-zone drive-through).
+        const lanesHere = TR.laneCountAt(st, v.s);
+        const cands = v.lane === 0 ? [1] : (v.lane >= lanesHere - 1 ? [v.lane - 1] : [v.lane - 1, v.lane + 1]);
+        let target = -1;
+        for (const t of cands) {
+          if (t < 0 || t >= lanesHere) continue;
+          const tz2 = TR.zoneAt(st, v.s);
+          if (tz2 && t === tz2.lane) continue;
+          if (TR.isDoomedLaneAt(st, t, v.s)) continue;
+          target = t; break;
+        }
+        let clear = target >= 0;
+        if (clear) {
+          for (const o of st.traffic) {
+            if (o === v) continue;
+            if (o.lane === target && Math.abs(o.s - v.s) < TR.ROADWORK_MERGE_GAP) { clear = false; break; }
+            if (o.moving && o.targetLane === target && Math.abs(o.s - v.s) < TR.ROADWORK_MERGE_GAP) { clear = false; break; }
+          }
+        }
+        if (clear) {
+          const gapToPlayer = v.s - st.dist;
+          if (target === st.player.targetLane && gapToPlayer > -5 && gapToPlayer < 40) clear = false;
+        }
         if (clear) {
           v.targetLane = target;
           v.signalT = TR.SIGNAL_TIME;

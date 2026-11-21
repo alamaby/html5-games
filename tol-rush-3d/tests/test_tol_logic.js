@@ -659,6 +659,69 @@ function quiet(st) { st.spawnT = 9999; st.nextRoadworkAt = 99999; st.nextConvoyA
   ok('convoy generator advanced', cv.nextConvoyAt > 100);
 }
 
+// --- Fase 2CB: traffic must vacate a roadwork-closed lane ---
+{
+  // isLaneClosedAhead: a zone ahead closes the lane, not just one covering s
+  const h = TR.createGame({ mode: 'short' }); quiet(h);
+  h.roadworks.push({ at: 1500, len: 220, lane: 1 });
+  ok('closed ahead (zone 100 m ahead)', TR.isLaneClosedAhead(h, 1, 1400, 300));
+  ok('not closed ahead (zone 400 m ahead, beyond look-ahead)', !TR.isLaneClosedAhead(h, 1, 1000, 300));
+  ok('open lane not closed ahead', !TR.isLaneClosedAhead(h, 0, 1400, 300));
+  ok('closed lane covering s counts', TR.isLaneClosedAhead(h, 1, 1600, 300));
+
+  // roadworkAhead: the car is in the closed lane and approaching/in the zone
+  const r = TR.createGame({ mode: 'short' }); quiet(r);
+  r.roadworks.push({ at: 1500, len: 220, lane: 0 });
+  ok('approaching in closed lane', TR.roadworkAhead(r, { lane: 0, s: 1400 }) !== null);
+  ok('inside zone in closed lane', TR.roadworkAhead(r, { lane: 0, s: 1600 }) !== null);
+  ok('too far before the zone', TR.roadworkAhead(r, { lane: 0, s: 1200 }) === null);
+  ok('past the zone', TR.roadworkAhead(r, { lane: 0, s: 1800 }) === null);
+  ok('open lane approaching', TR.roadworkAhead(r, { lane: 1, s: 1400 }) === null);
+
+  // spawn refusal now looks ahead: a car may not spawn in a lane a zone
+  // will close 200 m ahead (the old check only looked at the spawn point)
+  const sp = TR.createGame({ mode: 'short' }); quiet(sp);
+  sp.roadworks.push({ at: 1500, len: 220, lane: 1 });
+  sp.dist = 1200;
+  eq('spawn in lane a zone will close ahead blocked', TR.spawnVehicle(sp, { lane: 1, gapAhead: 100 }), null);
+  ok('spawn in open lane ahead of a zone allowed', TR.spawnVehicle(sp, { lane: 0, gapAhead: 100 }) !== null);
+
+  // canChangeLane refusal now looks ahead too
+  const cc = TR.createGame({ mode: 'short' }); quiet(cc);
+  cc.roadworks.push({ at: 1500, len: 220, lane: 1 });
+  cc.dist = 1200;
+  const cvv = { lane: 0, targetLane: 0, s: 1300, x: -3.4, moving: false };
+  ok('change into a lane a zone will close ahead refused', !TR.canChangeLane(cc, cvv, 1));
+  ok('change into an open lane ahead of a zone allowed', TR.canChangeLane(cc, cvv, 2));
+
+  // forced merge: a sedan sitting in the closed lane 100 m before a zone
+  // signals and vacates it before the zone starts (it must not drive
+  // through the cones). Same for a truck — the merge is for any vehicle.
+  // (The player sits 300 m before the zone so the car stays inside the
+  // 350 m traffic window; a car spawned 1400 m ahead would be cleaned up
+  // before it could merge.)
+  for (const kind of ['sedan', 'truck']) {
+    const f = TR.createGame({ mode: 'short' }); quiet(f);
+    f.roadworks.push({ at: 1500, len: 220, lane: 0 });
+    f.dist = 1200;
+    const car = TR.spawnVehicle(f, { lane: 1, gapAhead: 200, kind, speed: 15 });
+    car.lane = 0; car.targetLane = 0; car.x = f.laneXs[0]; car.startX = f.laneXs[0];
+    // keep the player far behind so the player-proximity guard cannot block
+    f.player.lane = f.player.targetLane = 2; f.player.x = f.laneXs[2];
+    let signalled = false, vacatedAt = -1;
+    for (let i = 0; i < 60 * 6; i++) {
+      TR.step(f, 1 / 60);
+      if (car.signalT > 0 || car.moving) signalled = true;
+      if (car.lane === 1 && vacatedAt < 0) vacatedAt = car.s;
+      if (car.s > 1500) break;
+    }
+    ok(kind + ' in closed lane signals a merge', signalled);
+    ok(kind + ' vacates the closed lane before the zone', vacatedAt > 0 && vacatedAt < 1500);
+    eq(kind + ' never sits in the closed lane inside the zone',
+      f.traffic.some((v) => v === car && TR.zoneAt(f, v.s) && v.lane === 0 && !v.moving), false);
+  }
+}
+
 // Penghadang (Fase 2AC): aggressive sedan, one deliberate swerve into the
 // player's lane, only while the player is 40-70 m behind in an adjacent lane.
 {
